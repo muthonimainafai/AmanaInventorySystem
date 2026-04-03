@@ -1,0 +1,49 @@
+{
+  "name": "amanainventorysystem",
+  "version": "1.0.0",
+  "description": "Amana Kuku Feeds desktop inventory system",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "node server.js",
+    "desktop": "electron .",
+    "desktop:remote": "set AMANA_SERVER_URL=http://localhost:3000&& electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "electron": "^37.4.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.amanakuku.inventory",
+    "productName": "Amana Kuku Feeds Inventory",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron-main.js",
+      "server.js",
+      "feedCatalog.json",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

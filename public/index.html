@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Amana Kuku Feeds - Desktop Inventory</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Amana Kuku Feeds Inventory</h1>
+        <p>Two-user system for Owner and Employee.</p>
+      </header>
+
+      <section id="loginCard" class="card auth-card">
+        <h2>Sign In</h2>
+        <form id="loginForm">
+          <label>
+            Username
+            <input id="username" placeholder="owner or employee" required />
+          </label>
+          <label>
+            Password
+            <input id="password" type="password" required />
+          </label>
+          <button type="submit">Login</button>
+        </form>
+        <p class="hint">
+          First-time default credentials: <code>owner / Owner@123</code> and
+          <code>employee / Employee@123</code>.
+        </p>
+      </section>
+
+      <section id="appCard" class="hidden">
+        <nav class="app-nav" aria-label="Main">
+          <button type="button" class="nav-tab active owner-only-tab" data-page="inventory">Feed Inventory</button>
+          <button type="button" class="nav-tab" data-page="sales-bags">Sales Per Bags</button>
+          <button type="button" class="nav-tab" data-page="sales-kg">Sales Per Kg</button>
+          <button type="button" class="nav-tab" data-page="chicken">Chicken Sales</button>
+        </nav>
+
+        <div class="top-bar card top-bar-flush">
+          <h2 class="page-title" id="pageHeading">Feed Inventory</h2>
+          <div class="user-pill">
+            <span id="userInfo"></span>
+            <button type="button" class="secondary" id="logoutBtn">Logout</button>
+          </div>
+        </div>
+
+        <div id="page-inventory" class="app-page">
+          <div class="card">
+          <form id="inventory-form">
+            <div class="grid">
+              <label class="date-field">
+                <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                <div class="date-picker-wrap">
+                  <input
+                    type="text"
+                    id="dateDisplay"
+                    placeholder="DD/MM/YYYY"
+                    pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}"
+                    required
+                  />
+                  <button type="button" id="openCalendarBtn" class="calendar-btn" aria-label="Open calendar">
+                    📅
+                  </button>
+                </div>
+                <input type="date" id="date" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+              </label>
+
+              <label>
+                Brand
+                <select id="brand" required>
+                  <option value="">Select brand</option>
+                </select>
+              </label>
+
+              <label>
+                Feed Type
+                <select id="feedType" required disabled>
+                  <option value="">Select feed type</option>
+                </select>
+              </label>
+
+              <label>
+                Bag Size (kg)
+                <input type="number" id="bagSize" min="1" step="1" readonly />
+              </label>
+
+              <label>
+                Quantity in Stock (bags)
+                <input type="number" id="quantityInStock" min="0" step="1" required />
+                <span class="field-hint">
+                  For a <strong>new save</strong> on a <strong>new day</strong>, enter <strong>only the bags you are adding today</strong> (e.g. 20). Any stock still on hand from earlier (e.g. 10) is added automatically. When you <strong>Update Record</strong>, enter the full quantity you want on that line.
+                </span>
+              </label>
+
+              <label>
+                Accumulated Bags
+                <input type="number" id="accumulatedBags" min="0" step="1" readonly title="Running total of bags for this brand and feed type; not reduced when employees sell." />
+                <span class="field-hint">
+                  Total bags recorded for this product line (carried forward + each new intake). <strong>Does not go down</strong> when staff sell. Sales reduce <strong>Quantity</strong> only.
+                </span>
+              </label>
+
+              <label>
+                Buying Price (per bag)
+                <input type="number" id="buyingPrice" min="0" step="0.01" required />
+              </label>
+
+              <label>
+                Selling Price (per bag)
+                <input type="number" id="sellingPrice" min="0" step="0.01" required />
+              </label>
+
+              <label>
+                Profit Margin Per Bag
+                <input type="number" id="profitMarginPerBag" step="0.01" required />
+              </label>
+
+              <label>
+                Accumulated Profit
+                <input type="number" id="accumulatedProfit" step="0.01" readonly title="Today’s profit from bags sold today for this line (0 if no sales today)" />
+                <span class="field-hint">Only counts bag/kg sales recorded today for this product. No sales today → 0. Matches the “Accumulated Profit” column in the table.</span>
+              </label>
+
+              <label>
+                Reorder Level (bags)
+                <input type="number" id="reorderLevel" min="0" step="1" required />
+              </label>
+            </div>
+
+            <p class="field-hint inventory-save-hint">
+              <strong>Same day:</strong> a second save for the same brand, feed, and bag size adds to that day’s row. <strong>New day:</strong> one new row is created; quantity = yesterday’s remaining stock + today’s intake, and accumulated bags = previous total + today’s intake (example: 10 left + 20 new → quantity 30, accumulated 30). Use <strong>Clear</strong> before <strong>Save Record</strong> if the button still says “Update Record”.
+            </p>
+
+            <div class="actions">
+              <button type="submit" id="saveBtn">Save Record</button>
+              <button type="button" id="clearBtn" class="secondary">Clear</button>
+              <button type="button" id="refreshBtn" class="secondary">Refresh</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="profit-highlight-above-table owner-only-highlight hidden" aria-live="polite">
+            <div class="profit-highlight-inner">
+              <div class="profit-highlight-text">
+                <p class="profit-highlight-title">Accumulated profit from today’s sales</p>
+                <p class="profit-highlight-sub">
+                  Real-time running total for today’s feed sales (bags and kg). Example: margin KES 150, sell 1 bag -> 150; then 2 more bags -> 450.
+                </p>
+              </div>
+              <span class="js-today-profit-value profit-highlight-amount">KES 0</span>
+            </div>
+            <p class="profit-highlight-example js-today-profit-meta"></p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Brand</th>
+                  <th>Feed Type</th>
+                  <th>Bag Size</th>
+                  <th>Quantity (bags)</th>
+                  <th title="Running total of bags for this brand and feed type; not reduced by sales.">Accumulated Bags</th>
+                  <th>Buying</th>
+                  <th>Selling</th>
+                  <th>Profit Margin / Bag</th>
+                  <th title="Today’s profit for this line (bags sold today × margin).">Accumulated Profit</th>
+                  <th>Reorder</th>
+                  <th>Status</th>
+                  <th>Created By</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="inventory-body">
+                <tr>
+                  <td colspan="14" class="empty">No records.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        </div>
+
+        <div id="page-sales-bags" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Record sale (by bags)</h3>
+            <form id="sales-bags-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="sbDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="sbOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="sbDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Brand
+                  <select id="sbBrand" required><option value="">Select brand</option></select>
+                </label>
+                <label>
+                  Feed Type
+                  <select id="sbFeedType" required disabled><option value="">Select feed type</option></select>
+                </label>
+                <label>
+                  Bag Size (kg)
+                  <input type="number" id="sbBagSize" min="1" step="1" readonly />
+                </label>
+                <label>
+                  Bags sold
+                  <input type="number" id="sbBagsSold" min="1" step="1" required />
+                </label>
+                <label>
+                  Price per bag
+                  <input type="number" id="sbPricePerBag" min="0" step="0.01" required />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="sbSaveBtn">Save sale</button>
+                <button type="button" class="secondary" id="sbClearBtn">Clear</button>
+                <button
+                  type="button"
+                  id="clearMySalesBtn"
+                  class="secondary employee-only-action hidden"
+                  title="Development/testing only: deletes sales created by this employee and reverses inventory changes."
+                >
+                  Clear My Sales (Dev)
+                </button>
+              </div>
+            </form>
+          </div>
+          <div class="card sales-history-card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Brand</th>
+                    <th>Feed Type</th>
+                    <th>Bag Size</th>
+                    <th>Bags sold</th>
+                    <th>Price/bag</th>
+                    <th title="Bags sold × price per bag for this sale.">Total</th>
+                    <th>By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="sales-bags-body"><tr><td colspan="9" class="empty">No sales.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-sales-kg" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Record sale (by kilograms)</h3>
+            <form id="sales-kg-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="skDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="skOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="skDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Brand
+                  <select id="skBrand" required><option value="">Select brand</option></select>
+                </label>
+                <label>
+                  Feed Type
+                  <select id="skFeedType" required disabled><option value="">Select feed type</option></select>
+                </label>
+                <label>
+                  Bags sold
+                  <input type="number" id="skBagsSold" min="0" step="1" required />
+                </label>
+                <label>
+                  Kg sold
+                  <input type="number" id="skKgSold" min="0.01" step="0.01" required />
+                </label>
+                <label>
+                  Price per kg
+                  <input type="number" id="skPricePerKg" min="0" step="0.01" required />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="skSaveBtn">Save sale</button>
+                <button type="button" class="secondary" id="skClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card sales-history-card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Brand</th>
+                    <th>Feed Type</th>
+                    <th>Bags sold</th>
+                    <th>Kg sold</th>
+                    <th>Price/kg</th>
+                    <th title="Kg sold × price per kg for this sale.">Total</th>
+                    <th>By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="sales-kg-body"><tr><td colspan="9" class="empty">No sales.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-chicken" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Record chicken sale</h3>
+            <form id="chicken-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="chDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="chOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="chDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="chDescription" placeholder="e.g. Broilers, Layers, Kienyeji" required />
+                </label>
+                <label>
+                  Quantity (birds)
+                  <input type="number" id="chQuantity" min="1" step="1" required />
+                </label>
+                <label>
+                  Total weight (kg) — optional
+                  <input type="number" id="chWeightKg" min="0" step="0.01" />
+                </label>
+                <label>
+                  Price per bird
+                  <input type="number" id="chUnitPrice" min="0" step="0.01" required />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="chSaveBtn">Save sale</button>
+                <button type="button" class="secondary" id="chClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Birds</th>
+                    <th>Weight (kg)</th>
+                    <th>Price/bird</th>
+                    <th title="Birds × price per bird for this sale.">Total</th>
+                    <th>By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="chicken-body"><tr><td colspan="8" class="empty">No sales.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

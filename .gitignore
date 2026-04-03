@@ -1,0 +1,18 @@
+# Dependencies (never commit — reinstall with npm install)
+node_modules/
+
+# Build output (Electron / electron-builder)
+dist/
+
+# Local database and runtime data (do not push your shop data)
+data/
+
+# Environment secrets
+.env
+.env.*
+
+# Logs & OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

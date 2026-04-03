@@ -1,0 +1,45 @@
+{
+  "Sigma Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 },
+    { "type": "Growers bags", "bagSize": 50 },
+    { "type": "Layers bags", "bagSize": 50 },
+    { "type": "Kienyeji bags", "bagSize": 50 },
+    { "type": "Chick Mash bag", "bagSize": 50 }
+  ],
+  "Fugo Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "Isinya Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "Suguna Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "Irvines Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "Backbone Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Grower bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "AfriFama Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "De-heus Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Grower bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 }
+  ],
+  "Dola Feeds": [
+    { "type": "Starter bags", "bagSize": 50 },
+    { "type": "Finisher bags", "bagSize": 50 },
+    { "type": "Layers bag", "bagSize": 20 }
+  ]
+}
