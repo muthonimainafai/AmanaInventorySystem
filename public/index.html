@@ -18,26 +18,40 @@
         <form id="loginForm">
           <label>
             Username
-            <input id="username" placeholder="owner or employee" required />
+            <input id="username" placeholder="owner or employee" required autocomplete="username" />
           </label>
-          <label>
-            Password
-            <input id="password" type="password" required />
-          </label>
+          <div class="login-field login-password-block">
+            <label for="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              required
+              autocomplete="current-password"
+            />
+            <div class="show-password-row">
+              <input type="checkbox" id="showPassword" />
+              <label for="showPassword">Show password</label>
+            </div>
+          </div>
           <button type="submit">Login</button>
         </form>
         <p class="hint">
-          First-time default credentials: <code>owner / Owner@123</code> and
-          <code>employee / Employee@123</code>.
+          Use the <strong>owner</strong> and <strong>staff</strong> accounts defined in your server
+          <code>.env</code> file (<code>AMANA_OWNER_*</code> and <code>AMANA_EMPLOYEE_*</code>). See
+          <code>env.example</code> in the project folder.
         </p>
       </section>
 
       <section id="appCard" class="hidden">
         <nav class="app-nav" aria-label="Main">
           <button type="button" class="nav-tab active owner-only-tab" data-page="inventory">Feed Inventory</button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="retail-inventory">Retail Feed Inventory</button>
+          <button type="button" class="nav-tab" data-page="chicken-inventory">
+            <span class="owner-only-tab">Chicken Sales Inventory</span>
+            <span class="employee-only-action hidden">Chicken Sales</span>
+          </button>
           <button type="button" class="nav-tab" data-page="sales-bags">Sales Per Bags</button>
           <button type="button" class="nav-tab" data-page="sales-kg">Sales Per Kg</button>
-          <button type="button" class="nav-tab" data-page="chicken">Chicken Sales</button>
         </nav>
 
         <div class="top-bar card top-bar-flush">
@@ -121,8 +135,8 @@
 
               <label>
                 Accumulated Profit
-                <input type="number" id="accumulatedProfit" step="0.01" readonly title="Today’s profit from bags sold today for this line (0 if no sales today)" />
-                <span class="field-hint">Only counts bag/kg sales recorded today for this product. No sales today → 0. Matches the “Accumulated Profit” column in the table.</span>
+                <input type="number" id="accumulatedProfit" step="0.01" readonly title="Cumulative profit from Sales Per Bags for this line (all time, current margin × total bags sold)" />
+                <span class="field-hint">Cumulative profit from <strong>Sales Per Bags</strong> for this product (all dates, not Sales Per Kg). Uses current margin × total bags sold. Matches the table column.</span>
               </label>
 
               <label>
@@ -147,9 +161,9 @@
           <div class="profit-highlight-above-table owner-only-highlight hidden" aria-live="polite">
             <div class="profit-highlight-inner">
               <div class="profit-highlight-text">
-                <p class="profit-highlight-title">Accumulated profit from today’s sales</p>
+                <p class="profit-highlight-title">Cumulative profit from Sales Per Bags</p>
                 <p class="profit-highlight-sub">
-                  Real-time running total for today’s feed sales (bags and kg). Example: margin KES 150, sell 1 bag -> 150; then 2 more bags -> 450.
+                  Running total across <strong>all days</strong> from Sales Per Bags (each inventory line: total bags ever sold × current profit margin per bag). Kg retail profit stays under Retail Feed Inventory.
                 </p>
               </div>
               <span class="js-today-profit-value profit-highlight-amount">KES 0</span>
@@ -164,12 +178,13 @@
                   <th>Brand</th>
                   <th>Feed Type</th>
                   <th>Bag Size</th>
-                  <th>Quantity (bags)</th>
+                  <th>CurrentStock(Bags)</th>
                   <th title="Running total of bags for this brand and feed type; not reduced by sales.">Accumulated Bags</th>
                   <th>Buying</th>
                   <th>Selling</th>
                   <th>Profit Margin / Bag</th>
-                  <th title="Today’s profit for this line (bags sold today × margin).">Accumulated Profit</th>
+                  <th title="Cumulative profit from Sales Per Bags (all-time bags sold × current margin per bag).">Accumulated Profit</th>
+                  <th title="All-time bags sold recorded as By Ufaray / pass-through for this line (excluded from profit above).">Bags sold (Ufaray)</th>
                   <th>Reorder</th>
                   <th>Status</th>
                   <th>Created By</th>
@@ -178,12 +193,346 @@
               </thead>
               <tbody id="inventory-body">
                 <tr>
-                  <td colspan="14" class="empty">No records.</td>
+                  <td colspan="15" class="empty">No records.</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </div>
+
+        <div class="card owner-only-highlight hidden" id="ufaraySalesCard">
+          <h3 class="card-title">Bag sales via Ufaray &amp; pass-through</h3>
+          <p class="field-hint">
+            Each row is a staff-recorded <strong>Sales Per Bags</strong> entry with <strong>By Ufaray</strong> (or another agent).
+            <strong>Total</strong> is buying cost × bags; customer price per bag is shown for reference. Edit or delete under <strong>Sales Per Bags</strong>.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Brand</th>
+                  <th>Feed Type</th>
+                  <th>Bag Size</th>
+                  <th>Bags</th>
+                  <th title="Price the customer paid per bag.">Price/bag</th>
+                  <th title="Buying cost × bags (at time of sale logic).">Total (cost)</th>
+                  <th>Via</th>
+                  <th>Recorded by</th>
+                </tr>
+              </thead>
+              <tbody id="ufaray-bag-sales-body">
+                <tr>
+                  <td colspan="9" class="empty">No pass-through bag sales yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        </div>
+
+        <div id="page-retail-inventory" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Retail Feed Inventory</h3>
+            <p class="field-hint">
+              Set <strong>price per kg</strong> and <strong>profit margin per kg</strong> for each product. Staff on <strong>Sales Per Kg</strong> must use
+              these prices when a line exists here; otherwise they use Feed Inventory (selling price ÷ bag size). <strong>Accumulated profit</strong> on each
+              line increases by margin × kg sold on each sale. Wholesale stock stays under <strong>Feed Inventory</strong>. For
+              <strong>Maize (Germ Wishwa)</strong>, <strong>Broken (Wheat)</strong>, and <strong>Wheat (Bran / Pollard)</strong>, you can set
+              <strong>Weight (kg)</strong> per opened bag — staff see it on Sales Per Kg and it drives the <strong>Total Kgs</strong> column when set.
+            </p>
+            <form id="retail-feed-form">
+              <div class="grid">
+                <label>
+                  Brand
+                  <select id="rfBrand" required><option value="">Select brand</option></select>
+                </label>
+                <label>
+                  Feed Type
+                  <select id="rfFeedType" required disabled><option value="">Select feed type</option></select>
+                </label>
+                <label>
+                  Price per kg
+                  <input type="number" id="rfPricePerKg" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Profit margin per kg
+                  <input type="number" id="rfMarginPerKg" step="0.01" required />
+                </label>
+                <label>
+                  Accumulated profit
+                  <input type="number" id="rfAccumulatedProfit" step="0.01" readonly value="0" title="Sum of margin × kg sold for this line (all time)." />
+                  <span class="field-hint">Updates when employees record kg sales at this retail price.</span>
+                </label>
+                <label id="rfWeightKgWrap" class="hidden">
+                  Weight (kg)
+                  <input type="number" id="rfWeightKg" min="0" step="0.01" placeholder="e.g. 50" title="Kg counted per opened bag for Total Kgs on Sales Per Kg (Maize Germ, Broken Wheat, Wheat Bran/Pollard)." />
+                  <span class="field-hint">Optional. When set, replaces catalog bag size for <strong>Total Kgs</strong> on staff Sales Per Kg for this product.</span>
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="rfSaveBtn">Save retail line</button>
+                <button type="button" class="secondary" id="rfClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="profit-highlight-above-table owner-only-highlight hidden" aria-live="polite">
+              <div class="profit-highlight-inner">
+                <div class="profit-highlight-text">
+                  <p class="profit-highlight-title">Cumulative retail kg profit</p>
+                  <p class="profit-highlight-sub">
+                    All-time total: each day’s sales add to this amount (margin per kg × kg sold on retail-priced lines). Same basis as the <strong>Accumulated profit</strong> column in the table below, summed across all products.
+                  </p>
+                </div>
+                <span class="js-retail-today-profit-value profit-highlight-amount">KES 0</span>
+              </div>
+              <p class="profit-highlight-example js-retail-today-profit-meta"></p>
+            </div>
+            <h4 class="card-title" style="margin-top: 0">Retail prices &amp; margins</h4>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Updated</th>
+                    <th>Brand</th>
+                    <th>Feed Type</th>
+                    <th>Bag size</th>
+                    <th>Weight (kg)</th>
+                    <th>Price / kg</th>
+                    <th>Margin / kg</th>
+                    <th title="Sum over time of margin × kg sold.">Accumulated profit</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="retail-pricing-body">
+                  <tr>
+                    <td colspan="9" class="empty">No retail prices yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h4 class="card-title">Sales activity (by day)</h4>
+            <p class="field-hint">From employee <strong>Sales Per Kg</strong> entries.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Brand</th>
+                    <th>Feed Type</th>
+                    <th>Bag size</th>
+                    <th>Bags opened</th>
+                    <th title="Sum of kg sold that day for this product (all users).">Total kg sold</th>
+                    <th title="Kg sold on lines recorded by staff (not the owner account).">Kg sold (employee)</th>
+                    <th title="Floor of total kg ÷ bag size — e.g. 50 kg → 1 when bag is 50 kg.">Bags sold (from kg)</th>
+                  </tr>
+                </thead>
+                <tbody id="retail-inventory-body">
+                  <tr>
+                    <td colspan="8" class="empty">No Sales Per Kg data yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-chicken-inventory" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Chicken Sales Inventory</h3>
+            <p class="field-hint">
+              Record chick sales by breed. <strong>Minimum order:</strong> 50 chicks. <span class="owner-only-highlight hidden"
+                ><strong>Owner:</strong> set buying, selling, and profit margin per chick (revenue uses selling price). </span
+              ><span class="employee-only-action hidden"
+                ><strong>Staff:</strong> <strong>Price per chick</strong> follows the selling price last saved by the owner for that breed (from their sales). </span
+              >
+            </p>
+            <form id="chicken-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input
+                      type="text"
+                      id="chDateDisplay"
+                      placeholder="DD/MM/YYYY"
+                      pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}"
+                      required
+                    />
+                    <button type="button" id="chOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="chDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Breed
+                  <select id="chBreed" required>
+                    <option value="">Select breed</option>
+                  </select>
+                </label>
+                <label class="owner-only-highlight hidden">
+                  Buying price (per chick)
+                  <input type="number" id="chBuyingPrice" min="0" step="0.01" />
+                  <span class="field-hint">Your cost per chick for this sale.</span>
+                </label>
+                <label class="owner-only-highlight hidden">
+                  Selling price (per chick)
+                  <input type="number" id="chSellingPrice" min="0" step="0.01" />
+                  <span class="field-hint">Customer price per chick (same as total ÷ chicks).</span>
+                </label>
+                <label class="owner-only-highlight hidden">
+                  Profit margin (per chick)
+                  <input type="number" id="chProfitMarginPerChick" min="0" step="0.01" />
+                  <span class="field-hint">Margin on each chick — should equal selling − buying (updates when you change buying or selling).</span>
+                </label>
+                <label>
+                  Notes — optional
+                  <input type="text" id="chDescription" placeholder="e.g. customer reference" />
+                </label>
+                <label>
+                  Number of chicks (minimum 50)
+                  <input type="number" id="chQuantity" min="50" step="1" required />
+                </label>
+                <label class="employee-only-action hidden">
+                  Price per chick
+                  <input type="number" id="chUnitPrice" min="0" step="0.01" />
+                </label>
+              </div>
+              <fieldset class="chicken-customer-fieldset employee-only-action hidden">
+                <legend class="chicken-customer-legend">Customer Details</legend>
+                <div class="grid">
+                  <label>
+                    Customer name
+                    <input type="text" id="chCustomerName" placeholder="Customer name" autocomplete="name" />
+                  </label>
+                  <label>
+                    Phone no.
+                    <input type="tel" id="chCustomerPhone" placeholder="Phone number" autocomplete="tel" />
+                  </label>
+                  <label>
+                    Total amount
+                    <input type="text" id="chCustomerTotal" readonly />
+                  </label>
+                  <label>
+                    Money paid
+                    <input type="number" id="chMoneyPaid" min="0" step="0.01" value="0" />
+                  </label>
+                  <label>
+                    Balance
+                    <input type="text" id="chCustomerBalance" readonly />
+                  </label>
+                  <label>
+                    Payments
+                    <select id="chPaymentStatus">
+                      <option value="pending">Pending</option>
+                      <option value="cleared">Cleared</option>
+                    </select>
+                  </label>
+                </div>
+              </fieldset>
+              <p class="field-hint inventory-save-hint">
+                <span class="owner-only-highlight hidden"
+                  ><strong>New record:</strong> choose breed, chicks (≥ 50), buying price, selling price, and margin (selling − buying). </span
+                ><span class="employee-only-action hidden"
+                  ><strong>New sale:</strong> choose breed and chicks; price per chick is locked to the owner’s selling price for that breed. </span
+                ><strong>Edit:</strong> use <strong>Edit</strong> on a row below.
+              </p>
+              <div class="actions">
+                <button type="submit" id="chSaveBtn">Save sale</button>
+                <button type="button" class="secondary" id="chClearBtn">Clear</button>
+              </div>
+            </form>
+            <div class="profit-highlight-above-table profit-below-form owner-only-highlight hidden" aria-live="polite">
+              <div class="profit-highlight-inner">
+                <div class="profit-highlight-text">
+                  <p class="profit-highlight-title">Chicken sales profit</p>
+                  <p class="profit-highlight-sub">
+                    <strong>Cumulative</strong> and <strong>today</strong> count <strong>staff chick sales only</strong>. The table below includes your inventory and staff lines; <strong>Profit (sale)</strong> on staff rows matches margin × chicks (same basis as these totals).
+                  </p>
+                </div>
+                <div class="profit-highlight-amount-col">
+                  <span class="js-chicken-cumulative-profit profit-highlight-amount">KES 0</span>
+                  <span class="profit-highlight-today">Today: <strong class="js-chicken-today-profit">KES 0</strong></span>
+                </div>
+              </div>
+              <p class="profit-highlight-example js-chicken-profit-meta"></p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h4 class="card-title owner-only-highlight hidden" style="margin-top: 0">Chicks in shop &amp; staff sales</h4>
+            <h4 class="card-title employee-only-action hidden" style="margin-top: 0">Chick sales history</h4>
+            <p class="field-hint owner-only-highlight hidden">
+              Lists <strong>your inventory</strong> and <strong>staff chick sales</strong>. <strong>Profit (sale)</strong> is KES&nbsp;0 on your lines; for staff lines it is margin × chicks. For each <strong>staff</strong> line, staff-entered <strong>customer name, phone, money paid, balance, and payments</strong> appear in the table columns. Click a staff sale row to load the same details into <strong>Customer details (from staff)</strong> above. Use <strong>Edit</strong> only on your own inventory rows.
+            </p>
+            <p class="field-hint employee-only-action hidden">
+              Your recorded chick sales for the shop. Use <strong>Edit</strong> within one hour of recording, or anytime while the customer still has an <strong>unpaid balance</strong>, to update a line (e.g. when they complete payment).
+            </p>
+            <p id="chickenInventorySummary" class="field-hint chicken-inventory-summary owner-only-highlight hidden" aria-live="polite"></p>
+            <fieldset id="chickenOwnerCustomerPanel" class="chicken-customer-fieldset chicken-owner-customer-panel owner-only-highlight hidden" aria-live="polite">
+              <legend class="chicken-customer-legend">Customer details (from staff)</legend>
+              <p id="chickenOwnerCustomerHint" class="field-hint">
+                Staff-entered customer and payment info appears in the table columns and below. Click a <strong>staff sale</strong> row (see <strong>By</strong> column) to load details here.
+              </p>
+              <div class="grid">
+                <label>
+                  Customer name
+                  <input type="text" id="chOwnerViewCustomerName" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Phone no.
+                  <input type="text" id="chOwnerViewCustomerPhone" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Total amount
+                  <input type="text" id="chOwnerViewCustomerTotal" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Money paid
+                  <input type="text" id="chOwnerViewMoneyPaid" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Balance
+                  <input type="text" id="chOwnerViewBalance" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Payments
+                  <input type="text" id="chOwnerViewStatus" readonly tabindex="-1" />
+                </label>
+              </div>
+            </fieldset>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Breed</th>
+                    <th>Notes</th>
+                    <th>Chicks</th>
+                    <th>Price/chick</th>
+                    <th title="Chicks × price per chick for this sale.">Total</th>
+                    <th>Customer</th>
+                    <th>Phone</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Payments</th>
+                    <th class="owner-only-highlight hidden" title="Your inventory: KES 0. Staff sales: margin per chick × chicks sold.">Profit (sale)</th>
+                    <th>By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="chicken-inventory-body">
+                  <tr>
+                    <td colspan="14" class="empty chicken-inventory-empty-msg">Loading…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         <div id="page-sales-bags" class="app-page hidden">
@@ -216,6 +565,14 @@
                   <input type="number" id="sbBagsSold" min="1" step="1" required />
                 </label>
                 <label>
+                  Sale recorded for
+                  <select id="sbSaleType" title="Pass-through sales do not count toward feed profit; total uses buying cost × bags.">
+                    <option value="">Shop sale (normal)</option>
+                    <option value="Ufaray">By Ufaray</option>
+                  </select>
+                  <span class="field-hint">Ufaray: enter the customer’s price per bag; stock still drops; total column shows buying price × bags; profit totals ignore this sale.</span>
+                </label>
+                <label>
                   Price per bag
                   <input type="number" id="sbPricePerBag" min="0" step="0.01" required />
                 </label>
@@ -223,14 +580,6 @@
               <div class="actions">
                 <button type="submit" id="sbSaveBtn">Save sale</button>
                 <button type="button" class="secondary" id="sbClearBtn">Clear</button>
-                <button
-                  type="button"
-                  id="clearMySalesBtn"
-                  class="secondary employee-only-action hidden"
-                  title="Development/testing only: deletes sales created by this employee and reverses inventory changes."
-                >
-                  Clear My Sales (Dev)
-                </button>
               </div>
             </form>
           </div>
@@ -245,12 +594,13 @@
                     <th>Bag Size</th>
                     <th>Bags sold</th>
                     <th>Price/bag</th>
-                    <th title="Bags sold × price per bag for this sale.">Total</th>
+                    <th title="Shop sales: bags × price. Ufaray: buying cost × bags.">Total</th>
+                    <th title="Who the sale is recorded for (e.g. agent / Ufaray).">Via</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="sales-bags-body"><tr><td colspan="9" class="empty">No sales.</td></tr></tbody>
+                <tbody id="sales-bags-body"><tr><td colspan="10" class="empty">No sales.</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -278,11 +628,12 @@
                   <select id="skFeedType" required disabled><option value="">Select feed type</option></select>
                 </label>
                 <label>
-                  Bags sold
-                  <input type="number" id="skBagsSold" min="0" step="1" required />
+                  Bag opened
+                  <input type="number" id="skBagOpened" min="0" step="1" value="0" />
+                  <span class="field-hint">For a new line, use <strong>1</strong> when you open a full bag (e.g. 50 kg). Use <strong>0</strong> on later lines for the same product/day. The table shows <strong>1</strong> once a bag is open.</span>
                 </label>
                 <label>
-                  Kg sold
+                  Kg sold (this sale)
                   <input type="number" id="skKgSold" min="0.01" step="0.01" required />
                 </label>
                 <label>
@@ -290,6 +641,13 @@
                   <input type="number" id="skPricePerKg" min="0" step="0.01" required />
                 </label>
               </div>
+              <p id="skOwnerWeightHint" class="field-hint hidden" style="margin-top: 0.5rem" role="status"></p>
+              <p class="field-hint" style="margin-top: 0.75rem">
+                <strong>Total Kgs</strong> is the kg left from opened bags for that product that day (starts at the owner’s weight per bag when set under Retail
+                Feed Inventory, otherwise the catalog bag size, e.g. 50 kg, and goes down as you record sales). Each time you save,
+                <strong>Kg sold (this sale)</strong> is added onto the same row for that product/day (no duplicate rows). <strong>Bags sold</strong> counts
+                full bags represented by total kg sold (same product/day).
+              </p>
               <div class="actions">
                 <button type="submit" id="skSaveBtn">Save sale</button>
                 <button type="button" class="secondary" id="skClearBtn">Clear</button>
@@ -304,76 +662,38 @@
                     <th>Date</th>
                     <th>Brand</th>
                     <th>Feed Type</th>
-                    <th>Bags sold</th>
-                    <th>Kg sold</th>
+                    <th title="Shows 1 once any bag is opened for this product that day.">Bag opened</th>
+                    <th title="Kg remaining from opened bags after this line (catalog bag size × bags opened − kg sold so far).">Total Kgs</th>
+                    <th title="Full bags equivalent of total kg sold today for this product (from catalog bag size).">Bags sold</th>
+                    <th title="Total kg on this line (adds up when you record more sales for the same product/day).">Kg sold (total)</th>
                     <th>Price/kg</th>
-                    <th title="Kg sold × price per kg for this sale.">Total</th>
+                    <th title="Cumulative line total: total kg on this line × price per kg.">Total</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="sales-kg-body"><tr><td colspan="9" class="empty">No sales.</td></tr></tbody>
+                <tbody id="sales-kg-body"><tr><td colspan="11" class="empty">No sales.</td></tr></tbody>
               </table>
             </div>
           </div>
         </div>
 
-        <div id="page-chicken" class="app-page hidden">
-          <div class="card">
-            <h3 class="card-title">Record chicken sale</h3>
-            <form id="chicken-form">
-              <div class="grid">
-                <label class="date-field">
-                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
-                  <div class="date-picker-wrap">
-                    <input type="text" id="chDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
-                    <button type="button" id="chOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
-                  </div>
-                  <input type="date" id="chDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
-                </label>
-                <label>
-                  Description
-                  <input type="text" id="chDescription" placeholder="e.g. Broilers, Layers, Kienyeji" required />
-                </label>
-                <label>
-                  Quantity (birds)
-                  <input type="number" id="chQuantity" min="1" step="1" required />
-                </label>
-                <label>
-                  Total weight (kg) — optional
-                  <input type="number" id="chWeightKg" min="0" step="0.01" />
-                </label>
-                <label>
-                  Price per bird
-                  <input type="number" id="chUnitPrice" min="0" step="0.01" required />
-                </label>
-              </div>
-              <div class="actions">
-                <button type="submit" id="chSaveBtn">Save sale</button>
-                <button type="button" class="secondary" id="chClearBtn">Clear</button>
-              </div>
-            </form>
+        <footer
+          id="ownerCombinedProfitDock"
+          class="owner-combined-profit-dock hidden"
+          aria-label="Combined accumulated profits"
+          aria-live="polite"
+        >
+          <div class="owner-combined-profit-dock-inner">
+            <span class="owner-combined-profit-dock-label">
+              Combined accumulated profits — Feed Inventory + Retail Feed + Chicken Sales (staff)
+            </span>
+            <strong class="js-owner-combined-profit-total">KES 0</strong>
           </div>
-          <div class="card">
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Description</th>
-                    <th>Birds</th>
-                    <th>Weight (kg)</th>
-                    <th>Price/bird</th>
-                    <th title="Birds × price per bird for this sale.">Total</th>
-                    <th>By</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="chicken-body"><tr><td colspan="8" class="empty">No sales.</td></tr></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+          <p class="owner-combined-profit-dock-hint">
+            Sum of all-time bag sales profit, retail kg profit, and staff chick margin totals. Refreshes when you save sales or when data reloads.
+          </p>
+        </footer>
       </section>
     </main>
 

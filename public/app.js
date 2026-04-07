@@ -1,34 +1,83 @@
 const state = {
-  token: localStorage.getItem("amanaToken") || "",
+  token: (localStorage.getItem("amanaToken") || "").trim(),
   user: JSON.parse(localStorage.getItem("amanaUser") || "null"),
   catalog: {},
   records: [],
   editId: null,
   salesBags: [],
   salesKg: [],
+  /** Owner: chicks-in-shop inventory rows only. Employee: staff chick sales only. */
   chickenSales: [],
+  /** Full rows for owner; employees get { breed, selling_price } only. */
+  chickenBreeds: [],
+  /** Owner: cumulative + today’s chick margin (from API). */
+  chickenProfitSummary: { todayProfit: 0, cumulativeProfit: 0, today: "" },
+  /** Owner: aggregated kg / bag opened / bags-from-kg for Retail Feed Inventory. */
+  retailFeedSummary: [],
+  /** Owner: retail price/margin/weight; employees: price per kg + optional weight_kg (for Sales Per Kg). */
+  retailFeedPricing: [],
+  /** Sum of retail_feed_pricing.accumulated_profit (all-time, not shop-day). */
+  cumulativeRetailKgProfit: 0,
+  editRetailFeedId: null,
   editSalesBagId: null,
   editSalesKgId: null,
   editChickenId: null,
   currentPage: "inventory",
   /** Cumulative feed profit for the shop calendar day (from API). */
-  todayFeedProfit: 0,
+  cumulativeFeedBagProfit: 0,
   /** DD/MM/YYYY shop “today” (Africa/Nairobi on server; client mirrors for display). */
   shopToday: "",
   /** From GET /api/inventory/selling-prices (employees): lines ordered by id DESC, same as server stock lookup. */
   inventoryPricing: [],
+  /** Owner: selected chick sale row id for the staff customer details panel. */
+  ownerSelectedChickenRowId: null,
 };
 
 const PAGE_HEADINGS = {
   inventory: "Feed Inventory",
+  "retail-inventory": "Retail Feed Inventory",
+  "chicken-inventory": "Chicken Sales Inventory",
   "sales-bags": "Sales Per Bags",
   "sales-kg": "Sales Per Kg",
-  chicken: "Chicken Sales",
 };
+
+/** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
+const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory"]);
+/** Owner pages that show the combined accumulated profit footer at the bottom. */
+const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
+
+/** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
+const DEFAULT_CHICKEN_BREED_NAMES = [
+  "Irvines",
+  "Supreme",
+  "Isinya",
+  "Silverland",
+  "Kenchick",
+  "Jumbo",
+  "Suguna",
+];
+
+function chickenBreedsRowsFromNames(names) {
+  return names.map((breed) => ({
+    breed,
+    buying_price: 0,
+    selling_price: 0,
+    profit_margin_per_chick: 0,
+    accumulated_profit: 0,
+  }));
+}
+
+/** Rows for the breed dropdown: API data, else static fallback so the list is never empty. */
+function getChickenBreedsRows() {
+  if (Array.isArray(state.chickenBreeds) && state.chickenBreeds.length > 0) return state.chickenBreeds;
+  return chickenBreedsRowsFromNames(DEFAULT_CHICKEN_BREED_NAMES);
+}
 
 const loginCard = document.getElementById("loginCard");
 const appCard = document.getElementById("appCard");
 const loginForm = document.getElementById("loginForm");
+const passwordInput = document.getElementById("password");
+const showPasswordCheckbox = document.getElementById("showPassword");
 const userInfo = document.getElementById("userInfo");
 const logoutBtn = document.getElementById("logoutBtn");
 const refreshBtn = document.getElementById("refreshBtn");
@@ -61,14 +110,17 @@ const salesKgBody = document.getElementById("sales-kg-body");
 const skDateDisplay = document.getElementById("skDateDisplay");
 const skDate = document.getElementById("skDate");
 const skOpenCalendarBtn = document.getElementById("skOpenCalendarBtn");
+const retailInventoryBody = document.getElementById("retail-inventory-body");
+const retailPricingBody = document.getElementById("retail-pricing-body");
+const retailFeedForm = document.getElementById("retail-feed-form");
+const rfBrand = document.getElementById("rfBrand");
+const rfFeedType = document.getElementById("rfFeedType");
 
 const chickenForm = document.getElementById("chicken-form");
-const chickenBody = document.getElementById("chicken-body");
+const chickenInventoryBody = document.getElementById("chicken-inventory-body");
 const chDateDisplay = document.getElementById("chDateDisplay");
 const chDate = document.getElementById("chDate");
 const chOpenCalendarBtn = document.getElementById("chOpenCalendarBtn");
-
-const clearMySalesBtn = document.getElementById("clearMySalesBtn");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -91,6 +143,16 @@ async function api(path, options = {}) {
     }
   }
   if (!response.ok) {
+    const isLogin = path === "/api/login";
+    if (response.status === 401 && !isLogin) {
+      const msg = body.error || "";
+      if (msg === "Invalid token" || msg === "Unauthorized") {
+        clearAuth();
+        stopAutoRefresh();
+        showLoggedOut();
+        throw new Error("Session expired. Please sign in again.");
+      }
+    }
     throw new Error(body.error || `Request failed (${response.status})`);
   }
   return body;
@@ -130,15 +192,66 @@ function clientShopTodayDMY() {
 }
 
 function updateTodayProfitDisplay() {
-  const val = currency(state.todayFeedProfit);
+  const val = currency(state.cumulativeFeedBagProfit);
   document.querySelectorAll(".js-today-profit-value").forEach((el) => {
     el.textContent = val;
   });
   const meta = state.shopToday
-    ? `Shop day ${state.shopToday}. Example: if the margin on a line is KES 150 and you sell 1 bag, this shows 150; after two more bags on the same line it shows 450. Mixed products use each line’s margin. Refreshes when you save a sale (and every few seconds).`
+    ? `Shop day ${state.shopToday}. Total is cumulative profit from all Sales Per Bags (all dates), using each line’s current margin × total bags sold. Resets only if bag sales are deleted.`
     : "";
   document.querySelectorAll(".js-today-profit-meta").forEach((el) => {
     el.textContent = meta;
+  });
+}
+
+function updateRetailCumulativeProfitDisplay() {
+  const val = currency(state.cumulativeRetailKgProfit);
+  document.querySelectorAll(".js-retail-today-profit-value").forEach((el) => {
+    el.textContent = val;
+  });
+  const meta = state.shopToday
+    ? `Shop day ${state.shopToday}. This total is not reset daily: it is the sum of every line’s accumulated retail kg profit (all past sales plus new sales).`
+    : "";
+  document.querySelectorAll(".js-retail-today-profit-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
+function updateChickenProfitDisplay() {
+  const cum = currency(Number(state.chickenProfitSummary?.cumulativeProfit ?? 0));
+  const today = currency(Number(state.chickenProfitSummary?.todayProfit ?? 0));
+  document.querySelectorAll(".js-chicken-cumulative-profit").forEach((el) => {
+    el.textContent = cum;
+  });
+  document.querySelectorAll(".js-chicken-today-profit").forEach((el) => {
+    el.textContent = today;
+  });
+  const shop = state.chickenProfitSummary?.today || state.shopToday || "";
+  const meta = shop
+    ? `Shop day ${shop}. Cumulative and today count staff chick sales only. Your inventory lines do not add to these totals; staff rows show margin in the Profit (sale) column.`
+    : "";
+  document.querySelectorAll(".js-chicken-profit-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
+function updateOwnerCombinedProfitDockVisibility() {
+  const dock = document.getElementById("ownerCombinedProfitDock");
+  if (!dock) return;
+  const show =
+    state.user?.role === "owner" && OWNER_PAGES_WITH_COMBINED_PROFIT.has(state.currentPage);
+  dock.classList.toggle("hidden", !show);
+}
+
+/** Owner: Feed bag cumulative + retail kg cumulative + staff chicken margin cumulative. */
+function updateOwnerCombinedProfitDisplay() {
+  if (state.user?.role !== "owner") return;
+  const feed = Number(state.cumulativeFeedBagProfit) || 0;
+  const retail = Number(state.cumulativeRetailKgProfit) || 0;
+  const chicken = Number(state.chickenProfitSummary?.cumulativeProfit) || 0;
+  const sum = feed + retail + chicken;
+  document.querySelectorAll(".js-owner-combined-profit-total").forEach((el) => {
+    el.textContent = currency(sum);
   });
 }
 
@@ -208,6 +321,26 @@ function feedTypeCatalogValue(brandKey, feedType) {
   return found ? found.type : feedType;
 }
 
+/** Maize Germ (Wishwa), Broken Wheat, Wheat Bran/Pollard — owner can set retail weight (kg) per opened bag. */
+function isOwnerWeightRetailLine(brandKey, feedType) {
+  const b = resolveBrandKey(brandKey);
+  const f = normalizeFeedTypeForMatch(feedType);
+  const pairs = [
+    ["Maize", "Germ (Wishwa)"],
+    ["Broken", "Wheat"],
+    ["Wheat", "Bran"],
+    ["Wheat", "Pollard"],
+  ];
+  return pairs.some(([bb, ff]) => resolveBrandKey(bb) === b && normalizeFeedTypeForMatch(ff) === f);
+}
+
+function updateRfWeightFieldVisibility() {
+  const wrap = document.getElementById("rfWeightKgWrap");
+  if (!wrap) return;
+  const show = isOwnerWeightRetailLine(rfBrand?.value, rfFeedType?.value);
+  wrap.classList.toggle("hidden", !show);
+}
+
 function formatDateDMY(dateValue) {
   if (!dateValue) return "";
   const s = String(dateValue).trim();
@@ -252,6 +385,25 @@ function compareDMYParts(a, b) {
   return a.d - b.d;
 }
 
+function tableDateSeparatorRow(colSpan) {
+  return `<tr class="table-date-separator" aria-hidden="true"><td colspan="${colSpan}"></td></tr>`;
+}
+
+/** Inserts an orange separator row when `date` changes between consecutive rows (same order as API). */
+function joinRowsWithDateSeparators(rows, colSpan, buildRowHtml) {
+  if (!rows.length) return "";
+  const parts = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (i > 0) {
+      const cur = formatDateDMY(rows[i].date).trim();
+      const prev = formatDateDMY(rows[i - 1].date).trim();
+      if (cur !== prev) parts.push(tableDateSeparatorRow(colSpan));
+    }
+    parts.push(buildRowHtml(rows[i], i));
+  }
+  return parts.join("");
+}
+
 /** Sale row date is on or after the shop calendar day (both interpreted as DD/MM/YYYY). */
 function saleDateOnOrAfterShopDay(rowDate, shopDayDMY) {
   const row = parseDMYParts(rowDate);
@@ -278,6 +430,141 @@ function saleLineTotalChicken(row) {
   return Number(row.quantity_birds || 0) * Number(row.unit_price || 0);
 }
 
+function escapeHtmlCell(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function chickenSalePaymentStatusLabel(row) {
+  const s = String(row.payment_status || "pending").toLowerCase();
+  return s === "cleared" ? "Cleared" : "Pending";
+}
+
+function chickenSaleCustomerCellsHtml(row) {
+  const name = row.customer_name ? escapeHtmlCell(row.customer_name) : "—";
+  const phone = row.customer_phone ? escapeHtmlCell(row.customer_phone) : "—";
+  const paid = currency(Number(row.money_paid) || 0);
+  const total = saleLineTotalChicken(row);
+  const bal = total - (Number(row.money_paid) || 0);
+  const balStr = currency(bal);
+  const st = escapeHtmlCell(chickenSalePaymentStatusLabel(row));
+  return `<td>${name}</td><td>${phone}</td><td>${paid}</td><td>${balStr}</td><td>${st}</td>`;
+}
+
+function updateChickenCustomerAmounts() {
+  if (state.user?.role !== "employee") return;
+  const qty = Number(document.getElementById("chQuantity")?.value || 0);
+  const unit = Number(document.getElementById("chUnitPrice")?.value || 0);
+  const total = Number.isFinite(qty) && Number.isFinite(unit) ? qty * unit : NaN;
+  const totalEl = document.getElementById("chCustomerTotal");
+  const balEl = document.getElementById("chCustomerBalance");
+  if (totalEl) totalEl.value = Number.isFinite(total) ? total.toFixed(2) : "";
+  const paid = Number(document.getElementById("chMoneyPaid")?.value || 0);
+  const balance = Number.isFinite(total) && Number.isFinite(paid) ? total - paid : NaN;
+  if (balEl) balEl.value = Number.isFinite(balance) ? balance.toFixed(2) : "";
+}
+
+function onChickenPaymentStatusChange() {
+  if (state.user?.role !== "employee") return;
+  const sel = document.getElementById("chPaymentStatus");
+  if (!sel || sel.value !== "cleared") return;
+  const qty = Number(document.getElementById("chQuantity")?.value || 0);
+  const unit = Number(document.getElementById("chUnitPrice")?.value || 0);
+  const total = Number.isFinite(qty) && Number.isFinite(unit) ? qty * unit : NaN;
+  const mp = document.getElementById("chMoneyPaid");
+  if (mp && Number.isFinite(total) && total > 0) mp.value = String(Math.round(total * 100) / 100);
+  updateChickenCustomerAmounts();
+}
+
+function clearOwnerCustomerViewPanel() {
+  state.ownerSelectedChickenRowId = null;
+  const ids = [
+    "chOwnerViewCustomerName",
+    "chOwnerViewCustomerPhone",
+    "chOwnerViewCustomerTotal",
+    "chOwnerViewMoneyPaid",
+    "chOwnerViewBalance",
+    "chOwnerViewStatus",
+  ];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  }
+  const hint = document.getElementById("chickenOwnerCustomerHint");
+  if (hint) {
+    hint.innerHTML =
+      'Staff-entered customer and payment info appears in the table columns and below. Click a <strong>staff sale</strong> row (see <strong>By</strong> column) to load details here.';
+  }
+}
+
+function highlightChickenRowForOwner(id) {
+  if (!chickenInventoryBody) return;
+  chickenInventoryBody.querySelectorAll("tr[data-chicken-row-id]").forEach((tr) => {
+    tr.classList.toggle("chicken-row-selected", id != null && String(tr.dataset.chickenRowId) === String(id));
+  });
+}
+
+/** Owner: show staff-entered customer/payment fields (table + read-only panel). */
+function fillOwnerCustomerViewPanel(row) {
+  state.ownerSelectedChickenRowId = row.id;
+  const name = document.getElementById("chOwnerViewCustomerName");
+  const phone = document.getElementById("chOwnerViewCustomerPhone");
+  const totalEl = document.getElementById("chOwnerViewCustomerTotal");
+  const paidEl = document.getElementById("chOwnerViewMoneyPaid");
+  const balEl = document.getElementById("chOwnerViewBalance");
+  const stEl = document.getElementById("chOwnerViewStatus");
+  const hint = document.getElementById("chickenOwnerCustomerHint");
+  if (isChickenRowOwnerInventory(row)) {
+    if (name) name.value = "";
+    if (phone) phone.value = "";
+    if (totalEl) totalEl.value = "";
+    if (paidEl) paidEl.value = "";
+    if (balEl) balEl.value = "";
+    if (stEl) stEl.value = "";
+    if (hint) {
+      hint.textContent =
+        "This row is your own inventory record — staff customer fields do not apply.";
+    }
+    return;
+  }
+  if (hint) hint.textContent = "Recorded by staff for this sale.";
+  if (name) name.value = row.customer_name || "";
+  if (phone) phone.value = row.customer_phone || "";
+  const lineTotal = saleLineTotalChicken(row);
+  if (totalEl) totalEl.value = Number.isFinite(lineTotal) ? lineTotal.toFixed(2) : "";
+  const mp = Number(row.money_paid) || 0;
+  if (paidEl) paidEl.value = Number.isFinite(mp) ? mp.toFixed(2) : "";
+  const balance = lineTotal - mp;
+  if (balEl) balEl.value = Number.isFinite(balance) ? balance.toFixed(2) : "";
+  if (stEl) stEl.value = chickenSalePaymentStatusLabel(row);
+}
+
+/** Profit for this row: margin × chicks. Only owner inventory lines are KES 0 (creator_role owner). */
+function chickenSaleLineProfit(row) {
+  const cr = String(row.creator_role || "").toLowerCase();
+  if (cr === "owner") return 0;
+  const q = Number(row.quantity_birds) || 0;
+  if (row.margin_snap == null || row.margin_snap === "") return null;
+  const m = Number(row.margin_snap);
+  if (!Number.isFinite(m)) return null;
+  return q * m;
+}
+
+function formatChickenSaleProfitCell(row) {
+  const p = chickenSaleLineProfit(row);
+  return p == null ? "—" : currency(p);
+}
+
+/** Rows you recorded as shop inventory (not staff chick sales). */
+function isChickenRowOwnerInventory(row) {
+  const cr = String(row?.creator_role || "").toLowerCase();
+  const createdBy = String(row?.created_by || "");
+  const ownerUsername = String(state.user?.username || "");
+  return cr === "owner" || (cr !== "employee" && ownerUsername !== "" && createdBy === ownerUsername);
+}
+
 const EMPLOYEE_SALE_EDIT_MS = 60 * 60 * 1000;
 
 /** Employees may only edit a sale within 1 hour of when it was recorded (`created_at` / fallback `updated_at`). */
@@ -287,6 +574,15 @@ function saleWithinEmployeeEditWindow(row) {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return false;
   return Date.now() - t <= EMPLOYEE_SALE_EDIT_MS;
+}
+
+/** Chicken sales: editable while there is an unpaid balance; otherwise same 1-hour rule as other sales. */
+function employeeChickenSaleEditable(row) {
+  const total = saleLineTotalChicken(row);
+  const paid = Number(row.money_paid);
+  const paidNum = Number.isFinite(paid) ? paid : 0;
+  if (Number.isFinite(total) && total - paidNum > 0.005) return true;
+  return saleWithinEmployeeEditWindow(row);
 }
 
 function showLoggedOut() {
@@ -310,7 +606,9 @@ function showLoggedIn() {
   });
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
-    const shouldShow = isOwner ? page === "inventory" : page !== "inventory";
+    const shouldShow = isOwner
+      ? OWNER_INVENTORY_PAGES.has(page) || page === "chicken-inventory"
+      : !OWNER_INVENTORY_PAGES.has(page);
     btn.classList.toggle("hidden", !shouldShow);
   });
 }
@@ -380,6 +678,23 @@ function populateSkFeedTypes(brand) {
   skFeedType.disabled = false;
 }
 
+function populateRfFeedTypes(brand) {
+  if (!rfFeedType) return;
+  const brandKey = resolveBrandKey(brand);
+  rfFeedType.innerHTML = '<option value="">Select feed type</option>';
+  if (!brandKey || !state.catalog[brandKey]) {
+    rfFeedType.disabled = true;
+    return;
+  }
+  state.catalog[brandKey].forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.type;
+    option.textContent = displayFeedType(item.type);
+    rfFeedType.appendChild(option);
+  });
+  rfFeedType.disabled = false;
+}
+
 function wireDatePicker(dateDisplay, dateInput, openBtn) {
   openBtn.addEventListener("click", () => {
     if (dateDisplay.value.trim()) {
@@ -412,6 +727,34 @@ function bagSizeFor(brand, feedType) {
   return loose ? loose.bagSize : 0;
 }
 
+/** Sum of bag_opened for the same calendar line (for defaulting the form). Excludes the row being edited. */
+function sumBagOpenedForSkLine(dateStr, brand, feedType) {
+  if (!dateStr || !brand || !feedType) return 0;
+  const bk = resolveBrandKey(brand);
+  const ftWant = feedTypeCatalogValue(bk, feedType);
+  let sum = 0;
+  for (const r of state.salesKg) {
+    if (String(r.date).trim() !== String(dateStr).trim()) continue;
+    if (resolveBrandKey(r.brand) !== bk) continue;
+    if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
+    if (state.editSalesKgId && String(r.id) === String(state.editSalesKgId)) continue;
+    sum += Number(r.bag_opened || 0);
+  }
+  return sum;
+}
+
+/** First sale for this product/day defaults bag opened to 1; after a bag is open, default 0 for extra lines. */
+function applyDefaultSkBagOpened() {
+  if (state.editSalesKgId) return;
+  const dateStr = skDateDisplay?.value?.trim();
+  if (!dateStr || !isValidDMY(dateStr)) return;
+  if (!skBrand?.value || !skFeedType?.value) return;
+  const el = document.getElementById("skBagOpened");
+  if (!el) return;
+  const sum = sumBagOpenedForSkLine(dateStr, skBrand.value, skFeedType.value);
+  el.value = sum >= 1 ? "0" : "1";
+}
+
 /** Matches server getInventoryItem: same bag_size, normalized brand + feed; first row wins (list is id DESC). */
 function findInventorySellingPrice(brand, feedType, bagSize) {
   const bs = Number(bagSize);
@@ -428,6 +771,50 @@ function findInventorySellingPrice(brand, feedType, bagSize) {
   return null;
 }
 
+/** Retail price per kg from owner (GET /api/retail-feed-pricing), if configured for this product. */
+function findRetailPricePerKg(brand, feedType) {
+  const bKey = resolveBrandKey(brand);
+  const fKey = normalizeFeedTypeForMatch(feedType);
+  for (const row of state.retailFeedPricing || []) {
+    if (resolveBrandKey(row.brand) !== bKey) continue;
+    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
+    const p = Number(row.price_per_kg);
+    return Number.isFinite(p) ? p : null;
+  }
+  return null;
+}
+
+/** Owner-set kg per opened bag for Total Kgs on Sales Per Kg, when present on the retail line. */
+function findRetailWeightKg(brand, feedType) {
+  const bKey = resolveBrandKey(brand);
+  const fKey = normalizeFeedTypeForMatch(feedType);
+  for (const row of state.retailFeedPricing || []) {
+    if (resolveBrandKey(row.brand) !== bKey) continue;
+    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
+    const w = row.weight_kg == null || row.weight_kg === "" ? null : Number(row.weight_kg);
+    return Number.isFinite(w) && w > 0 ? w : null;
+  }
+  return null;
+}
+
+function updateSalesKgOwnerWeightHint() {
+  const el = document.getElementById("skOwnerWeightHint");
+  if (!el) return;
+  if (state.user?.role !== "employee") {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  const w = findRetailWeightKg(skBrand.value, skFeedType.value);
+  if (w != null) {
+    el.textContent = `Owner-set weight for this product: ${w} kg per opened bag (used for Total Kgs in the table below).`;
+    el.classList.remove("hidden");
+  } else {
+    el.classList.add("hidden");
+    el.textContent = "";
+  }
+}
+
 function applyEmployeeSalesBagPriceFromInventory() {
   if (state.user?.role !== "employee") return;
   const bagSize = Number(sbBagSize.value || 0);
@@ -439,34 +826,104 @@ function applyEmployeeSalesBagPriceFromInventory() {
 
 function applyEmployeeSalesKgPriceFromInventory() {
   if (state.user?.role !== "employee") return;
+  const el = document.getElementById("skPricePerKg");
+  const rp = findRetailPricePerKg(skBrand.value, skFeedType.value);
+  if (rp != null) {
+    el.value = rp.toFixed(2);
+    updateSalesKgOwnerWeightHint();
+    return;
+  }
   const bagKg = bagSizeFor(skBrand.value, skFeedType.value);
   const sp = findInventorySellingPrice(skBrand.value, skFeedType.value, bagKg);
-  const el = document.getElementById("skPricePerKg");
   if (sp != null && bagKg > 0) {
     const perKg = sp / bagKg;
     el.value = Number.isFinite(perKg) ? perKg.toFixed(2) : "";
   } else el.value = "";
+  updateSalesKgOwnerWeightHint();
+}
+
+function applyEmployeeChickenPriceFromBreeds() {
+  if (state.user?.role !== "employee") return;
+  const sel = document.getElementById("chBreed");
+  const el = document.getElementById("chUnitPrice");
+  if (!sel || !el) return;
+  const row = getChickenBreedsRows().find((r) => r.breed === sel.value);
+  const sp = row != null ? Number(row.selling_price) : NaN;
+  if (Number.isFinite(sp) && sp >= 0) el.value = String(sp);
+  else el.value = "";
+}
+
+/** Owner sale form: buying / selling / profit margin from breed defaults when breed changes. */
+function applyOwnerChickenPricesFromBreed() {
+  if (state.user?.role !== "owner") return;
+  const sel = document.getElementById("chBreed");
+  const buyEl = document.getElementById("chBuyingPrice");
+  const sellEl = document.getElementById("chSellingPrice");
+  const marginEl = document.getElementById("chProfitMarginPerChick");
+  if (!sel || !buyEl || !sellEl || !marginEl) return;
+  const row = getChickenBreedsRows().find((r) => r.breed === sel.value);
+  if (row) {
+    buyEl.value = row.buying_price != null ? String(row.buying_price) : "";
+    sellEl.value = row.selling_price != null ? String(row.selling_price) : "";
+    marginEl.value = row.profit_margin_per_chick != null ? String(row.profit_margin_per_chick) : "";
+  } else {
+    buyEl.value = "";
+    sellEl.value = "";
+    marginEl.value = "";
+  }
+}
+
+function syncOwnerChickenMarginFromBuySell() {
+  if (state.user?.role !== "owner") return;
+  const buy = Number(document.getElementById("chBuyingPrice")?.value);
+  const sell = Number(document.getElementById("chSellingPrice")?.value);
+  const mEl = document.getElementById("chProfitMarginPerChick");
+  if (!mEl || !Number.isFinite(buy) || !Number.isFinite(sell)) return;
+  mEl.value = String(Math.round((sell - buy) * 100) / 100);
+}
+
+function syncOwnerChickenSellFromBuyMargin() {
+  if (state.user?.role !== "owner") return;
+  const buy = Number(document.getElementById("chBuyingPrice")?.value);
+  const m = Number(document.getElementById("chProfitMarginPerChick")?.value);
+  const sellEl = document.getElementById("chSellingPrice");
+  if (!sellEl || !Number.isFinite(buy) || !Number.isFinite(m)) return;
+  sellEl.value = String(Math.round((buy + m) * 100) / 100);
 }
 
 function applyEmployeeFeedSalePricingUi() {
   const isEmployee = state.user?.role === "employee";
   const sb = document.getElementById("sbPricePerBag");
   const sk = document.getElementById("skPricePerKg");
+  const ch = document.getElementById("chUnitPrice");
+  const saleTypeEl = document.getElementById("sbSaleType");
+  const isPassThrough = !!(saleTypeEl && String(saleTypeEl.value || "").trim() !== "");
   if (sb) {
-    sb.readOnly = !!isEmployee;
+    const lockBagPrice = !!isEmployee && !isPassThrough;
+    sb.readOnly = lockBagPrice;
     sb.title = isEmployee
-      ? "Matches the selling price per bag from Feed Inventory for this product."
+      ? isPassThrough
+        ? "Enter the price the customer pays per bag. Total in the list is buying cost × bags; feed profit ignores this sale."
+        : "Matches the selling price per bag from Feed Inventory for this product."
       : "";
   }
   if (sk) {
     sk.readOnly = !!isEmployee;
     sk.title = isEmployee
-      ? "Per kg = selling price per bag ÷ bag size (kg), from Feed Inventory."
+      ? "Uses retail price per kg from Retail Feed Inventory when set; otherwise selling price per bag ÷ bag size from Feed Inventory. Owner weight (kg) for Maize Germ, Broken Wheat, Wheat Bran/Pollard appears above when set."
+      : "";
+  }
+  if (ch) {
+    ch.readOnly = !!isEmployee;
+    ch.title = isEmployee
+      ? "Filled from the selling price for this breed (set under Chicken Sales Inventory by the owner)."
       : "";
   }
   if (isEmployee) {
-    applyEmployeeSalesBagPriceFromInventory();
+    if (!isPassThrough) applyEmployeeSalesBagPriceFromInventory();
     applyEmployeeSalesKgPriceFromInventory();
+    applyEmployeeChickenPriceFromBreeds();
+    updateChickenCustomerAmounts();
   }
 }
 
@@ -489,18 +946,46 @@ function resetForm() {
   document.getElementById("saveBtn").textContent = "Save Record";
 }
 
+function renderOwnerPassThroughBagSales() {
+  const tbody = document.getElementById("ufaray-bag-sales-body");
+  if (!tbody) return;
+  if (state.user.role !== "owner") return;
+  const rows = (state.salesBags || []).filter((r) => String(r.through_party || "").trim() !== "");
+  if (!rows.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="9" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags → By Ufaray.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = joinRowsWithDateSeparators(rows, 9, (row) => {
+    const viaRaw = String(row.through_party || "").trim();
+    const viaCell = viaRaw ? `By ${viaRaw}` : "—";
+    return `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${displayBrand(row.brand)}</td>
+        <td>${displayFeedType(row.feed_type)}</td>
+        <td>${row.bag_size} kg</td>
+        <td>${row.bags_sold}</td>
+        <td>${currency(row.price_per_bag)}</td>
+        <td>${currency(saleLineTotalBags(row))}</td>
+        <td>${viaCell}</td>
+        <td>${row.created_by}</td>
+      </tr>`;
+  });
+}
+
 function renderTable() {
   if (!state.records.length) {
-    tableBody.innerHTML = '<tr><td colspan="14" class="empty">No records.</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="15" class="empty">No records.</td></tr>';
     return;
   }
 
-  tableBody.innerHTML = state.records
-    .map((row) => {
-      const canDelete = state.user.role === "owner";
-      const lineToday = currency(row.today_profit ?? 0);
-      const accBags = row.accumulated_bags != null ? row.accumulated_bags : row.quantity_in_stock;
-      return `
+  tableBody.innerHTML = joinRowsWithDateSeparators(state.records, 15, (row) => {
+    const canDelete = state.user.role === "owner";
+    const lineCumulative = currency(row.cumulative_bag_profit ?? 0);
+    const ufarayBags = Number(row.bags_sold_pass_through ?? 0);
+    const accBags = row.accumulated_bags != null ? row.accumulated_bags : row.quantity_in_stock;
+    return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${displayBrand(row.brand)}</td>
@@ -511,7 +996,8 @@ function renderTable() {
         <td>${currency(row.buying_price)}</td>
         <td>${currency(row.selling_price)}</td>
         <td>${currency(row.profit_margin_per_bag ?? 0)}</td>
-        <td>${lineToday}</td>
+        <td>${lineCumulative}</td>
+        <td>${ufarayBags}</td>
         <td>${row.reorder_level}</td>
         <td>${statusLabel(row)}</td>
         <td>${row.created_by}</td>
@@ -526,23 +1012,23 @@ function renderTable() {
           </div>
         </td>
       </tr>`;
-    })
-    .join("");
+  });
 }
 
 function renderSalesBagsTable() {
   if (!state.salesBags.length) {
-    salesBagsBody.innerHTML = '<tr><td colspan="9" class="empty">No sales.</td></tr>';
+    salesBagsBody.innerHTML = '<tr><td colspan="10" class="empty">No sales.</td></tr>';
     return;
   }
   const canDelete = state.user.role === "owner";
   const shopDay = state.shopToday || clientShopTodayDMY();
-  salesBagsBody.innerHTML = state.salesBags
-    .map((row) => {
-      const canEdit =
-        state.user.role === "owner" ||
-        (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
-      return `
+  salesBagsBody.innerHTML = joinRowsWithDateSeparators(state.salesBags, 10, (row) => {
+    const canEdit =
+      state.user.role === "owner" ||
+      (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
+    const viaRaw = String(row.through_party || "").trim();
+    const viaCell = viaRaw ? `By ${viaRaw}` : "—";
+    return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${displayBrand(row.brand)}</td>
@@ -551,6 +1037,7 @@ function renderSalesBagsTable() {
         <td>${row.bags_sold}</td>
         <td>${currency(row.price_per_bag)}</td>
         <td>${currency(saleLineTotalBags(row))}</td>
+        <td>${viaCell}</td>
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -563,28 +1050,36 @@ function renderSalesBagsTable() {
           </div>
         </td>
       </tr>`;
-    })
-    .join("");
+  });
 }
 
 function renderSalesKgTable() {
   if (!state.salesKg.length) {
-    salesKgBody.innerHTML = '<tr><td colspan="9" class="empty">No sales.</td></tr>';
+    salesKgBody.innerHTML = '<tr><td colspan="11" class="empty">No sales.</td></tr>';
     return;
   }
   const canDelete = state.user.role === "owner";
   const shopDay = state.shopToday || clientShopTodayDMY();
-  salesKgBody.innerHTML = state.salesKg
-    .map((row) => {
-      const canEdit =
-        state.user.role === "owner" ||
-        (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
-      return `
+  salesKgBody.innerHTML = joinRowsWithDateSeparators(state.salesKg, 11, (row) => {
+    const canEdit =
+      state.user.role === "owner" ||
+      (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
+    const bagsFromKg =
+      row.bags_sold_cumulative != null ? row.bags_sold_cumulative : Number(row.bags_sold || 0);
+    const bagOpenedCell =
+      row.bag_opened_display != null ? row.bag_opened_display : Number(row.bag_opened || 0) > 0 ? 1 : 0;
+    const rem =
+      row.total_kgs_remaining != null
+        ? Number(row.total_kgs_remaining).toFixed(2)
+        : "—";
+    return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${displayBrand(row.brand)}</td>
         <td>${displayFeedType(row.feed_type)}</td>
-        <td>${row.bags_sold || 0}</td>
+        <td title="1 once at least one bag is opened for this product on this date.">${bagOpenedCell}</td>
+        <td title="Kg left from opened bags after this sale (bag size × bags opened − kg sold so far).">${rem}</td>
+        <td title="Full bags represented by total kg sold this day for this product (bag size from catalog).">${bagsFromKg}</td>
         <td>${row.kg_sold}</td>
         <td>${currency(row.price_per_kg)}</td>
         <td>${currency(saleLineTotalKg(row))}</td>
@@ -600,30 +1095,98 @@ function renderSalesKgTable() {
           </div>
         </td>
       </tr>`;
-    })
+  });
+}
+
+function renderRetailPricingTable() {
+  if (!retailPricingBody) return;
+  if (!state.retailFeedPricing.length) {
+    retailPricingBody.innerHTML =
+      '<tr><td colspan="9" class="empty">No retail prices yet. Add a product using the form above.</td></tr>';
+    return;
+  }
+  retailPricingBody.innerHTML = state.retailFeedPricing
+    .map(
+      (row) => `
+      <tr>
+        <td>${row.updated_at ? new Date(row.updated_at).toLocaleString() : "—"}</td>
+        <td>${displayBrand(row.brand)}</td>
+        <td>${displayFeedType(row.feed_type)}</td>
+        <td>${row.bag_size} kg</td>
+        <td>${
+          row.weight_kg != null && row.weight_kg !== "" && Number(row.weight_kg) > 0
+            ? `${Number(row.weight_kg)} kg`
+            : "—"
+        }</td>
+        <td>${currency(row.price_per_kg)}</td>
+        <td>${currency(row.profit_margin_per_kg)}</td>
+        <td>${currency(row.accumulated_profit ?? 0)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-action="edit-retail" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-action="delete-retail" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`
+    )
     .join("");
 }
 
-function renderChickenTable() {
-  if (!state.chickenSales.length) {
-    chickenBody.innerHTML = '<tr><td colspan="8" class="empty">No sales.</td></tr>';
+function renderRetailInventoryTable() {
+  if (!retailInventoryBody) return;
+  if (!state.retailFeedSummary.length) {
+    retailInventoryBody.innerHTML =
+      '<tr><td colspan="8" class="empty">No Sales Per Kg data yet. Employees record sales under Sales Per Kg.</td></tr>';
     return;
   }
-  const canDelete = state.user.role === "owner";
-  const shopDay = state.shopToday || clientShopTodayDMY();
-  chickenBody.innerHTML = state.chickenSales
-    .map((row) => {
-      const canEdit =
-        state.user.role === "owner" ||
-        (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
-      return `
+  retailInventoryBody.innerHTML = joinRowsWithDateSeparators(state.retailFeedSummary, 8, (row) => {
+    return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
-        <td>${row.description}</td>
+        <td>${displayBrand(row.brand)}</td>
+        <td>${displayFeedType(row.feed_type)}</td>
+        <td>${row.bag_size} kg</td>
+        <td>${Number(row.bags_opened || 0)}</td>
+        <td>${Number(row.total_kg_sold || 0)}</td>
+        <td>${Number(row.employee_kg_sold ?? 0)}</td>
+        <td>${Number(row.bags_sold_from_kg || 0)}</td>
+      </tr>`;
+  });
+}
+
+function chickenSalesTableRowsHtml() {
+  const emptyMsg =
+    state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
+  const isEmployeeViewer = state.user.role === "employee";
+  const colSpan = isEmployeeViewer ? 13 : 14;
+  if (!state.chickenSales.length) {
+    return `<tr><td colspan="${colSpan}" class="empty">${emptyMsg}</td></tr>`;
+  }
+  return joinRowsWithDateSeparators(state.chickenSales, colSpan, (row) => {
+    const isOwnerInventoryRow = isChickenRowOwnerInventory(row);
+    let canEdit = false;
+    let canDelete = false;
+    if (isEmployeeViewer) {
+      canEdit = employeeChickenSaleEditable(row);
+      canDelete = false;
+    } else if (state.user.role === "owner") {
+      canEdit = isOwnerInventoryRow;
+      canDelete = isOwnerInventoryRow;
+    }
+    const breedCell = row.breed ? row.breed : "—";
+    const notesCell = row.description ? row.description : "—";
+    const customerCells = chickenSaleCustomerCellsHtml(row);
+    const profitCell = isEmployeeViewer ? "" : `<td>${formatChickenSaleProfitCell(row)}</td>`;
+    return `
+      <tr data-chicken-row-id="${row.id}">
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${breedCell}</td>
+        <td>${notesCell}</td>
         <td>${row.quantity_birds}</td>
-        <td>${row.weight_kg != null ? row.weight_kg : "—"}</td>
         <td>${currency(row.unit_price)}</td>
         <td>${currency(saleLineTotalChicken(row))}</td>
+        ${customerCells}
+        ${profitCell}
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -636,8 +1199,64 @@ function renderChickenTable() {
           </div>
         </td>
       </tr>`;
-    })
-    .join("");
+  });
+}
+
+function renderChickenSalesHistoryTable() {
+  if (!chickenInventoryBody) return;
+  const prevOwnerSel = state.ownerSelectedChickenRowId;
+  chickenInventoryBody.innerHTML = chickenSalesTableRowsHtml();
+  if (state.user.role === "owner" && prevOwnerSel != null) {
+    const selRow = state.chickenSales.find((r) => String(r.id) === String(prevOwnerSel));
+    if (selRow) {
+      fillOwnerCustomerViewPanel(selRow);
+      highlightChickenRowForOwner(selRow.id);
+    } else {
+      state.ownerSelectedChickenRowId = null;
+      clearOwnerCustomerViewPanel();
+      highlightChickenRowForOwner(null);
+    }
+  } else {
+    highlightChickenRowForOwner(null);
+  }
+  const summaryEl = document.getElementById("chickenInventorySummary");
+  if (!summaryEl) return;
+  if (state.user.role !== "owner") {
+    summaryEl.textContent = "";
+    return;
+  }
+  if (!state.chickenSales.length) {
+    summaryEl.textContent = "";
+    return;
+  }
+  let invBirds = 0;
+  let invRevenue = 0;
+  let staffMarginSum = 0;
+  for (const r of state.chickenSales) {
+    const isInv = isChickenRowOwnerInventory(r);
+    if (isInv) {
+      invBirds += Number(r.quantity_birds) || 0;
+      invRevenue += saleLineTotalChicken(r);
+    }
+    const p = chickenSaleLineProfit(r);
+    if (p != null) staffMarginSum += p;
+  }
+  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (matches Profit column for staff rows). Highlight above uses the same staff-only totals.`;
+}
+
+function populateChickenBreedSelect() {
+  const sel = document.getElementById("chBreed");
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Select breed</option>';
+  for (const r of getChickenBreedsRows()) {
+    if (!r.breed) continue;
+    const opt = document.createElement("option");
+    opt.value = r.breed;
+    opt.textContent = r.breed;
+    sel.appendChild(opt);
+  }
+  if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
 }
 
 function resetSalesBagForm() {
@@ -647,6 +1266,11 @@ function resetSalesBagForm() {
   sbFeedType.innerHTML = '<option value="">Select feed type</option>';
   sbFeedType.disabled = true;
   sbBagSize.value = "";
+  const st = document.getElementById("sbSaleType");
+  if (st) {
+    st.innerHTML =
+      '<option value="">Shop sale (normal)</option><option value="Ufaray">By Ufaray</option>';
+  }
   document.getElementById("sbSaveBtn").textContent = "Save sale";
   applyEmployeeSalesDateRules();
   applyEmployeeFeedSalePricingUi();
@@ -661,14 +1285,28 @@ function resetSalesKgForm() {
   document.getElementById("skSaveBtn").textContent = "Save sale";
   applyEmployeeSalesDateRules();
   applyEmployeeFeedSalePricingUi();
+  applyDefaultSkBagOpened();
 }
 
 function resetChickenForm() {
   chickenForm.reset();
   state.editChickenId = null;
   chDateDisplay.value = "";
-  document.getElementById("chSaveBtn").textContent = "Save sale";
+  const chSave = document.getElementById("chSaveBtn");
+  if (chSave) chSave.textContent = state.user?.role === "owner" ? "Save inventory" : "Save sale";
+  populateChickenBreedSelect();
   applyEmployeeSalesDateRules();
+  applyEmployeeFeedSalePricingUi();
+  if (state.user?.role === "owner") applyOwnerChickenPricesFromBreed();
+  const cn = document.getElementById("chCustomerName");
+  const cp = document.getElementById("chCustomerPhone");
+  const mp = document.getElementById("chMoneyPaid");
+  const ps = document.getElementById("chPaymentStatus");
+  if (cn) cn.value = "";
+  if (cp) cp.value = "";
+  if (mp) mp.value = "0";
+  if (ps) ps.value = "pending";
+  updateChickenCustomerAmounts();
 }
 
 function showPage(page) {
@@ -682,10 +1320,28 @@ function showPage(page) {
   const pageEl = document.getElementById(`page-${page}`);
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
-  if (page === "sales-bags" || page === "sales-kg" || page === "chicken") {
+  if (page === "chicken-inventory" && state.user?.role === "employee") {
+    pageHeading.textContent = "Chicken Sales";
+  }
+  if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory") {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
   }
+  if (page === "chicken-inventory") {
+    renderChickenSalesHistoryTable();
+    updateChickenProfitDisplay();
+  }
+  if (page === "sales-kg") applyDefaultSkBagOpened();
+  if (page === "inventory") {
+    renderOwnerPassThroughBagSales();
+  }
+  if (page === "retail-inventory") {
+    renderRetailPricingTable();
+    renderRetailInventoryTable();
+    updateRetailCumulativeProfitDisplay();
+  }
+  updateOwnerCombinedProfitDockVisibility();
+  updateOwnerCombinedProfitDisplay();
 }
 
 function populateForm(row) {
@@ -704,7 +1360,7 @@ function populateForm(row) {
   document.getElementById("buyingPrice").value = row.buying_price;
   document.getElementById("sellingPrice").value = row.selling_price;
   document.getElementById("profitMarginPerBag").value = row.profit_margin_per_bag ?? 0;
-  document.getElementById("accumulatedProfit").value = row.today_profit ?? 0;
+  document.getElementById("accumulatedProfit").value = row.cumulative_bag_profit ?? 0;
   document.getElementById("reorderLevel").value = row.reorder_level;
   document.getElementById("saveBtn").textContent = "Update Record";
 }
@@ -747,11 +1403,13 @@ async function loadAllData() {
     !catalogInitialized ||
     brandSelect.options.length <= 1 ||
     sbBrand.options.length <= 1 ||
-    skBrand.options.length <= 1;
+    skBrand.options.length <= 1 ||
+    (rfBrand && rfBrand.options.length <= 1);
   if (mustFillBrandDropdowns && Object.keys(state.catalog || {}).length > 0) {
     populateBrands();
     populateBrandSelect(sbBrand);
     populateBrandSelect(skBrand);
+    if (rfBrand) populateBrandSelect(rfBrand);
     catalogInitialized = true;
   }
 
@@ -762,14 +1420,21 @@ async function loadAllData() {
           api("/api/sales/bags"),
           api("/api/sales/kg"),
           api("/api/chicken-sales"),
+          api("/api/chicken-breeds"),
+          api("/api/chicken-sales/profit-summary"),
           api("/api/sales/today-profit"),
+          api("/api/retail-feed-summary"),
+          api("/api/retail-feed-pricing"),
+          api("/api/retail/cumulative-kg-profit"),
         ]
       : [
           api("/api/inventory/selling-prices"),
           api("/api/sales/bags"),
           api("/api/sales/kg"),
           api("/api/chicken-sales"),
+          api("/api/chicken-breeds"),
           api("/api/sales/today-profit"),
+          api("/api/retail-feed-pricing"),
         ];
 
   const outcomes = await Promise.allSettled(secondary);
@@ -788,16 +1453,65 @@ async function loadAllData() {
   o += 1;
   state.chickenSales = outcomes[o].status === "fulfilled" ? outcomes[o].value : [];
   o += 1;
+  state.chickenBreeds = outcomes[o].status === "fulfilled" ? outcomes[o].value : [];
+  o += 1;
+  if (!Array.isArray(state.chickenBreeds) || state.chickenBreeds.length === 0) {
+    try {
+      const res = await fetch("/chickenBreeds.json", { cache: "no-store" });
+      if (res.ok) {
+        const names = await res.json();
+        if (Array.isArray(names) && names.length) {
+          const cleaned = names.map((x) => String(x || "").trim()).filter(Boolean);
+          if (cleaned.length) state.chickenBreeds = chickenBreedsRowsFromNames(cleaned);
+        }
+      }
+    } catch (_e) {
+      /* keep empty; getChickenBreedsRows() uses DEFAULT_CHICKEN_BREED_NAMES */
+    }
+  }
+  if (state.user.role === "owner") {
+    const chProf = outcomes[o].status === "fulfilled" ? outcomes[o].value : {};
+    state.chickenProfitSummary = {
+      todayProfit: Number(chProf.todayProfit ?? 0),
+      cumulativeProfit: Number(chProf.cumulativeProfit ?? 0),
+      today: chProf.today || "",
+    };
+    o += 1;
+  } else {
+    state.chickenProfitSummary = { todayProfit: 0, cumulativeProfit: 0, today: "" };
+  }
   const profitPayload =
     outcomes[o].status === "fulfilled" ? outcomes[o].value : { totalProfit: 0, today: "" };
-  state.todayFeedProfit = Number(profitPayload.totalProfit ?? 0);
+  state.cumulativeFeedBagProfit = Number(profitPayload.totalProfit ?? 0);
   state.shopToday = profitPayload.today || "";
+  o += 1;
+  if (state.user.role === "owner") {
+    state.retailFeedSummary = outcomes[o].status === "fulfilled" ? outcomes[o].value : [];
+    o += 1;
+    state.retailFeedPricing = outcomes[o].status === "fulfilled" ? outcomes[o].value : [];
+    o += 1;
+    const retailProfitPayload =
+      outcomes[o].status === "fulfilled" ? outcomes[o].value : { totalProfit: 0 };
+    state.cumulativeRetailKgProfit = Number(retailProfitPayload.totalProfit ?? 0);
+  } else {
+    state.retailFeedSummary = [];
+    state.retailFeedPricing = outcomes[o].status === "fulfilled" ? outcomes[o].value : [];
+    state.cumulativeRetailKgProfit = 0;
+  }
   updateTodayProfitDisplay();
+  updateRetailCumulativeProfitDisplay();
+  updateChickenProfitDisplay();
+  updateOwnerCombinedProfitDisplay();
+  populateChickenBreedSelect();
   renderTable();
+  renderOwnerPassThroughBagSales();
   renderSalesBagsTable();
   renderSalesKgTable();
-  renderChickenTable();
+  renderChickenSalesHistoryTable();
+  renderRetailPricingTable();
+  renderRetailInventoryTable();
   applyEmployeeFeedSalePricingUi();
+  if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
 }
 
 function startAutoRefresh() {
@@ -817,16 +1531,24 @@ function stopAutoRefresh() {
   refreshTimer = null;
 }
 
+showPasswordCheckbox?.addEventListener("change", () => {
+  if (passwordInput) passwordInput.type = showPasswordCheckbox.checked ? "text" : "password";
+});
+
+loginForm?.addEventListener("reset", () => {
+  if (passwordInput) passwordInput.type = "password";
+});
+
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const username = document.getElementById("username").value.trim();
-  const password = document.getElementById("password").value;
+  const password = passwordInput?.value ?? "";
   try {
     const result = await api("/api/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
-    state.token = result.token;
+    state.token = String(result.token || "").trim();
     state.user = result.user;
     persistAuth();
     showLoggedIn();
@@ -951,20 +1673,24 @@ async function boot() {
 
 document.querySelectorAll(".nav-tab").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (state.user.role === "owner" && btn.dataset.page !== "inventory") return;
-    if (state.user.role !== "owner" && btn.dataset.page === "inventory") return;
-    showPage(btn.dataset.page);
+    const page = btn.dataset.page;
+    if (state.user.role === "owner" && !OWNER_INVENTORY_PAGES.has(page) && page !== "chicken-inventory") return;
+    if (state.user.role !== "owner" && OWNER_INVENTORY_PAGES.has(page)) return;
+    showPage(page);
   });
 });
 
 sbBrand.addEventListener("change", () => {
   populateSbFeedTypes(sbBrand.value);
   document.getElementById("sbPricePerBag").value = "";
-  applyEmployeeSalesBagPriceFromInventory();
+  applyEmployeeFeedSalePricingUi();
 });
 sbFeedType.addEventListener("change", () => {
   sbBagSize.value = bagSizeFor(sbBrand.value, sbFeedType.value);
-  applyEmployeeSalesBagPriceFromInventory();
+  applyEmployeeFeedSalePricingUi();
+});
+document.getElementById("sbSaleType")?.addEventListener("change", () => {
+  applyEmployeeFeedSalePricingUi();
 });
 wireDatePicker(sbDateDisplay, sbDate, sbOpenCalendarBtn);
 
@@ -972,34 +1698,47 @@ skBrand.addEventListener("change", () => {
   populateSkFeedTypes(skBrand.value);
   document.getElementById("skPricePerKg").value = "";
   applyEmployeeSalesKgPriceFromInventory();
+  applyDefaultSkBagOpened();
 });
 skFeedType.addEventListener("change", () => {
   applyEmployeeSalesKgPriceFromInventory();
+  applyDefaultSkBagOpened();
 });
+skDateDisplay.addEventListener("input", () => {
+  const t = skDateDisplay.value.trim();
+  if (isValidDMY(t)) applyDefaultSkBagOpened();
+});
+skDate.addEventListener("change", () => applyDefaultSkBagOpened());
 wireDatePicker(skDateDisplay, skDate, skOpenCalendarBtn);
 
 wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
 
+document.getElementById("chBreed")?.addEventListener("change", () => {
+  if (state.user?.role === "employee") {
+    applyEmployeeChickenPriceFromBreeds();
+    updateChickenCustomerAmounts();
+  } else applyOwnerChickenPricesFromBreed();
+});
+
+document.getElementById("chQuantity")?.addEventListener("input", updateChickenCustomerAmounts);
+document.getElementById("chMoneyPaid")?.addEventListener("input", updateChickenCustomerAmounts);
+document.getElementById("chPaymentStatus")?.addEventListener("change", onChickenPaymentStatusChange);
+
+document.getElementById("chBuyingPrice")?.addEventListener("input", () => {
+  syncOwnerChickenMarginFromBuySell();
+});
+
+document.getElementById("chSellingPrice")?.addEventListener("input", () => {
+  syncOwnerChickenMarginFromBuySell();
+});
+
+document.getElementById("chProfitMarginPerChick")?.addEventListener("input", () => {
+  syncOwnerChickenSellFromBuyMargin();
+});
+
 document.getElementById("sbClearBtn").addEventListener("click", resetSalesBagForm);
 document.getElementById("skClearBtn").addEventListener("click", resetSalesKgForm);
 document.getElementById("chClearBtn").addEventListener("click", resetChickenForm);
-
-clearMySalesBtn?.addEventListener("click", async () => {
-  if (!state.user || !state.token) return;
-  if (state.user.role !== "employee") return;
-  if (!window.confirm("Clear sales created by this employee? This will also reverse the stock changes.")) return;
-  const btn = clearMySalesBtn;
-  btn.disabled = true;
-  try {
-    await api("/api/testing/clear-my-sales", { method: "POST" });
-    await loadAllData();
-    applyEmployeeSalesDateRules();
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    btn.disabled = false;
-  }
-});
 
 salesBagsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1008,6 +1747,7 @@ salesBagsForm.addEventListener("submit", async (event) => {
     alert("Date must be in DD/MM/YYYY format.");
     return;
   }
+  const saleTypeVal = String(document.getElementById("sbSaleType")?.value || "").trim();
   const payload = {
     date: dateValue,
     brand: sbBrand.value,
@@ -1015,6 +1755,7 @@ salesBagsForm.addEventListener("submit", async (event) => {
     bag_size: Number(sbBagSize.value || 0),
     bags_sold: Number(document.getElementById("sbBagsSold").value || 0),
     price_per_bag: Number(document.getElementById("sbPricePerBag").value || 0),
+    through_party: saleTypeVal || null,
   };
   const saveBtn = document.getElementById("sbSaveBtn");
   saveBtn.disabled = true;
@@ -1044,7 +1785,7 @@ salesKgForm.addEventListener("submit", async (event) => {
     date: dateValue,
     brand: resolveBrandKey(skBrand.value),
     feed_type: skFeedType.value,
-    bags_sold: Number(document.getElementById("skBagsSold").value || 0),
+    bag_opened: Number(document.getElementById("skBagOpened").value || 0),
     kg_sold: Number(document.getElementById("skKgSold").value || 0),
     price_per_kg: Number(document.getElementById("skPricePerKg").value || 0),
   };
@@ -1053,11 +1794,23 @@ salesKgForm.addEventListener("submit", async (event) => {
   try {
     if (state.editSalesKgId) {
       await api(`/api/sales/kg/${state.editSalesKgId}`, { method: "PUT", body: JSON.stringify(payload) });
+      resetSalesKgForm();
+      await loadAllData();
     } else {
-      await api("/api/sales/kg", { method: "POST", body: JSON.stringify(payload) });
+      const result = await api("/api/sales/kg", { method: "POST", body: JSON.stringify(payload) });
+      await loadAllData();
+      if (state.user.role === "employee" && result.merged) {
+        skDateDisplay.value = dateValue;
+        skDate.value = toIsoDate(dateValue);
+        document.getElementById("skKgSold").value = "";
+        applyDefaultSkBagOpened();
+        applyEmployeeFeedSalePricingUi();
+        state.editSalesKgId = null;
+        document.getElementById("skSaveBtn").textContent = "Save sale";
+      } else {
+        resetSalesKgForm();
+      }
     }
-    resetSalesKgForm();
-    await loadAllData();
   } catch (error) {
     alert(error.message);
   } finally {
@@ -1072,14 +1825,66 @@ chickenForm.addEventListener("submit", async (event) => {
     alert("Date must be in DD/MM/YYYY format.");
     return;
   }
-  const w = document.getElementById("chWeightKg").value;
+  const qty = Number(document.getElementById("chQuantity").value || 0);
+  if (!Number.isFinite(qty) || qty < 50) {
+    alert("Quantity must be at least 50 chicks.");
+    return;
+  }
+  const breed = document.getElementById("chBreed").value.trim();
+  if (!breed) {
+    alert("Select a breed.");
+    return;
+  }
   const payload = {
     date: dateValue,
+    breed,
     description: document.getElementById("chDescription").value.trim(),
-    quantity_birds: Number(document.getElementById("chQuantity").value || 0),
-    weight_kg: w === "" ? null : Number(w),
-    unit_price: Number(document.getElementById("chUnitPrice").value || 0),
+    quantity_birds: qty,
+    weight_kg: null,
   };
+  const PRICE_MATCH_CH = 0.015;
+  if (state.user.role === "owner") {
+    const buy = Number(document.getElementById("chBuyingPrice")?.value);
+    const sell = Number(document.getElementById("chSellingPrice")?.value);
+    const pm = Number(document.getElementById("chProfitMarginPerChick")?.value);
+    if (!Number.isFinite(buy) || !Number.isFinite(sell) || buy < 0 || sell < 0) {
+      alert("Enter buying and selling price per chick.");
+      return;
+    }
+    if (!Number.isFinite(pm) || pm < 0) {
+      alert("Enter profit margin per chick.");
+      return;
+    }
+    if (Math.abs(pm - (sell - buy)) > PRICE_MATCH_CH) {
+      alert("Profit margin must equal selling price minus buying price.");
+      return;
+    }
+    payload.buying_price = buy;
+    payload.selling_price = sell;
+    payload.profit_margin_per_chick = pm;
+    payload.unit_price = sell;
+  } else {
+    const unitPriceNum = Number(document.getElementById("chUnitPrice")?.value || 0);
+    if (!Number.isFinite(unitPriceNum) || unitPriceNum < 0) {
+      alert("Price per chick is required.");
+      return;
+    }
+    payload.unit_price = unitPriceNum;
+  }
+  if (state.user.role === "employee") {
+    const unitForLine = Number(payload.unit_price);
+    const lineTotal = qty * unitForLine;
+    const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
+    const payStatus = document.getElementById("chPaymentStatus")?.value === "cleared" ? "cleared" : "pending";
+    if (payStatus === "cleared" && moneyPaid + 0.005 < lineTotal) {
+      alert("When Payments is Cleared, money paid must cover the sale total.");
+      return;
+    }
+    payload.customer_name = document.getElementById("chCustomerName")?.value.trim() ?? "";
+    payload.customer_phone = document.getElementById("chCustomerPhone")?.value.trim() ?? "";
+    payload.money_paid = Number.isFinite(moneyPaid) && moneyPaid >= 0 ? moneyPaid : 0;
+    payload.payment_status = payStatus;
+  }
   const saveBtn = document.getElementById("chSaveBtn");
   saveBtn.disabled = true;
   try {
@@ -1114,8 +1919,19 @@ salesBagsBody.addEventListener("click", async (event) => {
     sbFeedType.value = row.feed_type;
     sbBagSize.value = row.bag_size;
     document.getElementById("sbBagsSold").value = row.bags_sold;
-    if (state.user.role === "employee") applyEmployeeSalesBagPriceFromInventory();
-    else document.getElementById("sbPricePerBag").value = row.price_per_bag;
+    const st = document.getElementById("sbSaleType");
+    const tp = String(row.through_party || "").trim();
+    if (st) {
+      if (tp && !Array.from(st.options).some((o) => o.value === tp)) {
+        const o = document.createElement("option");
+        o.value = tp;
+        o.textContent = `By ${tp}`;
+        st.appendChild(o);
+      }
+      st.value = tp || "";
+    }
+    applyEmployeeFeedSalePricingUi();
+    document.getElementById("sbPricePerBag").value = row.price_per_bag;
     document.getElementById("sbSaveBtn").textContent = "Update sale";
     return;
   }
@@ -1145,7 +1961,7 @@ salesKgBody.addEventListener("click", async (event) => {
     skBrand.value = row.brand;
     populateSkFeedTypes(row.brand);
     skFeedType.value = row.feed_type;
-    document.getElementById("skBagsSold").value = row.bags_sold || 0;
+    document.getElementById("skBagOpened").value = row.bag_opened != null ? row.bag_opened : 0;
     document.getElementById("skKgSold").value = row.kg_sold;
     if (state.user.role === "employee") applyEmployeeSalesKgPriceFromInventory();
     else document.getElementById("skPricePerKg").value = row.price_per_kg;
@@ -1163,29 +1979,202 @@ salesKgBody.addEventListener("click", async (event) => {
   }
 });
 
-chickenBody.addEventListener("click", async (event) => {
+function wireChickenTableClicks(tbody) {
+  if (!tbody) return;
+  tbody.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (state.user.role === "owner" && !target.closest("button")) {
+      const tr = target.closest("tr[data-chicken-row-id]");
+      if (tr) {
+        const rid = tr.dataset.chickenRowId;
+        const row = state.chickenSales.find((r) => String(r.id) === String(rid));
+        if (row) {
+          fillOwnerCustomerViewPanel(row);
+          highlightChickenRowForOwner(row.id);
+        }
+      }
+    }
+    const id = target.dataset.id;
+    const action = target.dataset.action;
+    if (!id || !action || target.dataset.kind !== "chicken") return;
+    const row = state.chickenSales.find((r) => String(r.id) === String(id));
+    if (!row) return;
+    if (action === "edit") {
+      if (state.user.role === "owner") {
+        clearOwnerCustomerViewPanel();
+        highlightChickenRowForOwner(null);
+      }
+      if (state.user.role === "employee") {
+        if (!employeeChickenSaleEditable(row)) {
+          alert(
+            "This sale can no longer be edited (more than 1 hour after it was recorded). Lines with an unpaid balance stay editable until payment is complete."
+          );
+          return;
+        }
+      } else if (state.user.role === "owner" && !isChickenRowOwnerInventory(row)) {
+        alert("Only your own inventory rows can be edited here.");
+        return;
+      }
+      showPage("chicken-inventory");
+      state.editChickenId = row.id;
+      chDate.value = toIsoDate(row.date);
+      chDateDisplay.value = formatDateDMY(row.date);
+      populateChickenBreedSelect();
+      const br = document.getElementById("chBreed");
+      if (br && row.breed) br.value = row.breed;
+      document.getElementById("chDescription").value = row.description || "";
+      document.getElementById("chQuantity").value = row.quantity_birds;
+      if (state.user.role === "owner") {
+        const sell = Number(row.unit_price);
+        const m =
+          row.margin_snap != null && row.margin_snap !== "" ? Number(row.margin_snap) : null;
+        const chBuy = document.getElementById("chBuyingPrice");
+        const chSell = document.getElementById("chSellingPrice");
+        const chPm = document.getElementById("chProfitMarginPerChick");
+        if (chBuy && chSell && chPm && Number.isFinite(sell) && m != null && Number.isFinite(m) && m > 0) {
+          chSell.value = String(sell);
+          chBuy.value = String(sell - m);
+          chPm.value = String(m);
+        } else {
+          applyOwnerChickenPricesFromBreed();
+        }
+      } else {
+        const unitEl = document.getElementById("chUnitPrice");
+        if (unitEl) unitEl.value = row.unit_price;
+        const cn = document.getElementById("chCustomerName");
+        const cp = document.getElementById("chCustomerPhone");
+        const mp = document.getElementById("chMoneyPaid");
+        const ps = document.getElementById("chPaymentStatus");
+        if (cn) cn.value = row.customer_name || "";
+        if (cp) cp.value = row.customer_phone || "";
+        if (mp) mp.value = row.money_paid != null && row.money_paid !== "" ? String(row.money_paid) : "0";
+        if (ps) ps.value = String(row.payment_status || "pending").toLowerCase() === "cleared" ? "cleared" : "pending";
+        updateChickenCustomerAmounts();
+      }
+      document.getElementById("chSaveBtn").textContent =
+        state.user.role === "owner" ? "Update inventory" : "Update sale";
+      applyEmployeeSalesDateRules();
+      applyEmployeeFeedSalePricingUi();
+      return;
+    }
+    if (action === "delete") {
+      if (state.user.role !== "owner" || !isChickenRowOwnerInventory(row)) return;
+      if (!window.confirm("Delete this inventory record?")) return;
+      try {
+        await api(`/api/chicken-sales/${id}`, { method: "DELETE" });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  });
+}
+
+wireChickenTableClicks(chickenInventoryBody);
+
+function resetRetailFeedForm() {
+  if (!retailFeedForm) return;
+  state.editRetailFeedId = null;
+  retailFeedForm.reset();
+  if (rfFeedType) {
+    rfFeedType.innerHTML = '<option value="">Select feed type</option>';
+    rfFeedType.disabled = true;
+  }
+  const acc = document.getElementById("rfAccumulatedProfit");
+  if (acc) acc.value = "0";
+  const wEl = document.getElementById("rfWeightKg");
+  if (wEl) wEl.value = "";
+  updateRfWeightFieldVisibility();
+  const saveBtn = document.getElementById("rfSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save retail line";
+}
+
+function populateRetailFeedForm(row) {
+  state.editRetailFeedId = row.id;
+  const brandKey = resolveBrandKey(row.brand);
+  if (rfBrand) rfBrand.value = brandKey;
+  populateRfFeedTypes(brandKey);
+  if (rfFeedType) rfFeedType.value = feedTypeCatalogValue(brandKey, row.feed_type);
+  document.getElementById("rfPricePerKg").value = row.price_per_kg;
+  document.getElementById("rfMarginPerKg").value = row.profit_margin_per_kg;
+  document.getElementById("rfAccumulatedProfit").value = row.accumulated_profit ?? 0;
+  const wEl = document.getElementById("rfWeightKg");
+  if (wEl) {
+    const w = row.weight_kg;
+    wEl.value = w != null && w !== "" && Number(w) > 0 ? String(w) : "";
+  }
+  updateRfWeightFieldVisibility();
+  document.getElementById("rfSaveBtn").textContent = "Update retail line";
+}
+
+rfBrand?.addEventListener("change", () => {
+  populateRfFeedTypes(rfBrand.value);
+  updateRfWeightFieldVisibility();
+});
+
+rfFeedType?.addEventListener("change", () => {
+  updateRfWeightFieldVisibility();
+});
+
+retailFeedForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!rfBrand || !rfFeedType) return;
+  const payload = {
+    brand: resolveBrandKey(rfBrand.value),
+    feed_type: rfFeedType.value,
+    price_per_kg: Number(document.getElementById("rfPricePerKg").value || 0),
+    profit_margin_per_kg: Number(document.getElementById("rfMarginPerKg").value || 0),
+  };
+  const wRaw = document.getElementById("rfWeightKg")?.value?.trim() ?? "";
+  if (isOwnerWeightRetailLine(rfBrand.value, rfFeedType.value)) {
+    payload.weight_kg = wRaw === "" ? null : Number(wRaw);
+  } else {
+    const prev = state.editRetailFeedId
+      ? state.retailFeedPricing.find((r) => Number(r.id) === Number(state.editRetailFeedId))
+      : null;
+    const pw = prev?.weight_kg;
+    payload.weight_kg = pw != null && pw !== "" && Number(pw) > 0 ? Number(pw) : null;
+  }
+  const saveBtn = document.getElementById("rfSaveBtn");
+  saveBtn.disabled = true;
+  try {
+    if (state.editRetailFeedId) {
+      await api(`/api/retail-feed-pricing/${state.editRetailFeedId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api("/api/retail-feed-pricing", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetRetailFeedForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    saveBtn.disabled = false;
+  }
+});
+
+document.getElementById("rfClearBtn")?.addEventListener("click", () => resetRetailFeedForm());
+
+retailPricingBody?.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
   const id = target.dataset.id;
   const action = target.dataset.action;
-  if (!id || !action || target.dataset.kind !== "chicken") return;
-  const row = state.chickenSales.find((r) => String(r.id) === String(id));
+  if (!id || !action) return;
+  const row = state.retailFeedPricing.find((r) => String(r.id) === String(id));
   if (!row) return;
-  if (action === "edit") {
-    state.editChickenId = row.id;
-    chDate.value = toIsoDate(row.date);
-    chDateDisplay.value = formatDateDMY(row.date);
-    document.getElementById("chDescription").value = row.description;
-    document.getElementById("chQuantity").value = row.quantity_birds;
-    document.getElementById("chWeightKg").value = row.weight_kg != null ? row.weight_kg : "";
-    document.getElementById("chUnitPrice").value = row.unit_price;
-    document.getElementById("chSaveBtn").textContent = "Update sale";
+  if (action === "edit-retail") {
+    populateRetailFeedForm(row);
     return;
   }
-  if (action === "delete") {
-    if (!window.confirm("Delete this sale?")) return;
+  if (action === "delete-retail") {
+    if (!window.confirm("Delete this retail price line? Employees will use Feed Inventory per-kg pricing for this product.")) return;
     try {
-      await api(`/api/chicken-sales/${id}`, { method: "DELETE" });
+      await api(`/api/retail-feed-pricing/${id}`, { method: "DELETE" });
+      resetRetailFeedForm();
       await loadAllData();
     } catch (error) {
       alert(error.message);

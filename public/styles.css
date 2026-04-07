@@ -57,6 +57,28 @@ body {
   color: #333;
 }
 
+/** In-page title on Chicken Sales Inventory (above the record form). */
+.chicken-inventory-main-title {
+  margin: 0 0 14px;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #0f5132;
+  letter-spacing: 0.02em;
+}
+
+.chicken-inventory-main-title + .card-title {
+  margin-top: 0;
+}
+
+.chicken-form-breed-prices {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+}
+
+.chicken-form-breed-prices .grid {
+  margin-bottom: 0;
+}
+
 .field-hint {
   font-size: 12px;
   color: #6c757d;
@@ -75,6 +97,11 @@ body {
   border-left-width: 6px;
   background: linear-gradient(160deg, #d1e7dd 0%, #f8fff9 45%, #fff 100%);
   box-shadow: 0 2px 8px rgba(15, 81, 50, 0.12);
+}
+
+.profit-highlight-above-table.profit-below-form {
+  margin-top: 1rem;
+  margin-bottom: 0;
 }
 
 .profit-highlight-inner {
@@ -113,6 +140,18 @@ body {
   padding: 4px 0;
 }
 
+.profit-highlight-amount-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.profit-highlight-today {
+  font-size: 13px;
+  color: #344;
+}
+
 .profit-highlight-example {
   margin: 10px 0 0;
   padding-top: 8px;
@@ -131,6 +170,26 @@ input[readonly] {
   background: #eef2f5;
 }
 
+.chicken-customer-fieldset {
+  margin-top: 1rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.chicken-customer-legend {
+  font-weight: 600;
+  padding: 0 0.35rem;
+}
+
+.chicken-owner-customer-panel {
+  margin-bottom: 1rem;
+}
+
+#chicken-inventory-body tr[data-chicken-row-id].chicken-row-selected td {
+  box-shadow: inset 0 0 0 2px #0f5132;
+}
+
 h1 {
   color: #0f5132;
   margin-bottom: 8px;
@@ -146,6 +205,38 @@ h1 {
 
 .auth-card {
   max-width: 420px;
+}
+
+.login-password-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-password-block > label[for="password"] {
+  font-size: 14px;
+}
+
+.show-password-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 13px;
+  color: #3d4f5c;
+}
+
+.show-password-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.show-password-row label {
+  display: inline;
+  font-weight: normal;
+  cursor: pointer;
+  margin: 0;
 }
 
 label {
@@ -279,6 +370,29 @@ th {
   background: #edf3ee;
 }
 
+/**
+ * Zebra striping: light blue / white for all data tables (owner + employee).
+ * `of :not(.table-date-separator)` keeps alternation correct when a maroon date stripe sits between rows.
+ */
+tbody tr:nth-child(odd of :not(.table-date-separator)) {
+  background-color: #e8f4fc;
+}
+
+tbody tr:nth-child(even of :not(.table-date-separator)) {
+  background-color: #ffffff;
+}
+
+/** Full-width dark maroon stripe when consecutive dated rows are on different calendar days (all sales/inventory tables). */
+tr.table-date-separator td {
+  height: 12px;
+  padding: 0;
+  line-height: 0;
+  font-size: 0;
+  border: none;
+  background: #bd4b58;
+  box-shadow: inset 0 0 0 1px rgba(55, 22, 28, 0.35);
+}
+
 .row-actions {
   display: flex;
   gap: 6px;
@@ -292,6 +406,45 @@ th {
 .status-ok {
   color: #198754;
   font-weight: 700;
+}
+
+/** Owner: combined accumulated profits on Feed / Retail / Chicken inventory pages. */
+.owner-combined-profit-dock {
+  margin-top: 1.25rem;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: linear-gradient(132deg, #2196f3 0%, #1e88e5 45%, #42a5f5 100%);
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(30, 136, 229, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.owner-combined-profit-dock-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+}
+
+.owner-combined-profit-dock-label {
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+}
+
+.owner-combined-profit-dock .js-owner-combined-profit-total {
+  font-size: 1.45rem;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgba(146, 126, 126, 0.12);
+}
+
+.owner-combined-profit-dock-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  opacity: 0.93;
+  line-height: 1.45;
 }
 
 .empty {

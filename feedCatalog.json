@@ -40,6 +40,21 @@
   "Dola Feeds": [
     { "type": "Starter bags", "bagSize": 50 },
     { "type": "Finisher bags", "bagSize": 50 },
-    { "type": "Layers bag", "bagSize": 20 }
+    { "type": "Layers bag", "bagSize": 20 },
+    { "type": "Kienyeji Pellets (50kgs)", "bagSize": 50 }
+  ],
+  "Wheat": [
+    { "type": "Bran", "bagSize": 45 },
+    { "type": "Pollard", "bagSize": 50 }
+  ],
+  "Broken": [
+    { "type": "Wheat", "bagSize": 50 }
+  ],
+  "Maize": [
+    { "type": "Germ (Wishwa)", "bagSize": 50 }
+  ],
+  "Faida Feeds": [
+    { "type": "Starter", "bagSize": 50 },
+    { "type": "Finisher", "bagSize": 50 }
   ]
 }
