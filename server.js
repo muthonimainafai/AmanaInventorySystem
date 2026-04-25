@@ -56,6 +56,44 @@ function ensureDb() {
 /** Brand / feed types / bag sizes — single source (original Amana Kuku Feeds specification). */
 const feedCatalog = require("./feedCatalog.json");
 
+const FEEDERS_DRINKERS_CATALOG = [
+  { name: "Drinker 10L", item_type: "drinker", capacity_liters: 10 },
+  { name: "Drinker 5L", item_type: "drinker", capacity_liters: 5 },
+  { name: "Drinker 3L", item_type: "drinker", capacity_liters: 3 },
+  { name: "Drinker 1L", item_type: "drinker", capacity_liters: 1 },
+  { name: "Drinker 0.75L", item_type: "drinker", capacity_liters: 0.75 },
+  { name: "Feeder trough (Metal)", item_type: "feeder", capacity_liters: null },
+  { name: "Feeder round big (Metal)", item_type: "feeder", capacity_liters: null },
+  { name: "Feeder round small (Metal)", item_type: "feeder", capacity_liters: null },
+  { name: "Feeder round big (Plastic)", item_type: "feeder", capacity_liters: null },
+  { name: "Feeding trough (Plastic)", item_type: "feeder", capacity_liters: null },
+];
+
+const MEDICAMENTS_CATALOG = [
+  "Chick start 100g",
+  "Chick start 500g",
+  "Chick start 1kg",
+  "Booster 100g",
+  "Booster 500g",
+  "Booster 1kg",
+  "Paraffin 100ml",
+  "Paraffin 250ml",
+];
+
+function normalizeInventoryItemName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function resolveFeederDrinkerItem(name) {
+  const n = normalizeInventoryItemName(name);
+  return FEEDERS_DRINKERS_CATALOG.find((i) => normalizeInventoryItemName(i.name) === n) || null;
+}
+
+function resolveMedicamentItem(name) {
+  const n = normalizeInventoryItemName(name);
+  return MEDICAMENTS_CATALOG.find((i) => normalizeInventoryItemName(i) === n) || null;
+}
+
 /** Day-old chick brands — buying/selling per chick and margins are tracked in `chicken_breeds`. Override via `public/chickenBreeds.json` (array of strings). */
 function loadChickenBreedsList() {
   const defaultBreeds = ["Irvines", "Supreme", "Isinya", "Silverland", "Kenchick", "Jumbo", "Suguna"];
@@ -295,6 +333,80 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS app_meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS feeders_drinkers_inventory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      item_type TEXT NOT NULL CHECK(item_type IN ('feeder','drinker')),
+      capacity_liters REAL,
+      quantity_in_stock INTEGER NOT NULL,
+      accumulated_stock INTEGER NOT NULL DEFAULT 0,
+      buying_price REAL NOT NULL,
+      selling_price REAL NOT NULL,
+      profit_margin REAL NOT NULL DEFAULT 0,
+      accumulated_profit REAL NOT NULL DEFAULT 0,
+      reorder_level INTEGER NOT NULL,
+      created_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS medicaments_inventory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      quantity_in_stock INTEGER NOT NULL,
+      accumulated_stock INTEGER NOT NULL DEFAULT 0,
+      buying_price REAL NOT NULL,
+      selling_price REAL NOT NULL,
+      profit_margin REAL NOT NULL DEFAULT 0,
+      accumulated_profit REAL NOT NULL DEFAULT 0,
+      reorder_level INTEGER NOT NULL,
+      created_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await run("ALTER TABLE feeders_drinkers_inventory ADD COLUMN profit_margin REAL NOT NULL DEFAULT 0").catch(() => {});
+  await run("ALTER TABLE feeders_drinkers_inventory ADD COLUMN accumulated_stock INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  await run("ALTER TABLE feeders_drinkers_inventory ADD COLUMN accumulated_profit REAL NOT NULL DEFAULT 0").catch(() => {});
+  await run("ALTER TABLE medicaments_inventory ADD COLUMN profit_margin REAL NOT NULL DEFAULT 0").catch(() => {});
+  await run("ALTER TABLE medicaments_inventory ADD COLUMN accumulated_stock INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  await run("ALTER TABLE medicaments_inventory ADD COLUMN accumulated_profit REAL NOT NULL DEFAULT 0").catch(() => {});
+  await run(
+    "UPDATE feeders_drinkers_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
+  ).catch(() => {});
+  await run(
+    "UPDATE medicaments_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
+  ).catch(() => {});
+  await run(`
+    CREATE TABLE IF NOT EXISTS feeders_drinkers_sales (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      quantity_sold INTEGER NOT NULL,
+      price_per_item REAL NOT NULL,
+      total_amount REAL NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS medicaments_sales (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      quantity_sold INTEGER NOT NULL,
+      price_per_item REAL NOT NULL,
+      total_amount REAL NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     )
   `);
 
@@ -1303,6 +1415,578 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
 
 app.delete("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
   await run("DELETE FROM inventory WHERE id = ?", [Number(req.params.id)]);
+  res.json({ ok: true });
+});
+
+app.get("/api/feeders-drinkers/catalog", auth, allowRoles("owner", "employee"), (_req, res) => {
+  res.json(FEEDERS_DRINKERS_CATALOG);
+});
+
+app.get("/api/feeders-drinkers", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  const rows = await all("SELECT * FROM feeders_drinkers_inventory ORDER BY id DESC");
+  res.json(rows);
+});
+
+async function getFeedersDrinkersRowsForItem(itemName) {
+  return await all("SELECT * FROM feeders_drinkers_inventory WHERE item_name = ? ORDER BY id ASC", [itemName]);
+}
+
+async function getFeedersDrinkersCurrentLine(itemName) {
+  const rows = await all("SELECT * FROM feeders_drinkers_inventory WHERE item_name = ? ORDER BY id DESC", [itemName]);
+  return rows.length ? rows[0] : null;
+}
+
+async function adjustFeedersDrinkersStock(itemName, deltaQty, recordProfit = true) {
+  const rows = await getFeedersDrinkersRowsForItem(itemName);
+  if (!rows.length) throw new Error("No stock record found for this item.");
+  const delta = Number(deltaQty);
+  if (!Number.isFinite(delta)) throw new Error("Invalid quantity.");
+  const nowIso = new Date().toISOString();
+  if (delta >= 0) {
+    const target = rows[rows.length - 1];
+    const nextQty = Number(target.quantity_in_stock || 0) + delta;
+    const margin = Number(target.profit_margin || 0);
+    const profitDelta = recordProfit ? -delta * margin : 0;
+    const nextAccumulatedProfit = Number(target.accumulated_profit || 0) + profitDelta;
+    await run("UPDATE feeders_drinkers_inventory SET quantity_in_stock = ?, accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      nextQty,
+      nextAccumulatedProfit,
+      nowIso,
+      target.id,
+    ]);
+    return;
+  }
+  let remaining = -delta;
+  const available = rows.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0);
+  if (available < remaining) throw new Error("Not enough stock for this sale.");
+  for (const row of rows) {
+    if (remaining <= 0) break;
+    const q = Number(row.quantity_in_stock || 0);
+    if (q <= 0) continue;
+    const take = Math.min(q, remaining);
+    const margin = Number(row.profit_margin || 0);
+    const profitDelta = recordProfit ? take * margin : 0;
+    const nextAccumulatedProfit = Number(row.accumulated_profit || 0) + profitDelta;
+    await run("UPDATE feeders_drinkers_inventory SET quantity_in_stock = ?, accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      q - take,
+      nextAccumulatedProfit,
+      nowIso,
+      row.id,
+    ]);
+    remaining -= take;
+  }
+}
+
+app.get("/api/feeders-drinkers/employee-items", auth, allowRoles("employee"), async (_req, res) => {
+  const rows = await all(
+    `SELECT item_name, item_type, capacity_liters, COALESCE(SUM(quantity_in_stock), 0) AS quantity_in_stock
+     FROM feeders_drinkers_inventory
+     GROUP BY item_name, item_type, capacity_liters
+     HAVING COALESCE(SUM(quantity_in_stock), 0) > 0
+     ORDER BY item_name ASC`
+  );
+  res.json(rows);
+});
+
+app.get("/api/feeders-drinkers/sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (req.user.role === "owner") {
+    const rows = await all("SELECT * FROM feeders_drinkers_sales ORDER BY id DESC");
+    return res.json(rows);
+  }
+  const rows = await all("SELECT * FROM feeders_drinkers_sales WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  return res.json(rows);
+});
+
+app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  const item = resolveFeederDrinkerItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
+  const qty = Number(p.quantity_sold);
+  if (!Number.isFinite(qty) || qty < 1) {
+    return res.status(400).json({ error: "Quantity sold must be at least 1." });
+  }
+  const line = await getFeedersDrinkersCurrentLine(item.name);
+  if (!line) {
+    return res.status(400).json({ error: "No inventory record found for this item." });
+  }
+  const price = Number(line.selling_price);
+  if (!Number.isFinite(price) || price < 0) {
+    return res.status(400).json({ error: "Selling price is not set for this item." });
+  }
+  try {
+    await adjustFeedersDrinkersStock(item.name, -Math.floor(qty));
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "Could not process sale." });
+  }
+  const nowIso = new Date().toISOString();
+  const quantitySold = Math.floor(qty);
+  const total = quantitySold * price;
+  await run(
+    `INSERT INTO feeders_drinkers_sales
+    (date, item_name, quantity_sold, price_per_item, total_amount, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, item.name, quantitySold, price, total, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  const item = resolveFeederDrinkerItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
+  const qty = Math.floor(Number(p.quantity_sold));
+  if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
+  const invLine = await getFeedersDrinkersCurrentLine(item.name);
+  if (!invLine) return res.status(400).json({ error: "No inventory record found for this item." });
+  const price = Number(invLine.selling_price);
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this item." });
+  try {
+    await run("BEGIN TRANSACTION");
+    await adjustFeedersDrinkersStock(current.item_name, Number(current.quantity_sold));
+    await adjustFeedersDrinkersStock(item.name, -qty);
+    await run(
+      `UPDATE feeders_drinkers_sales
+       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, updated_at = ?
+       WHERE id = ?`,
+      [dateCanon, item.name, qty, price, qty * price, new Date().toISOString(), id]
+    );
+    await run("COMMIT");
+  } catch (err) {
+    try { await run("ROLLBACK"); } catch (_e) {}
+    return res.status(400).json({ error: err.message || "Could not update sale." });
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  try {
+    await adjustFeedersDrinkersStock(current.item_name, Number(current.quantity_sold));
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "Could not delete sale." });
+  }
+  await run("DELETE FROM feeders_drinkers_sales WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/feeders-drinkers", auth, allowRoles("owner"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const item = resolveFeederDrinkerItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
+  const quantity = Number(p.quantity_in_stock);
+  const buying = Number(p.buying_price);
+  const selling = Number(p.selling_price);
+  const margin = Number(p.profit_margin);
+  const reorder = Number(p.reorder_level);
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Quantity in stock must be zero or greater." });
+  }
+  if (!Number.isFinite(buying) || buying < 0 || !Number.isFinite(selling) || selling < 0) {
+    return res.status(400).json({ error: "Buying and selling price must be valid non-negative numbers." });
+  }
+  if (!Number.isFinite(reorder) || reorder < 0) {
+    return res.status(400).json({ error: "Reorder level must be zero or greater." });
+  }
+  if (!Number.isFinite(margin) || margin < 0) {
+    return res.status(400).json({ error: "Profit margin must be zero or greater." });
+  }
+  const qtyAdd = Math.floor(quantity);
+  const existing = await get("SELECT * FROM feeders_drinkers_inventory WHERE item_name = ? ORDER BY id DESC LIMIT 1", [item.name]);
+  if (existing) {
+    await run(
+      `UPDATE feeders_drinkers_inventory SET
+       date = ?, item_type = ?, capacity_liters = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        dateCanon,
+        item.item_type,
+        item.capacity_liters,
+        Number(existing.quantity_in_stock || 0) + qtyAdd,
+        Number(existing.accumulated_stock || 0) + qtyAdd,
+        buying,
+        selling,
+        margin,
+        Math.floor(reorder),
+        new Date().toISOString(),
+        existing.id,
+      ]
+    );
+  } else {
+    await run(
+      `INSERT INTO feeders_drinkers_inventory
+      (date, item_name, item_type, capacity_liters, quantity_in_stock, accumulated_stock, buying_price, selling_price, profit_margin, accumulated_profit, reorder_level, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      [
+        dateCanon,
+        item.name,
+        item.item_type,
+        item.capacity_liters,
+        qtyAdd,
+        qtyAdd,
+        buying,
+        selling,
+        margin,
+        Math.floor(reorder),
+        req.user.username,
+        new Date().toISOString(),
+      ]
+    );
+  }
+  res.json({ ok: true });
+});
+
+app.put("/api/feeders-drinkers/:id", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "Invalid inventory id." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const item = resolveFeederDrinkerItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
+  const quantity = Number(p.quantity_in_stock);
+  const buying = Number(p.buying_price);
+  const selling = Number(p.selling_price);
+  const margin = Number(p.profit_margin);
+  const reorder = Number(p.reorder_level);
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Quantity in stock must be zero or greater." });
+  }
+  if (!Number.isFinite(buying) || buying < 0 || !Number.isFinite(selling) || selling < 0) {
+    return res.status(400).json({ error: "Buying and selling price must be valid non-negative numbers." });
+  }
+  if (!Number.isFinite(reorder) || reorder < 0) {
+    return res.status(400).json({ error: "Reorder level must be zero or greater." });
+  }
+  if (!Number.isFinite(margin) || margin < 0) {
+    return res.status(400).json({ error: "Profit margin must be zero or greater." });
+  }
+  const existing = await get(
+    "SELECT quantity_in_stock, COALESCE(accumulated_stock, 0) AS accumulated_stock FROM feeders_drinkers_inventory WHERE id = ?",
+    [id]
+  );
+  if (!existing) return res.status(404).json({ error: "Inventory record not found." });
+  const nextQty = Math.floor(quantity);
+  const oldQty = Number(existing.quantity_in_stock || 0);
+  const addOnly = Math.max(0, nextQty - oldQty);
+  const nextAccumulated = Number(existing.accumulated_stock || 0) + addOnly;
+  const result = await run(
+    `UPDATE feeders_drinkers_inventory SET
+      date = ?, item_name = ?, item_type = ?, capacity_liters = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      dateCanon,
+      item.name,
+      item.item_type,
+      item.capacity_liters,
+      nextQty,
+      nextAccumulated,
+      buying,
+      selling,
+      margin,
+      Math.floor(reorder),
+      new Date().toISOString(),
+      id,
+    ]
+  );
+  if (result.changes === 0) return res.status(404).json({ error: "Inventory record not found." });
+  res.json({ ok: true });
+});
+
+app.delete("/api/feeders-drinkers/:id", auth, allowRoles("owner"), async (req, res) => {
+  const result = await run("DELETE FROM feeders_drinkers_inventory WHERE id = ?", [Number(req.params.id)]);
+  if (result.changes === 0) return res.status(404).json({ error: "Inventory record not found." });
+  res.json({ ok: true });
+});
+
+app.get("/api/medicaments/catalog", auth, allowRoles("owner", "employee"), (_req, res) => {
+  res.json(MEDICAMENTS_CATALOG);
+});
+
+app.get("/api/medicaments", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  const rows = await all("SELECT * FROM medicaments_inventory ORDER BY id DESC");
+  res.json(rows);
+});
+
+async function getMedicamentsRowsForItem(itemName) {
+  return await all("SELECT * FROM medicaments_inventory WHERE item_name = ? ORDER BY id ASC", [itemName]);
+}
+
+async function getMedicamentsCurrentLine(itemName) {
+  const rows = await all("SELECT * FROM medicaments_inventory WHERE item_name = ? ORDER BY id DESC", [itemName]);
+  return rows.length ? rows[0] : null;
+}
+
+async function adjustMedicamentsStock(itemName, deltaQty, recordProfit = true) {
+  const rows = await getMedicamentsRowsForItem(itemName);
+  if (!rows.length) throw new Error("No stock record found for this item.");
+  const delta = Number(deltaQty);
+  if (!Number.isFinite(delta)) throw new Error("Invalid quantity.");
+  const nowIso = new Date().toISOString();
+  if (delta >= 0) {
+    const target = rows[rows.length - 1];
+    const nextQty = Number(target.quantity_in_stock || 0) + delta;
+    const margin = Number(target.profit_margin || 0);
+    const profitDelta = recordProfit ? -delta * margin : 0;
+    const nextAccumulatedProfit = Number(target.accumulated_profit || 0) + profitDelta;
+    await run("UPDATE medicaments_inventory SET quantity_in_stock = ?, accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      nextQty,
+      nextAccumulatedProfit,
+      nowIso,
+      target.id,
+    ]);
+    return;
+  }
+  let remaining = -delta;
+  const available = rows.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0);
+  if (available < remaining) throw new Error("Not enough stock for this sale.");
+  for (const row of rows) {
+    if (remaining <= 0) break;
+    const q = Number(row.quantity_in_stock || 0);
+    if (q <= 0) continue;
+    const take = Math.min(q, remaining);
+    const margin = Number(row.profit_margin || 0);
+    const profitDelta = recordProfit ? take * margin : 0;
+    const nextAccumulatedProfit = Number(row.accumulated_profit || 0) + profitDelta;
+    await run("UPDATE medicaments_inventory SET quantity_in_stock = ?, accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      q - take,
+      nextAccumulatedProfit,
+      nowIso,
+      row.id,
+    ]);
+    remaining -= take;
+  }
+}
+
+app.get("/api/medicaments/employee-items", auth, allowRoles("employee"), async (_req, res) => {
+  const rows = await all(
+    `SELECT item_name, COALESCE(SUM(quantity_in_stock), 0) AS quantity_in_stock
+     FROM medicaments_inventory
+     GROUP BY item_name
+     HAVING COALESCE(SUM(quantity_in_stock), 0) > 0
+     ORDER BY item_name ASC`
+  );
+  res.json(rows);
+});
+
+app.get("/api/medicaments/sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (req.user.role === "owner") {
+    const rows = await all("SELECT * FROM medicaments_sales ORDER BY id DESC");
+    return res.json(rows);
+  }
+  const rows = await all("SELECT * FROM medicaments_sales WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  return res.json(rows);
+});
+
+app.post("/api/medicaments/sales", auth, allowRoles("employee"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  const item = resolveMedicamentItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid medicament item." });
+  const qty = Math.floor(Number(p.quantity_sold));
+  if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
+  const invLine = await getMedicamentsCurrentLine(item);
+  if (!invLine) return res.status(400).json({ error: "No inventory record found for this item." });
+  const price = Number(invLine.selling_price);
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this item." });
+  try {
+    await adjustMedicamentsStock(item, -qty);
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "Could not process sale." });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO medicaments_sales
+    (date, item_name, quantity_sold, price_per_item, total_amount, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, item, qty, price, qty * price, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  const item = resolveMedicamentItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid medicament item." });
+  const qty = Math.floor(Number(p.quantity_sold));
+  if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
+  const invLine = await getMedicamentsCurrentLine(item);
+  if (!invLine) return res.status(400).json({ error: "No inventory record found for this item." });
+  const price = Number(invLine.selling_price);
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this item." });
+  try {
+    await run("BEGIN TRANSACTION");
+    await adjustMedicamentsStock(current.item_name, Number(current.quantity_sold));
+    await adjustMedicamentsStock(item, -qty);
+    await run(
+      `UPDATE medicaments_sales
+       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, updated_at = ?
+       WHERE id = ?`,
+      [dateCanon, item, qty, price, qty * price, new Date().toISOString(), id]
+    );
+    await run("COMMIT");
+  } catch (err) {
+    try { await run("ROLLBACK"); } catch (_e) {}
+    return res.status(400).json({ error: err.message || "Could not update sale." });
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  try {
+    await adjustMedicamentsStock(current.item_name, Number(current.quantity_sold));
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "Could not delete sale." });
+  }
+  await run("DELETE FROM medicaments_sales WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/medicaments", auth, allowRoles("owner"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const item = resolveMedicamentItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid medicament item." });
+  const quantity = Number(p.quantity_in_stock);
+  const buying = Number(p.buying_price);
+  const selling = Number(p.selling_price);
+  const margin = Number(p.profit_margin);
+  const reorder = Number(p.reorder_level);
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Quantity in stock must be zero or greater." });
+  }
+  if (!Number.isFinite(buying) || buying < 0 || !Number.isFinite(selling) || selling < 0) {
+    return res.status(400).json({ error: "Buying and selling price must be valid non-negative numbers." });
+  }
+  if (!Number.isFinite(reorder) || reorder < 0) {
+    return res.status(400).json({ error: "Reorder level must be zero or greater." });
+  }
+  if (!Number.isFinite(margin) || margin < 0) {
+    return res.status(400).json({ error: "Profit margin must be zero or greater." });
+  }
+  const qtyAdd = Math.floor(quantity);
+  const existing = await get("SELECT * FROM medicaments_inventory WHERE item_name = ? ORDER BY id DESC LIMIT 1", [item]);
+  if (existing) {
+    await run(
+      `UPDATE medicaments_inventory SET
+       date = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        dateCanon,
+        Number(existing.quantity_in_stock || 0) + qtyAdd,
+        Number(existing.accumulated_stock || 0) + qtyAdd,
+        buying,
+        selling,
+        margin,
+        Math.floor(reorder),
+        new Date().toISOString(),
+        existing.id,
+      ]
+    );
+  } else {
+    await run(
+      `INSERT INTO medicaments_inventory
+      (date, item_name, quantity_in_stock, accumulated_stock, buying_price, selling_price, profit_margin, accumulated_profit, reorder_level, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      [
+        dateCanon,
+        item,
+        qtyAdd,
+        qtyAdd,
+        buying,
+        selling,
+        margin,
+        Math.floor(reorder),
+        req.user.username,
+        new Date().toISOString(),
+      ]
+    );
+  }
+  res.json({ ok: true });
+});
+
+app.put("/api/medicaments/:id", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "Invalid inventory id." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const item = resolveMedicamentItem(p.item_name);
+  if (!item) return res.status(400).json({ error: "Invalid medicament item." });
+  const quantity = Number(p.quantity_in_stock);
+  const buying = Number(p.buying_price);
+  const selling = Number(p.selling_price);
+  const margin = Number(p.profit_margin);
+  const reorder = Number(p.reorder_level);
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Quantity in stock must be zero or greater." });
+  }
+  if (!Number.isFinite(buying) || buying < 0 || !Number.isFinite(selling) || selling < 0) {
+    return res.status(400).json({ error: "Buying and selling price must be valid non-negative numbers." });
+  }
+  if (!Number.isFinite(reorder) || reorder < 0) {
+    return res.status(400).json({ error: "Reorder level must be zero or greater." });
+  }
+  if (!Number.isFinite(margin) || margin < 0) {
+    return res.status(400).json({ error: "Profit margin must be zero or greater." });
+  }
+  const existing = await get(
+    "SELECT quantity_in_stock, COALESCE(accumulated_stock, 0) AS accumulated_stock FROM medicaments_inventory WHERE id = ?",
+    [id]
+  );
+  if (!existing) return res.status(404).json({ error: "Inventory record not found." });
+  const nextQty = Math.floor(quantity);
+  const oldQty = Number(existing.quantity_in_stock || 0);
+  const addOnly = Math.max(0, nextQty - oldQty);
+  const nextAccumulated = Number(existing.accumulated_stock || 0) + addOnly;
+  const result = await run(
+    `UPDATE medicaments_inventory SET
+      date = ?, item_name = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      dateCanon,
+      item,
+      nextQty,
+      nextAccumulated,
+      buying,
+      selling,
+      margin,
+      Math.floor(reorder),
+      new Date().toISOString(),
+      id,
+    ]
+  );
+  if (result.changes === 0) return res.status(404).json({ error: "Inventory record not found." });
+  res.json({ ok: true });
+});
+
+app.delete("/api/medicaments/:id", auth, allowRoles("owner"), async (req, res) => {
+  const result = await run("DELETE FROM medicaments_inventory WHERE id = ?", [Number(req.params.id)]);
+  if (result.changes === 0) return res.status(404).json({ error: "Inventory record not found." });
   res.json({ ok: true });
 });
 

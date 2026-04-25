@@ -31,6 +31,16 @@ const state = {
   inventoryPricing: [],
   /** Owner: selected chick sale row id for the staff customer details panel. */
   ownerSelectedChickenRowId: null,
+  feedersDrinkersCatalog: [],
+  feedersDrinkersInventory: [],
+  feedersDrinkersEmployeeItems: [],
+  feedersDrinkersSales: [],
+  medicamentsCatalog: [],
+  medicamentsInventory: [],
+  medicamentsEmployeeItems: [],
+  medicamentsSales: [],
+  editFeedersDrinkersId: null,
+  editMedicamentId: null,
 };
 
 const PAGE_HEADINGS = {
@@ -39,10 +49,13 @@ const PAGE_HEADINGS = {
   "chicken-inventory": "Chicken Sales Inventory",
   "sales-bags": "Sales Per Bags",
   "sales-kg": "Sales Per Kg",
+  "feeders-drinkers": "Feeders and Drinkers inventory",
+  medicaments: "Medicaments inventory",
 };
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
 const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory"]);
+const OWNER_ALLOWED_PAGES = new Set(["inventory", "retail-inventory", "chicken-inventory", "feeders-drinkers", "medicaments"]);
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
 
@@ -121,6 +134,18 @@ const chickenInventoryBody = document.getElementById("chicken-inventory-body");
 const chDateDisplay = document.getElementById("chDateDisplay");
 const chDate = document.getElementById("chDate");
 const chOpenCalendarBtn = document.getElementById("chOpenCalendarBtn");
+const fdForm = document.getElementById("fd-form");
+const fdBody = document.getElementById("fd-body");
+const fdItem = document.getElementById("fdItem");
+const fdDateDisplay = document.getElementById("fdDateDisplay");
+const fdDate = document.getElementById("fdDate");
+const fdOpenCalendarBtn = document.getElementById("fdOpenCalendarBtn");
+const medForm = document.getElementById("med-form");
+const medBody = document.getElementById("med-body");
+const medItem = document.getElementById("medItem");
+const medDateDisplay = document.getElementById("medDateDisplay");
+const medDate = document.getElementById("medDate");
+const medOpenCalendarBtn = document.getElementById("medOpenCalendarBtn");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -231,6 +256,34 @@ function updateChickenProfitDisplay() {
     ? `Shop day ${shop}. Cumulative and today count staff chick sales only. Your inventory lines do not add to these totals; staff rows show margin in the Profit (sale) column.`
     : "";
   document.querySelectorAll(".js-chicken-profit-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
+function updateFeedersDrinkersProfitDisplay() {
+  const total = (state.feedersDrinkersInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const val = currency(total);
+  document.querySelectorAll(".js-fd-accumulated-profit-value").forEach((el) => {
+    el.textContent = val;
+  });
+  const meta = state.shopToday
+    ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of item accumulated profits).`
+    : "Cumulative profit from employee sales only (sum of item accumulated profits).";
+  document.querySelectorAll(".js-fd-accumulated-profit-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
+function updateMedicamentsProfitDisplay() {
+  const total = (state.medicamentsInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const val = currency(total);
+  document.querySelectorAll(".js-med-accumulated-profit-value").forEach((el) => {
+    el.textContent = val;
+  });
+  const meta = state.shopToday
+    ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of item accumulated profits).`
+    : "Cumulative profit from employee sales only (sum of item accumulated profits).";
+  document.querySelectorAll(".js-med-accumulated-profit-meta").forEach((el) => {
     el.textContent = meta;
   });
 }
@@ -606,11 +659,40 @@ function showLoggedIn() {
   });
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
-    const shouldShow = isOwner
-      ? OWNER_INVENTORY_PAGES.has(page) || page === "chicken-inventory"
-      : !OWNER_INVENTORY_PAGES.has(page);
+    const shouldShow = isOwner ? OWNER_ALLOWED_PAGES.has(page) : !OWNER_INVENTORY_PAGES.has(page);
     btn.classList.toggle("hidden", !shouldShow);
   });
+  [fdForm, medForm].forEach((frm) => {
+    if (!frm) return;
+    frm.querySelectorAll("input, select, button").forEach((el) => {
+      if (el.classList?.contains("secondary")) return;
+      if (el.id === "fdOpenCalendarBtn" || el.id === "medOpenCalendarBtn") return;
+      if (el.id === "fdDateDisplay" || el.id === "medDateDisplay") return;
+      if (!isOwner && el.closest(".actions")) return;
+      if (!isOwner && frm === medForm && (el.tagName === "INPUT" || el.tagName === "SELECT")) el.disabled = true;
+      if (isOwner) el.disabled = false;
+    });
+  });
+  if (fdForm && !isOwner) {
+    fdForm.querySelectorAll("input, select").forEach((el) => {
+      const editable =
+        el.id === "fdDateDisplay" || el.id === "fdItem" || el.id === "fdQuantity" || el.id === "fdEmployeeSellingPrice";
+      el.disabled = !editable;
+    });
+    if (fdDate) fdDate.disabled = false;
+  }
+  if (medForm && !isOwner) {
+    medForm.querySelectorAll("input, select").forEach((el) => {
+      const editable =
+        el.id === "medDateDisplay" || el.id === "medItem" || el.id === "medQuantity" || el.id === "medEmployeeSellingPrice";
+      el.disabled = !editable;
+    });
+    if (medDate) medDate.disabled = false;
+  }
+  const fdSaveBtn = document.getElementById("fdSaveBtn");
+  if (fdSaveBtn) fdSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
+  const medSaveBtn = document.getElementById("medSaveBtn");
+  if (medSaveBtn) medSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
 }
 
 function populateBrandSelect(selectEl) {
@@ -1154,6 +1236,196 @@ function renderRetailInventoryTable() {
   });
 }
 
+function populateFeedersDrinkersItems() {
+  if (!fdItem) return;
+  const current = fdItem.value;
+  fdItem.innerHTML = '<option value="">Select item</option>';
+  const items =
+    state.user?.role === "employee"
+      ? state.feedersDrinkersEmployeeItems || []
+      : state.feedersDrinkersCatalog || [];
+  for (const item of items) {
+    const name = typeof item === "string" ? item : item.name || item.item_name;
+    if (!name) continue;
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    fdItem.appendChild(opt);
+  }
+  if (current && [...fdItem.options].some((o) => o.value === current)) fdItem.value = current;
+}
+
+function populateMedicamentsItems() {
+  if (!medItem) return;
+  const current = medItem.value;
+  medItem.innerHTML = '<option value="">Select item</option>';
+  const items =
+    state.user?.role === "employee"
+      ? state.medicamentsEmployeeItems || []
+      : state.medicamentsCatalog || [];
+  for (const item of items) {
+    const name = typeof item === "string" ? item : item.name || item.item_name;
+    if (!name) continue;
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    medItem.appendChild(opt);
+  }
+  if (current && [...medItem.options].some((o) => o.value === current)) medItem.value = current;
+}
+
+function currentFdSellingPrice(itemName) {
+  const rows = (state.feedersDrinkersInventory || []).filter((r) => String(r.item_name || "") === String(itemName || ""));
+  if (!rows.length) return null;
+  const row = rows[0];
+  const p = Number(row.selling_price);
+  return Number.isFinite(p) ? p : null;
+}
+
+function currentMedSellingPrice(itemName) {
+  const rows = (state.medicamentsInventory || []).filter((r) => String(r.item_name || "") === String(itemName || ""));
+  if (!rows.length) return null;
+  const row = rows[0];
+  const p = Number(row.selling_price);
+  return Number.isFinite(p) ? p : null;
+}
+
+function refreshEmployeeNewPageSellingPrices() {
+  if (state.user?.role !== "employee") return;
+  const fdSell = document.getElementById("fdEmployeeSellingPrice");
+  const medSell = document.getElementById("medEmployeeSellingPrice");
+  if (fdSell) {
+    const p = currentFdSellingPrice(fdItem?.value);
+    fdSell.value = p == null ? "" : String(p);
+  }
+  if (medSell) {
+    const p = currentMedSellingPrice(medItem?.value);
+    medSell.value = p == null ? "" : String(p);
+  }
+}
+
+function renderFeedersDrinkersTable() {
+  if (!fdBody) return;
+  const isOwner = state.user.role === "owner";
+  const rows = isOwner ? state.feedersDrinkersInventory : state.feedersDrinkersSales;
+  const colSpan = isOwner ? 14 : 7;
+  if (!rows.length) {
+    fdBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
+    return;
+  }
+  if (!isOwner) {
+    fdBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.item_name}</td>
+        <td>${row.quantity_sold}</td>
+        <td>${currency(row.total_amount)}</td>
+        <td><span class="status-ok">SOLD</span></td>
+        <td>${row.created_by}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="fd-sale" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="fd-sale" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+    return;
+  }
+  fdBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.item_name}</td>
+        <td>${row.quantity_in_stock}</td>
+        <td>${currency((Number(row.accumulated_stock ?? row.quantity_in_stock) || 0) * (Number(row.buying_price) || 0))}</td>
+        <td>${currency(row.buying_price)}</td>
+        <td>${currency(row.selling_price)}</td>
+        <td>${row.quantity_in_stock}</td>
+        <td>${row.accumulated_stock != null ? row.accumulated_stock : row.quantity_in_stock}</td>
+        <td>${currency(row.profit_margin ?? 0)}</td>
+        <td>${currency(row.accumulated_profit ?? 0)}</td>
+        <td>${row.reorder_level}</td>
+        <td>${statusLabel(row)}</td>
+        <td>${row.created_by}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="fd" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="fd" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+}
+
+function renderMedicamentsTable() {
+  if (!medBody) return;
+  const isOwner = state.user.role === "owner";
+  const rows = isOwner ? state.medicamentsInventory : state.medicamentsSales;
+  const colSpan = isOwner ? 14 : 7;
+  if (!rows.length) {
+    medBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
+    return;
+  }
+  if (!isOwner) {
+    medBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.item_name}</td>
+        <td>${row.quantity_sold}</td>
+        <td>${currency(row.total_amount)}</td>
+        <td><span class="status-ok">SOLD</span></td>
+        <td>${row.created_by}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="med-sale" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="med-sale" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+    return;
+  }
+  medBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.item_name}</td>
+        <td>${row.quantity_in_stock}</td>
+        <td>${currency((Number(row.accumulated_stock ?? row.quantity_in_stock) || 0) * (Number(row.buying_price) || 0))}</td>
+        <td>${currency(row.buying_price)}</td>
+        <td>${currency(row.selling_price)}</td>
+        <td>${row.quantity_in_stock}</td>
+        <td>${row.accumulated_stock != null ? row.accumulated_stock : row.quantity_in_stock}</td>
+        <td>${currency(row.profit_margin ?? 0)}</td>
+        <td>${currency(row.accumulated_profit ?? 0)}</td>
+        <td>${row.reorder_level}</td>
+        <td>${statusLabel(row)}</td>
+        <td>${row.created_by}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="med" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="med" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+}
+
+function resetFeedersDrinkersForm() {
+  if (!fdForm) return;
+  fdForm.reset();
+  state.editFeedersDrinkersId = null;
+  if (fdDateDisplay) fdDateDisplay.value = "";
+  if (document.getElementById("fdSaveBtn")) {
+    document.getElementById("fdSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
+  }
+}
+
+function resetMedicamentsForm() {
+  if (!medForm) return;
+  medForm.reset();
+  state.editMedicamentId = null;
+  if (medDateDisplay) medDateDisplay.value = "";
+  if (document.getElementById("medSaveBtn")) {
+    document.getElementById("medSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
+  }
+}
+
 function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
@@ -1323,6 +1595,12 @@ function showPage(page) {
   if (page === "chicken-inventory" && state.user?.role === "employee") {
     pageHeading.textContent = "Chicken Sales";
   }
+  if (page === "feeders-drinkers" && state.user?.role === "employee") {
+    pageHeading.textContent = "Feeders and Drinkers";
+  }
+  if (page === "medicaments" && state.user?.role === "employee") {
+    pageHeading.textContent = "Medicaments";
+  }
   if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory") {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -1340,6 +1618,8 @@ function showPage(page) {
     renderRetailInventoryTable();
     updateRetailCumulativeProfitDisplay();
   }
+  if (page === "feeders-drinkers") renderFeedersDrinkersTable();
+  if (page === "medicaments") renderMedicamentsTable();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -1498,11 +1778,36 @@ async function loadAllData() {
     state.retailFeedPricing = outcomes[o].status === "fulfilled" ? outcomes[o].value : [];
     state.cumulativeRetailKgProfit = 0;
   }
+
+  const extras = await Promise.allSettled([
+    api("/api/feeders-drinkers/catalog"),
+    api("/api/feeders-drinkers"),
+    api("/api/medicaments/catalog"),
+    api("/api/medicaments"),
+    api("/api/feeders-drinkers/employee-items"),
+    api("/api/feeders-drinkers/sales"),
+    api("/api/medicaments/employee-items"),
+    api("/api/medicaments/sales"),
+  ]);
+  state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
+  state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
+  state.medicamentsCatalog = extras[2].status === "fulfilled" ? extras[2].value : [];
+  state.medicamentsInventory = extras[3].status === "fulfilled" ? extras[3].value : [];
+  state.feedersDrinkersEmployeeItems = extras[4].status === "fulfilled" ? extras[4].value : [];
+  state.feedersDrinkersSales = extras[5].status === "fulfilled" ? extras[5].value : [];
+  state.medicamentsEmployeeItems = extras[6].status === "fulfilled" ? extras[6].value : [];
+  state.medicamentsSales = extras[7].status === "fulfilled" ? extras[7].value : [];
+
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
   updateChickenProfitDisplay();
+  updateFeedersDrinkersProfitDisplay();
+  updateMedicamentsProfitDisplay();
   updateOwnerCombinedProfitDisplay();
   populateChickenBreedSelect();
+  populateFeedersDrinkersItems();
+  populateMedicamentsItems();
+  refreshEmployeeNewPageSellingPrices();
   renderTable();
   renderOwnerPassThroughBagSales();
   renderSalesBagsTable();
@@ -1510,6 +1815,8 @@ async function loadAllData() {
   renderChickenSalesHistoryTable();
   renderRetailPricingTable();
   renderRetailInventoryTable();
+  renderFeedersDrinkersTable();
+  renderMedicamentsTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
 }
@@ -1674,7 +1981,7 @@ async function boot() {
 document.querySelectorAll(".nav-tab").forEach((btn) => {
   btn.addEventListener("click", () => {
     const page = btn.dataset.page;
-    if (state.user.role === "owner" && !OWNER_INVENTORY_PAGES.has(page) && page !== "chicken-inventory") return;
+    if (state.user.role === "owner" && !OWNER_ALLOWED_PAGES.has(page)) return;
     if (state.user.role !== "owner" && OWNER_INVENTORY_PAGES.has(page)) return;
     showPage(page);
   });
@@ -1712,6 +2019,10 @@ skDate.addEventListener("change", () => applyDefaultSkBagOpened());
 wireDatePicker(skDateDisplay, skDate, skOpenCalendarBtn);
 
 wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
+if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, fdDate, fdOpenCalendarBtn);
+if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
+fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
+medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 
 document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {
@@ -1739,6 +2050,98 @@ document.getElementById("chProfitMarginPerChick")?.addEventListener("input", () 
 document.getElementById("sbClearBtn").addEventListener("click", resetSalesBagForm);
 document.getElementById("skClearBtn").addEventListener("click", resetSalesKgForm);
 document.getElementById("chClearBtn").addEventListener("click", resetChickenForm);
+document.getElementById("fdClearBtn")?.addEventListener("click", resetFeedersDrinkersForm);
+document.getElementById("medClearBtn")?.addEventListener("click", resetMedicamentsForm);
+
+fdForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = fdDateDisplay.value.trim();
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  if (state.user?.role === "employee") {
+    const payloadSale = {
+      date: dateValue,
+      item_name: fdItem.value,
+      quantity_sold: Number(document.getElementById("fdQuantity")?.value || 0),
+    };
+    try {
+      if (state.editFeedersDrinkersId) {
+        await api(`/api/feeders-drinkers/sales/${state.editFeedersDrinkersId}`, { method: "PUT", body: JSON.stringify(payloadSale) });
+      } else {
+        await api("/api/feeders-drinkers/sales", { method: "POST", body: JSON.stringify(payloadSale) });
+      }
+      resetFeedersDrinkersForm();
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  const payload = {
+    date: dateValue,
+    item_name: fdItem.value,
+    quantity_in_stock: Number(document.getElementById("fdQuantity")?.value || 0),
+    buying_price: Number(document.getElementById("fdBuyingPrice")?.value || 0),
+    selling_price: Number(document.getElementById("fdSellingPrice")?.value || 0),
+    profit_margin: Number(document.getElementById("fdProfitMargin")?.value || 0),
+    reorder_level: Number(document.getElementById("fdReorderLevel")?.value || 0),
+  };
+  try {
+    if (state.editFeedersDrinkersId) {
+      await api(`/api/feeders-drinkers/${state.editFeedersDrinkersId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/feeders-drinkers", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetFeedersDrinkersForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+medForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = medDateDisplay.value.trim();
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  if (state.user?.role === "employee") {
+    const payloadSale = {
+      date: dateValue,
+      item_name: medItem.value,
+      quantity_sold: Number(document.getElementById("medQuantity")?.value || 0),
+    };
+    try {
+      if (state.editMedicamentId) {
+        await api(`/api/medicaments/sales/${state.editMedicamentId}`, { method: "PUT", body: JSON.stringify(payloadSale) });
+      } else {
+        await api("/api/medicaments/sales", { method: "POST", body: JSON.stringify(payloadSale) });
+      }
+      resetMedicamentsForm();
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  const payload = {
+    date: dateValue,
+    item_name: medItem.value,
+    quantity_in_stock: Number(document.getElementById("medQuantity")?.value || 0),
+    buying_price: Number(document.getElementById("medBuyingPrice")?.value || 0),
+    selling_price: Number(document.getElementById("medSellingPrice")?.value || 0),
+    profit_margin: Number(document.getElementById("medProfitMargin")?.value || 0),
+    reorder_level: Number(document.getElementById("medReorderLevel")?.value || 0),
+  };
+  try {
+    if (state.editMedicamentId) {
+      await api(`/api/medicaments/${state.editMedicamentId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/medicaments", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetMedicamentsForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
 
 salesBagsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2175,6 +2578,122 @@ retailPricingBody?.addEventListener("click", async (event) => {
     try {
       await api(`/api/retail-feed-pricing/${id}`, { method: "DELETE" });
       resetRetailFeedForm();
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+fdBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || (kind !== "fd" && kind !== "fd-sale")) return;
+  const row =
+    kind === "fd"
+      ? state.feedersDrinkersInventory.find((r) => String(r.id) === String(id))
+      : state.feedersDrinkersSales.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (kind === "fd-sale") {
+    if (action === "edit") {
+      state.editFeedersDrinkersId = row.id;
+      fdDate.value = toIsoDate(row.date);
+      fdDateDisplay.value = formatDateDMY(row.date);
+      fdItem.value = row.item_name;
+      document.getElementById("fdQuantity").value = row.quantity_sold;
+      refreshEmployeeNewPageSellingPrices();
+      document.getElementById("fdSaveBtn").textContent = "Update sale";
+      return;
+    }
+    if (action === "delete") {
+      if (!window.confirm("Delete this sale?")) return;
+      try {
+        await api(`/api/feeders-drinkers/sales/${id}`, { method: "DELETE" });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      }
+      return;
+    }
+  }
+  if (action === "edit") {
+    state.editFeedersDrinkersId = row.id;
+    fdDate.value = toIsoDate(row.date);
+    fdDateDisplay.value = formatDateDMY(row.date);
+    fdItem.value = row.item_name;
+    document.getElementById("fdQuantity").value = row.quantity_in_stock;
+    document.getElementById("fdBuyingPrice").value = row.buying_price;
+    document.getElementById("fdSellingPrice").value = row.selling_price;
+    document.getElementById("fdProfitMargin").value = row.profit_margin ?? 0;
+    document.getElementById("fdReorderLevel").value = row.reorder_level;
+    document.getElementById("fdSaveBtn").textContent = "Update record";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this record?")) return;
+    try {
+      await api(`/api/feeders-drinkers/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+medBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || (kind !== "med" && kind !== "med-sale")) return;
+  const row =
+    kind === "med"
+      ? state.medicamentsInventory.find((r) => String(r.id) === String(id))
+      : state.medicamentsSales.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (kind === "med-sale") {
+    if (action === "edit") {
+      state.editMedicamentId = row.id;
+      medDate.value = toIsoDate(row.date);
+      medDateDisplay.value = formatDateDMY(row.date);
+      medItem.value = row.item_name;
+      document.getElementById("medQuantity").value = row.quantity_sold;
+      refreshEmployeeNewPageSellingPrices();
+      document.getElementById("medSaveBtn").textContent = "Update sale";
+      return;
+    }
+    if (action === "delete") {
+      if (!window.confirm("Delete this sale?")) return;
+      try {
+        await api(`/api/medicaments/sales/${id}`, { method: "DELETE" });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      }
+      return;
+    }
+  }
+  if (action === "edit") {
+    state.editMedicamentId = row.id;
+    medDate.value = toIsoDate(row.date);
+    medDateDisplay.value = formatDateDMY(row.date);
+    medItem.value = row.item_name;
+    document.getElementById("medQuantity").value = row.quantity_in_stock;
+    document.getElementById("medBuyingPrice").value = row.buying_price;
+    document.getElementById("medSellingPrice").value = row.selling_price;
+    document.getElementById("medProfitMargin").value = row.profit_margin ?? 0;
+    document.getElementById("medReorderLevel").value = row.reorder_level;
+    document.getElementById("medSaveBtn").textContent = "Update record";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this record?")) return;
+    try {
+      await api(`/api/medicaments/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
