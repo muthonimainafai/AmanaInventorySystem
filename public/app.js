@@ -1,6 +1,10 @@
 const state = {
   token: (localStorage.getItem("amanaToken") || "").trim(),
   user: JSON.parse(localStorage.getItem("amanaUser") || "null"),
+  vehicleToken: (localStorage.getItem("vehicleToken") || "").trim(),
+  vehicleUser: JSON.parse(localStorage.getItem("vehicleUser") || "null"),
+  vehicleKaxEntries: [],
+  editVehicleKaxId: null,
   catalog: {},
   records: [],
   editId: null,
@@ -89,11 +93,24 @@ function getChickenBreedsRows() {
 const loginCard = document.getElementById("loginCard");
 const landingCard = document.getElementById("landingCard");
 const appCard = document.getElementById("appCard");
+const vehicleLoginCard = document.getElementById("vehicleLoginCard");
+const vehicleAppCard = document.getElementById("vehicleAppCard");
 const loginForm = document.getElementById("loginForm");
+const vehicleLoginForm = document.getElementById("vehicleLoginForm");
 const passwordInput = document.getElementById("password");
 const showPasswordCheckbox = document.getElementById("showPassword");
+const vehiclePasswordInput = document.getElementById("vehiclePassword");
+const showVehiclePasswordCheckbox = document.getElementById("showVehiclePassword");
 const userInfo = document.getElementById("userInfo");
 const logoutBtn = document.getElementById("logoutBtn");
+const vehicleUserInfo = document.getElementById("vehicleUserInfo");
+const vehicleLogoutBtn = document.getElementById("vehicleLogoutBtn");
+const vehicleKaxForm = document.getElementById("vehicle-kax-form");
+const vehicleKaxBody = document.getElementById("vehicle-kax-body");
+const vehicleKaxDateDisplay = document.getElementById("vehicleKaxDateDisplay");
+const vehicleKaxDate = document.getElementById("vehicleKaxDate");
+const vehicleKaxOpenCalendarBtn = document.getElementById("vehicleKaxOpenCalendarBtn");
+const vehicleKaxClearBtn = document.getElementById("vehicleKaxClearBtn");
 const refreshBtn = document.getElementById("refreshBtn");
 
 const form = document.getElementById("inventory-form");
@@ -184,9 +201,32 @@ async function api(path, options = {}) {
   return body;
 }
 
+async function vehicleApi(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (state.vehicleToken) headers.Authorization = `Bearer ${state.vehicleToken}`;
+  const response = await fetch(path, { ...options, headers });
+  const text = await response.text();
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      if (!response.ok) throw new Error(text.trim().slice(0, 200) || `Request failed (${response.status})`);
+      throw new Error("Server returned a non-JSON response.");
+    }
+  }
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  return body;
+}
+
 function persistAuth() {
   localStorage.setItem("amanaToken", state.token);
   localStorage.setItem("amanaUser", JSON.stringify(state.user));
+}
+
+function persistVehicleAuth() {
+  localStorage.setItem("vehicleToken", state.vehicleToken);
+  localStorage.setItem("vehicleUser", JSON.stringify(state.vehicleUser));
 }
 
 function clearAuth() {
@@ -194,6 +234,13 @@ function clearAuth() {
   state.user = null;
   localStorage.removeItem("amanaToken");
   localStorage.removeItem("amanaUser");
+}
+
+function clearVehicleAuth() {
+  state.vehicleToken = "";
+  state.vehicleUser = null;
+  localStorage.removeItem("vehicleToken");
+  localStorage.removeItem("vehicleUser");
 }
 
 function currency(value) {
@@ -642,19 +689,33 @@ function employeeChickenSaleEditable(row) {
 function showLoggedOut() {
   landingCard?.classList.remove("hidden");
   loginCard.classList.add("hidden");
+  vehicleLoginCard?.classList.add("hidden");
   appCard.classList.add("hidden");
+  vehicleAppCard?.classList.add("hidden");
 }
 
 function showLoginCard() {
   landingCard?.classList.add("hidden");
   loginCard.classList.remove("hidden");
+  vehicleLoginCard?.classList.add("hidden");
   appCard.classList.add("hidden");
+  vehicleAppCard?.classList.add("hidden");
+}
+
+function showVehicleLoginCard() {
+  landingCard?.classList.add("hidden");
+  loginCard.classList.add("hidden");
+  vehicleLoginCard?.classList.remove("hidden");
+  appCard.classList.add("hidden");
+  vehicleAppCard?.classList.add("hidden");
 }
 
 function showLoggedIn() {
   landingCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   appCard.classList.remove("hidden");
+  vehicleLoginCard?.classList.add("hidden");
+  vehicleAppCard?.classList.add("hidden");
   userInfo.textContent = `${state.user.fullName} (${state.user.role})`;
   const isOwner = state.user.role === "owner";
   document.querySelectorAll(".owner-only-tab").forEach((el) => {
@@ -702,6 +763,55 @@ function showLoggedIn() {
   if (fdSaveBtn) fdSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
   const medSaveBtn = document.getElementById("medSaveBtn");
   if (medSaveBtn) medSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
+}
+
+function showVehicleLoggedIn() {
+  landingCard?.classList.add("hidden");
+  loginCard.classList.add("hidden");
+  vehicleLoginCard?.classList.add("hidden");
+  appCard.classList.add("hidden");
+  vehicleAppCard?.classList.remove("hidden");
+  if (vehicleUserInfo) vehicleUserInfo.textContent = `${state.vehicleUser.fullName} (${state.vehicleUser.role})`;
+}
+
+function renderVehicleKaxTable() {
+  if (!vehicleKaxBody) return;
+  if (!state.vehicleKaxEntries.length) {
+    vehicleKaxBody.innerHTML = '<tr><td colspan="6" class="empty">No KAX entries.</td></tr>';
+    return;
+  }
+  const chronological = [...state.vehicleKaxEntries]
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  let running = 0;
+  const byId = new Map();
+  for (const row of chronological) {
+    running += (Number(row.money_in) || 0) - (Number(row.money_out) || 0);
+    byId.set(Number(row.id), running);
+  }
+  vehicleKaxBody.innerHTML = state.vehicleKaxEntries
+    .map(
+      (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.description}</td>
+        <td>${currency(row.money_in)}</td>
+        <td>${currency(row.money_out)}</td>
+        <td>${currency(byId.get(Number(row.id)) || 0)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="vehicle-kax" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="vehicle-kax" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`
+    )
+    .join("");
+}
+
+async function loadVehicleKaxData() {
+  if (!state.vehicleToken) return;
+  state.vehicleKaxEntries = await vehicleApi("/api/vehicle/kax");
+  renderVehicleKaxTable();
 }
 
 function populateBrandSelect(selectEl) {
@@ -1850,9 +1960,15 @@ function stopAutoRefresh() {
 showPasswordCheckbox?.addEventListener("change", () => {
   if (passwordInput) passwordInput.type = showPasswordCheckbox.checked ? "text" : "password";
 });
+showVehiclePasswordCheckbox?.addEventListener("change", () => {
+  if (vehiclePasswordInput) vehiclePasswordInput.type = showVehiclePasswordCheckbox.checked ? "text" : "password";
+});
 
 loginForm?.addEventListener("reset", () => {
   if (passwordInput) passwordInput.type = "password";
+});
+vehicleLoginForm?.addEventListener("reset", () => {
+  if (vehiclePasswordInput) vehiclePasswordInput.type = "password";
 });
 
 document.getElementById("openAmanaBtn")?.addEventListener("click", () => {
@@ -1860,11 +1976,15 @@ document.getElementById("openAmanaBtn")?.addEventListener("click", () => {
 });
 
 document.getElementById("openVehicleBtn")?.addEventListener("click", () => {
-  alert("Vehicle inventory dashboard is coming soon.");
+  showVehicleLoginCard();
 });
 
 document.getElementById("backToDashboardBtn")?.addEventListener("click", () => {
   loginForm.reset();
+  showLoggedOut();
+});
+document.getElementById("backToDashboardFromVehicleBtn")?.addEventListener("click", () => {
+  vehicleLoginForm?.reset();
   showLoggedOut();
 });
 
@@ -1892,9 +2012,116 @@ loginForm.addEventListener("submit", async (event) => {
   }
 });
 
+vehicleLoginForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const username = document.getElementById("vehicleUsername").value.trim();
+  const password = vehiclePasswordInput?.value ?? "";
+  try {
+    const response = await fetch("/api/vehicle/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Could not login to vehicle inventory.");
+    state.vehicleToken = String(body.token || "").trim();
+    state.vehicleUser = body.user;
+    persistVehicleAuth();
+    showVehicleLoggedIn();
+    await loadVehicleKaxData();
+    vehicleLoginForm.reset();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+if (vehicleKaxDateDisplay && vehicleKaxDate && vehicleKaxOpenCalendarBtn) {
+  wireDatePicker(vehicleKaxDateDisplay, vehicleKaxDate, vehicleKaxOpenCalendarBtn);
+}
+
+vehicleKaxForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = vehicleKaxDateDisplay.value.trim();
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: document.getElementById("vehicleKaxDescription")?.value.trim(),
+    money_in: Number(document.getElementById("vehicleKaxMoneyIn")?.value || 0),
+    money_out: Number(document.getElementById("vehicleKaxMoneyOut")?.value || 0),
+  };
+  try {
+    if (state.editVehicleKaxId) {
+      await vehicleApi(`/api/vehicle/kax/${state.editVehicleKaxId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await vehicleApi("/api/vehicle/kax", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetVehicleKaxForm();
+    await loadVehicleKaxData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+function resetVehicleKaxForm() {
+  if (!vehicleKaxForm) return;
+  vehicleKaxForm.reset();
+  state.editVehicleKaxId = null;
+  if (vehicleKaxDateDisplay) vehicleKaxDateDisplay.value = "";
+  const inEl = document.getElementById("vehicleKaxMoneyIn");
+  const outEl = document.getElementById("vehicleKaxMoneyOut");
+  if (inEl) inEl.value = "0";
+  if (outEl) outEl.value = "0";
+  const saveBtn = vehicleKaxForm.querySelector('button[type="submit"]');
+  if (saveBtn) saveBtn.textContent = "Save entry";
+}
+
+vehicleKaxClearBtn?.addEventListener("click", () => {
+  resetVehicleKaxForm();
+});
+
+vehicleKaxBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  if (!id || !action || target.dataset.kind !== "vehicle-kax") return;
+  const row = state.vehicleKaxEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editVehicleKaxId = row.id;
+    if (vehicleKaxDateDisplay) vehicleKaxDateDisplay.value = formatDateDMY(row.date);
+    if (vehicleKaxDate) vehicleKaxDate.value = toIsoDate(row.date);
+    const d = document.getElementById("vehicleKaxDescription");
+    const i = document.getElementById("vehicleKaxMoneyIn");
+    const o = document.getElementById("vehicleKaxMoneyOut");
+    if (d) d.value = row.description || "";
+    if (i) i.value = row.money_in ?? 0;
+    if (o) o.value = row.money_out ?? 0;
+    const saveBtn = vehicleKaxForm?.querySelector('button[type="submit"]');
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this KAX entry?")) return;
+    try {
+      await vehicleApi(`/api/vehicle/kax/${id}`, { method: "DELETE" });
+      await loadVehicleKaxData();
+      if (state.editVehicleKaxId && String(state.editVehicleKaxId) === String(id)) {
+        resetVehicleKaxForm();
+      }
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
 logoutBtn.addEventListener("click", () => {
   clearAuth();
   stopAutoRefresh();
+  showLoggedOut();
+});
+vehicleLogoutBtn?.addEventListener("click", () => {
+  clearVehicleAuth();
   showLoggedOut();
 });
 
@@ -1981,6 +2208,11 @@ tableBody.addEventListener("click", async (event) => {
 });
 
 async function boot() {
+  if (state.vehicleToken && state.vehicleUser) {
+    showVehicleLoggedIn();
+    await loadVehicleKaxData();
+    return;
+  }
   if (!state.token || !state.user) {
     stopAutoRefresh();
     showLoggedOut();

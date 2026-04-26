@@ -22,7 +22,7 @@ function loadEnvFile() {
       val = val.slice(1, -1);
     }
     if (!key) continue;
-    const fromFile = key.startsWith("AMANA_") || key === "JWT_SECRET";
+    const fromFile = key.startsWith("AMANA_") || key.startsWith("VEHICLE_") || key === "JWT_SECRET";
     if (fromFile || process.env[key] === undefined) process.env[key] = val;
   }
 }
@@ -39,6 +39,12 @@ const AMANA_OWNER_FULL_NAME = String(process.env.AMANA_OWNER_FULL_NAME || "Shop 
 const AMANA_EMPLOYEE_USERNAME = String(process.env.AMANA_EMPLOYEE_USERNAME || "employee").trim() || "employee";
 const AMANA_EMPLOYEE_PASSWORD = String(process.env.AMANA_EMPLOYEE_PASSWORD || "Employee@123");
 const AMANA_EMPLOYEE_FULL_NAME = String(process.env.AMANA_EMPLOYEE_FULL_NAME || "Shop Employee").trim() || "Shop Employee";
+const VEHICLE_ADMIN_USERNAME = String(process.env.VEHICLE_ADMIN_USERNAME || "vehicleadmin").trim() || "vehicleadmin";
+const VEHICLE_ADMIN_PASSWORD = String(process.env.VEHICLE_ADMIN_PASSWORD || "VehicleAdmin@123");
+const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "Vehicle Admin").trim() || "Vehicle Admin";
+const VEHICLE_STAFF_USERNAME = String(process.env.VEHICLE_STAFF_USERNAME || "vehiclestaff").trim() || "vehiclestaff";
+const VEHICLE_STAFF_PASSWORD = String(process.env.VEHICLE_STAFF_PASSWORD || "VehicleStaff@123");
+const VEHICLE_STAFF_FULL_NAME = String(process.env.VEHICLE_STAFF_FULL_NAME || "Vehicle Staff").trim() || "Vehicle Staff";
 
 let db = null;
 
@@ -207,6 +213,29 @@ async function zeroOwnerChickenSaleMarginSnaps() {
   );
 }
 
+async function syncVehicleUsersFromEnv() {
+  const admin = await get("SELECT id FROM vehicle_users WHERE role = ? ORDER BY id LIMIT 1", ["admin"]);
+  const staff = await get("SELECT id FROM vehicle_users WHERE role = ? ORDER BY id LIMIT 1", ["staff"]);
+  if (admin) {
+    const hash = await bcrypt.hash(VEHICLE_ADMIN_PASSWORD, 10);
+    await run("UPDATE vehicle_users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
+      VEHICLE_ADMIN_USERNAME,
+      VEHICLE_ADMIN_FULL_NAME,
+      hash,
+      admin.id,
+    ]);
+  }
+  if (staff) {
+    const hash = await bcrypt.hash(VEHICLE_STAFF_PASSWORD, 10);
+    await run("UPDATE vehicle_users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
+      VEHICLE_STAFF_USERNAME,
+      VEHICLE_STAFF_FULL_NAME,
+      hash,
+      staff.id,
+    ]);
+  }
+}
+
 async function initDb() {
   await run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -215,6 +244,26 @@ async function initDb() {
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('owner','employee')),
       full_name TEXT NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS vehicle_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin','staff')),
+      full_name TEXT NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS vehicle_kax_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      money_in REAL NOT NULL DEFAULT 0,
+      money_out REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     )
   `);
 
@@ -448,6 +497,24 @@ async function initDb() {
   } else {
     await syncLoginUsersFromEnv();
   }
+  const anyVehicleUser = await get("SELECT id FROM vehicle_users LIMIT 1");
+  if (!anyVehicleUser) {
+    if (VEHICLE_ADMIN_USERNAME.toLowerCase() === VEHICLE_STAFF_USERNAME.toLowerCase()) {
+      throw new Error("VEHICLE_ADMIN_USERNAME and VEHICLE_STAFF_USERNAME must differ.");
+    }
+    const adminHash = await bcrypt.hash(VEHICLE_ADMIN_PASSWORD, 10);
+    const staffHash = await bcrypt.hash(VEHICLE_STAFF_PASSWORD, 10);
+    await run(
+      "INSERT INTO vehicle_users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
+      [VEHICLE_ADMIN_USERNAME, adminHash, "admin", VEHICLE_ADMIN_FULL_NAME]
+    );
+    await run(
+      "INSERT INTO vehicle_users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
+      [VEHICLE_STAFF_USERNAME, staffHash, "staff", VEHICLE_STAFF_FULL_NAME]
+    );
+  } else {
+    await syncVehicleUsersFromEnv();
+  }
   await zeroOwnerChickenSaleMarginSnaps();
 }
 
@@ -492,6 +559,21 @@ function auth(req, res, next) {
   if (!token) return res.status(401).json({ error: "Unauthorized" });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    return next();
+  } catch (_error) {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+function vehicleAuth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    req.vehicleUser = jwt.verify(token, JWT_SECRET);
+    if (req.vehicleUser?.module !== "vehicle") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     return next();
   } catch (_error) {
     return res.status(401).json({ error: "Invalid token" });
@@ -1180,6 +1262,79 @@ app.post("/api/login", async (req, res) => {
     { expiresIn: "7d" }
   );
   return res.json({ token, user: { username: user.username, role: user.role, fullName: user.full_name } });
+});
+
+app.post("/api/vehicle/login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required." });
+  }
+  const user = await get("SELECT * FROM vehicle_users WHERE username = ?", [username]);
+  if (!user) return res.status(401).json({ error: "Invalid credentials." });
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return res.status(401).json({ error: "Invalid credentials." });
+  const token = jwt.sign(
+    { userId: user.id, username: user.username, role: user.role, fullName: user.full_name, module: "vehicle" },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+  return res.json({ token, user: { username: user.username, role: user.role, fullName: user.full_name } });
+});
+
+app.get("/api/vehicle/kax", vehicleAuth, async (_req, res) => {
+  const rows = await all("SELECT * FROM vehicle_kax_entries ORDER BY id DESC");
+  res.json(rows);
+});
+
+app.post("/api/vehicle/kax", vehicleAuth, async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  const moneyIn = Number(p.money_in);
+  const moneyOut = Number(p.money_out);
+  if (!Number.isFinite(moneyIn) || moneyIn < 0 || !Number.isFinite(moneyOut) || moneyOut < 0) {
+    return res.status(400).json({ error: "Money In and Money Out must be valid non-negative numbers." });
+  }
+  await run(
+    `INSERT INTO vehicle_kax_entries (date, description, money_in, money_out, created_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, moneyIn, moneyOut, req.vehicleUser.username, new Date().toISOString()]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/vehicle/kax/:id", vehicleAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "Invalid row id." });
+  const current = await get("SELECT id FROM vehicle_kax_entries WHERE id = ?", [id]);
+  if (!current) return res.status(404).json({ error: "Entry not found." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  const moneyIn = Number(p.money_in);
+  const moneyOut = Number(p.money_out);
+  if (!Number.isFinite(moneyIn) || moneyIn < 0 || !Number.isFinite(moneyOut) || moneyOut < 0) {
+    return res.status(400).json({ error: "Money In and Money Out must be valid non-negative numbers." });
+  }
+  await run(
+    `UPDATE vehicle_kax_entries
+     SET date = ?, description = ?, money_in = ?, money_out = ?, updated_at = ?
+     WHERE id = ?`,
+    [dateCanon, description, moneyIn, moneyOut, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/vehicle/kax/:id", vehicleAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "Invalid row id." });
+  const result = await run("DELETE FROM vehicle_kax_entries WHERE id = ?", [id]);
+  if (result.changes === 0) return res.status(404).json({ error: "Entry not found." });
+  res.json({ ok: true });
 });
 
 /** Public product list (brands / feed types / bag sizes) — no auth so the UI can always populate dropdowns. */
