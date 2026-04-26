@@ -320,6 +320,26 @@ h1 {
   background: linear-gradient(135deg, #0d6efd, #0b5ed7);
 }
 
+#vehicleLoginCard {
+  max-width: 460px;
+}
+
+#vehicleLoginForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#vehicleLoginForm .vehicle-primary-btn,
+#vehicleLoginForm #backToDashboardFromVehicleBtn {
+  width: 100%;
+}
+
+#vehicleLoginForm .vehicle-primary-btn {
+  white-space: normal;
+  line-height: 1.25;
+}
+
 .login-password-block {
   display: flex;
   flex-direction: column;

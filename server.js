@@ -42,9 +42,6 @@ const AMANA_EMPLOYEE_FULL_NAME = String(process.env.AMANA_EMPLOYEE_FULL_NAME || 
 const VEHICLE_ADMIN_USERNAME = String(process.env.VEHICLE_ADMIN_USERNAME || "vehicleadmin").trim() || "vehicleadmin";
 const VEHICLE_ADMIN_PASSWORD = String(process.env.VEHICLE_ADMIN_PASSWORD || "VehicleAdmin@123");
 const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "Vehicle Admin").trim() || "Vehicle Admin";
-const VEHICLE_STAFF_USERNAME = String(process.env.VEHICLE_STAFF_USERNAME || "vehiclestaff").trim() || "vehiclestaff";
-const VEHICLE_STAFF_PASSWORD = String(process.env.VEHICLE_STAFF_PASSWORD || "VehicleStaff@123");
-const VEHICLE_STAFF_FULL_NAME = String(process.env.VEHICLE_STAFF_FULL_NAME || "Vehicle Staff").trim() || "Vehicle Staff";
 
 let db = null;
 
@@ -215,7 +212,6 @@ async function zeroOwnerChickenSaleMarginSnaps() {
 
 async function syncVehicleUsersFromEnv() {
   const admin = await get("SELECT id FROM vehicle_users WHERE role = ? ORDER BY id LIMIT 1", ["admin"]);
-  const staff = await get("SELECT id FROM vehicle_users WHERE role = ? ORDER BY id LIMIT 1", ["staff"]);
   if (admin) {
     const hash = await bcrypt.hash(VEHICLE_ADMIN_PASSWORD, 10);
     await run("UPDATE vehicle_users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
@@ -223,15 +219,6 @@ async function syncVehicleUsersFromEnv() {
       VEHICLE_ADMIN_FULL_NAME,
       hash,
       admin.id,
-    ]);
-  }
-  if (staff) {
-    const hash = await bcrypt.hash(VEHICLE_STAFF_PASSWORD, 10);
-    await run("UPDATE vehicle_users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
-      VEHICLE_STAFF_USERNAME,
-      VEHICLE_STAFF_FULL_NAME,
-      hash,
-      staff.id,
     ]);
   }
 }
@@ -499,22 +486,15 @@ async function initDb() {
   }
   const anyVehicleUser = await get("SELECT id FROM vehicle_users LIMIT 1");
   if (!anyVehicleUser) {
-    if (VEHICLE_ADMIN_USERNAME.toLowerCase() === VEHICLE_STAFF_USERNAME.toLowerCase()) {
-      throw new Error("VEHICLE_ADMIN_USERNAME and VEHICLE_STAFF_USERNAME must differ.");
-    }
     const adminHash = await bcrypt.hash(VEHICLE_ADMIN_PASSWORD, 10);
-    const staffHash = await bcrypt.hash(VEHICLE_STAFF_PASSWORD, 10);
     await run(
       "INSERT INTO vehicle_users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
       [VEHICLE_ADMIN_USERNAME, adminHash, "admin", VEHICLE_ADMIN_FULL_NAME]
     );
-    await run(
-      "INSERT INTO vehicle_users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
-      [VEHICLE_STAFF_USERNAME, staffHash, "staff", VEHICLE_STAFF_FULL_NAME]
-    );
   } else {
     await syncVehicleUsersFromEnv();
   }
+  await run("DELETE FROM vehicle_users WHERE role = 'staff'");
   await zeroOwnerChickenSaleMarginSnaps();
 }
 
@@ -1271,6 +1251,7 @@ app.post("/api/vehicle/login", async (req, res) => {
   }
   const user = await get("SELECT * FROM vehicle_users WHERE username = ?", [username]);
   if (!user) return res.status(401).json({ error: "Invalid credentials." });
+  if (user.role !== "admin") return res.status(403).json({ error: "Vehicle inventory is admin-only." });
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials." });
   const token = jwt.sign(
