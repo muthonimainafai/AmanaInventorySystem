@@ -87,6 +87,7 @@ function getChickenBreedsRows() {
 }
 
 const loginCard = document.getElementById("loginCard");
+const landingCard = document.getElementById("landingCard");
 const appCard = document.getElementById("appCard");
 const loginForm = document.getElementById("loginForm");
 const passwordInput = document.getElementById("password");
@@ -639,11 +640,19 @@ function employeeChickenSaleEditable(row) {
 }
 
 function showLoggedOut() {
+  landingCard?.classList.remove("hidden");
+  loginCard.classList.add("hidden");
+  appCard.classList.add("hidden");
+}
+
+function showLoginCard() {
+  landingCard?.classList.add("hidden");
   loginCard.classList.remove("hidden");
   appCard.classList.add("hidden");
 }
 
 function showLoggedIn() {
+  landingCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   appCard.classList.remove("hidden");
   userInfo.textContent = `${state.user.fullName} (${state.user.role})`;
@@ -1844,6 +1853,19 @@ showPasswordCheckbox?.addEventListener("change", () => {
 
 loginForm?.addEventListener("reset", () => {
   if (passwordInput) passwordInput.type = "password";
+});
+
+document.getElementById("openAmanaBtn")?.addEventListener("click", () => {
+  showLoginCard();
+});
+
+document.getElementById("openVehicleBtn")?.addEventListener("click", () => {
+  alert("Vehicle inventory dashboard is coming soon.");
+});
+
+document.getElementById("backToDashboardBtn")?.addEventListener("click", () => {
+  loginForm.reset();
+  showLoggedOut();
 });
 
 loginForm.addEventListener("submit", async (event) => {
