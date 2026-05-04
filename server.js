@@ -3041,6 +3041,82 @@ function argvHasFlag(flag) {
   return process.argv.includes(flag);
 }
 
+/** Parses `--brand` / `--feed` and fixes `npm ... --brand "Sigma"--feed Growers` (missing space → merged token). */
+function argvBrandAndFeedForDeleteCli() {
+  let brand = argvFlagValue("--brand");
+  let feedType = argvFlagValue("--feed");
+  const brandIdx = process.argv.indexOf("--brand");
+  if (brand && brand.includes("--feed")) {
+    const idx = brand.indexOf("--feed");
+    const inlineFeed = brand.slice(idx + 6).trim();
+    brand = brand.slice(0, idx).trim();
+    if (inlineFeed) feedType = feedType || inlineFeed;
+  }
+  if (!feedType && brandIdx !== -1 && brandIdx + 2 < process.argv.length) {
+    const next = process.argv[brandIdx + 2];
+    if (next && !String(next).startsWith("--")) {
+      feedType = next;
+    }
+  }
+  return { brand, feedType };
+}
+
+function inventoryDbPathForHint() {
+  const dataDir = process.env.AMANA_DATA_DIR || path.join(__dirname, "data");
+  return path.join(dataDir, "inventory.db");
+}
+
+async function formatBagSaleDeleteNoMatchHint(dateStr, brand, feedType, bagsSold) {
+  const day = normalizeInventoryDate(dateStr);
+  const dbPath = inventoryDbPathForHint();
+  const recent = await all(
+    "SELECT id, date, brand, feed_type, bag_size, bags_sold, created_by FROM sales_bags ORDER BY id DESC LIMIT 50"
+  );
+  const sameDay = day ? recent.filter((r) => normalizeInventoryDate(r.date) === day) : [];
+  const lines = [];
+  lines.push(`Database file used: ${dbPath}`);
+  if (day && sameDay.length) {
+    lines.push(`Rows on ${day}:`);
+    for (const r of sameDay) {
+      lines.push(
+        `  id=${r.id}  brand=${r.brand}  feed_type=${r.feed_type}  ${r.bag_size}kg  bags_sold=${r.bags_sold}  created_by=${r.created_by}`
+      );
+    }
+  } else {
+    lines.push(`No rows on calendar day ${day || dateStr} in this database.`);
+    if (recent.length) {
+      lines.push("Latest bag sales (up to 15):");
+      for (const r of recent.slice(0, 15)) {
+        lines.push(
+          `  id=${r.id}  date=${r.date}  ${r.brand}  ${r.feed_type}  bags=${r.bags_sold}  by=${r.created_by}`
+        );
+      }
+    }
+  }
+  lines.push(
+    'Tip: use full catalog names, e.g. --brand "Sigma Feeds" --feed "Growers bags" (note the space before --feed). Or delete by id from the app: --id <n>.'
+  );
+  if (brand || feedType) {
+    lines.push(`You searched: brand=${JSON.stringify(brand)} feed_type=${JSON.stringify(feedType)} bags=${bagsSold}`);
+  }
+  return `\n${lines.join("\n")}`;
+}
+
+/** Same calendar day + brand + bags count (ignores feed type) — use only when unique. */
+async function findFeedBagSalesByDateBrandBags(dateStr, brand, bagsSold) {
+  const day = normalizeInventoryDate(dateStr);
+  if (!day) return [];
+  const wantBags = Number(bagsSold);
+  if (!Number.isFinite(wantBags) || wantBags < 1) return [];
+  const rows = await all("SELECT * FROM sales_bags ORDER BY id DESC");
+  return rows.filter(
+    (r) =>
+      normalizeInventoryDate(r.date) === day &&
+      normalizeBrand(r.brand) === normalizeBrand(brand) &&
+      Number(r.bags_sold) === wantBags
+  );
+}
+
 /** Find bag sales matching calendar date (DD/MM/YYYY), brand, feed type, and bags count (normalized like inventory). */
 async function findFeedBagSalesMatchingCriteria(dateStr, brand, feedType, bagsSold) {
   const day = normalizeInventoryDate(dateStr);
@@ -3093,18 +3169,33 @@ async function runDeleteFeedBagSaleCli() {
   }
 
   const dateStr = argvFlagValue("--date");
-  const brand = argvFlagValue("--brand");
-  const feedType = argvFlagValue("--feed");
+  const { brand, feedType } = argvBrandAndFeedForDeleteCli();
   const bagsStr = argvFlagValue("--bags");
   if (!dateStr || !brand || !feedType || bagsStr == null) {
     throw new Error(
       "Usage: node scripts/delete-feed-bag-sale.js --id <n> [--dry-run]\n" +
-        "   or: node scripts/delete-feed-bag-sale.js --date DD/MM/YYYY --brand \"Sigma Feeds\" --feed \"Growers bags\" --bags 2 [--dry-run]"
+        "   or: node scripts/delete-feed-bag-sale.js --date DD/MM/YYYY --brand \"Sigma Feeds\" --feed \"Growers bags\" --bags 2 [--dry-run]\n" +
+        "   or: same with --fuzzy to match by date + brand + bag count only when exactly one row matches.\n" +
+        '   PowerShell: leave a space between closing quote and --feed, e.g. --brand \"Sigma Feeds\" --feed \"Growers bags\"'
     );
   }
-  const matches = await findFeedBagSalesMatchingCriteria(dateStr, brand, feedType, bagsStr);
+  let matches = await findFeedBagSalesMatchingCriteria(dateStr, brand, feedType, bagsStr);
+  if (matches.length === 0 && argvHasFlag("--fuzzy")) {
+    const fuzzy = await findFeedBagSalesByDateBrandBags(dateStr, brand, bagsStr);
+    if (fuzzy.length === 1) {
+      matches = fuzzy;
+    } else if (fuzzy.length > 1) {
+      const ids = fuzzy.map((m) => `${m.id}(${m.feed_type})`).join(", ");
+      const hint = await formatBagSaleDeleteNoMatchHint(dateStr, brand, feedType, bagsStr);
+      throw new Error(`--fuzzy found multiple rows on that date for this brand and bag count: ${ids}.${hint}`);
+    }
+  }
   if (matches.length === 0) {
-    throw new Error("No matching bag sale rows (check date, brand, feed type, and bag count).");
+    const hint = await formatBagSaleDeleteNoMatchHint(dateStr, brand, feedType, bagsStr);
+    throw new Error(
+      "No matching bag sale rows (check date, brand, feed type, and bag count). If the sale is on Render, set AMANA_DATA_DIR to your disk mount path, or use --fuzzy when only one Sigma line matches that day and bag count." +
+        hint
+    );
   }
   if (matches.length > 1) {
     const ids = matches.map((m) => m.id).join(", ");

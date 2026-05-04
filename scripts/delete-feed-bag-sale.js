@@ -5,7 +5,11 @@
  *
  * Examples:
  *   node scripts/delete-feed-bag-sale.js --date 01/05/2026 --brand "Sigma Feeds" --feed "Growers bags" --bags 2
- *   node scripts/delete-feed-bag-sale.js --date 1/05/2026 --brand "Sigma Feeds" --feed "Growers bags" --bags 2 --dry-run
+ *   node scripts/delete-feed-bag-sale.js --date 01/05/2026 --brand "Sigma Feeds" --feed "Starter bags" --bags 2 --dry-run
+ *   npm run delete-bag-sale -- --date 01/05/2026 --brand "Sigma Feeds" --feed "Growers bags" --bags 2
+ *     (must be a space before --feed; do not write "Sigma Feeds"--feed)
+ *   npm run delete-bag-sale -- --date 01/05/2026 --brand "Sigma Feeds" --bags 2 --fuzzy
+ *     (--fuzzy: match by date + brand + bag count only if exactly one row; ignores feed type)
  *   node scripts/delete-feed-bag-sale.js --id 42
  */
 const path = require("path");
