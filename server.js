@@ -2268,7 +2268,7 @@ app.delete("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (
     if (current.created_by !== req.user.username) {
       return res.status(403).json({ error: "You can only delete your own bag sales." });
     }
-    if (!assertEmployeeSaleEditAllowed(req, res, current, EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS)) return;
+    /** No time window for delete (edit/update still uses 4 hours on PUT). */
   }
   try {
     await deleteFeedBagSaleRowById(idNum);
