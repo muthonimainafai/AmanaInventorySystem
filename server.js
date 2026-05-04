@@ -81,6 +81,8 @@ const MEDICAMENTS_CATALOG = [
   "Booster 1kg",
   "Paraffin 100ml",
   "Paraffin 250ml",
+  "Jiko Big",
+  "Jiko small",
 ];
 
 function normalizeInventoryItemName(value) {
