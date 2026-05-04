@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "wipe-sales": "node scripts/wipe-all-sales.js",
+    "delete-bag-sale": "node scripts/delete-feed-bag-sale.js",
     "desktop": "electron .",
     "desktop:remote": "set AMANA_SERVER_URL=http://localhost:3000&& electron .",
     "dist": "electron-builder --win nsis"

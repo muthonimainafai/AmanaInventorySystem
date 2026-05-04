@@ -754,27 +754,9 @@ async function adjustRetailAccumulatedProfitDelta(brandKey, feedType, profitDelt
 
 const EMPLOYEE_SALE_EDIT_WINDOW_MS = 60 * 60 * 1000;
 
-/** Chick sales only: customer still owes money (positive balance). */
-function employeeChickenSaleHasOutstandingBalance(saleRow) {
-  const totalRaw = Number(saleRow.total_amount);
-  const qty = Number(saleRow.quantity_birds);
-  const unit = Number(saleRow.unit_price);
-  const lineTotal = Number.isFinite(totalRaw)
-    ? totalRaw
-    : (Number.isFinite(qty) && Number.isFinite(unit) ? qty * unit : NaN);
-  const paid = Number(saleRow.money_paid);
-  const paidNum = Number.isFinite(paid) ? paid : 0;
-  if (!Number.isFinite(lineTotal)) return false;
-  return lineTotal - paidNum > 0.005;
-}
-
-/** Employees may only PUT a sale within 1 hour of when it was first recorded (`created_at`). */
+/** Employees may only PUT a bag or kg sale within 1 hour of when it was first recorded (`created_at`). Chicken sales are exempt (see PUT /api/chicken-sales). */
 function assertEmployeeSaleEditAllowed(req, res, saleRow) {
   if (req.user.role !== "employee") return true;
-  /** Chicken sales: allow updates while the customer has not paid in full (partial payment / balance). */
-  if (saleRow.quantity_birds != null && employeeChickenSaleHasOutstandingBalance(saleRow)) {
-    return true;
-  }
   const createdIso = saleRow.created_at || saleRow.updated_at;
   if (!createdIso) {
     res.status(403).json({
@@ -2267,20 +2249,14 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
 });
 
 app.delete("/api/sales/bags/:id", auth, allowRoles("owner"), async (req, res) => {
-  const current = await get("SELECT * FROM sales_bags WHERE id = ?", [Number(req.params.id)]);
+  const idNum = Number(req.params.id);
+  const current = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   try {
-    await adjustInventoryBags({
-      brand: current.brand,
-      feedType: current.feed_type,
-      bagSize: current.bag_size,
-      deltaBags: Number(current.bags_sold),
-      recordProfit: !isThroughPartyBagSaleRow(current),
-    });
+    await deleteFeedBagSaleRowById(idNum);
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-  await run("DELETE FROM sales_bags WHERE id = ?", [Number(req.params.id)]);
   res.json({ ok: true });
 });
 
@@ -2841,7 +2817,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   const currentCh = await get("SELECT * FROM chicken_sales WHERE id = ?", [Number(req.params.id)]);
   if (!currentCh) return res.status(404).json({ error: "Sale not found." });
   if (!(await assertChickenSaleRowMatchesActor(req, res, currentCh))) return;
-  if (!assertEmployeeSaleEditAllowed(req, res, currentCh)) return;
+  /** Chicken sales: employees may edit at any time (no 1-hour window; feed bag/kg sales still use `assertEmployeeSaleEditAllowed`). */
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
   await reverseChickenSaleProfitEffect(currentCh);
   if (!(await assertEmployeeChickenSalePrice(req, res, breed, unitPrice))) return;
@@ -2876,15 +2852,26 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   res.json({ ok: true });
 });
 
-app.delete("/api/chicken-sales/:id", auth, allowRoles("owner"), async (req, res) => {
+app.delete("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const idNum = Number(req.params.id);
-  const row = await get(
-    `SELECT cs.* FROM chicken_sales cs
-     INNER JOIN users u ON u.username = cs.created_by AND u.role = 'owner'
-     WHERE cs.id = ?`,
-    [idNum]
-  );
-  if (!row) return res.status(404).json({ error: "Inventory record not found." });
+  const row = await get("SELECT * FROM chicken_sales WHERE id = ?", [idNum]);
+  if (!row) return res.status(404).json({ error: "Record not found." });
+  if (req.user.role === "owner") {
+    const ownerRow = await get(
+      `SELECT cs.* FROM chicken_sales cs
+       INNER JOIN users u ON u.username = cs.created_by AND u.role = 'owner'
+       WHERE cs.id = ?`,
+      [idNum]
+    );
+    if (!ownerRow) return res.status(404).json({ error: "Inventory record not found." });
+    await reverseChickenSaleProfitEffect(ownerRow);
+    await run("DELETE FROM chicken_sales WHERE id = ?", [idNum]);
+    return res.json({ ok: true });
+  }
+  const creator = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
+  if (creator?.role !== "employee" || row.created_by !== req.user.username) {
+    return res.status(403).json({ error: "You can only delete your own chick sales." });
+  }
   await reverseChickenSaleProfitEffect(row);
   await run("DELETE FROM chicken_sales WHERE id = ?", [idNum]);
   res.json({ ok: true });
@@ -3006,6 +2993,126 @@ async function runWipeAllSalesDataCli() {
   }
 }
 
+/**
+ * Delete one `sales_bags` row like `DELETE /api/sales/bags/:id` (restore stock / reverse margin profit).
+ * For CLI: `node scripts/delete-feed-bag-sale.js --id 12` or `--date 01/05/2026 --brand "Sigma Feeds" --feed "Growers bags" --bags 2`
+ */
+async function deleteFeedBagSaleRowById(idNum) {
+  const current = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
+  if (!current) {
+    throw new Error(`No bag sale found with id ${idNum}.`);
+  }
+  await adjustInventoryBags({
+    brand: current.brand,
+    feedType: current.feed_type,
+    bagSize: current.bag_size,
+    deltaBags: Number(current.bags_sold),
+    recordProfit: !isThroughPartyBagSaleRow(current),
+  });
+  await run("DELETE FROM sales_bags WHERE id = ?", [idNum]);
+  return current;
+}
+
+function argvFlagValue(flag) {
+  const i = process.argv.indexOf(flag);
+  if (i === -1 || i + 1 >= process.argv.length) return null;
+  return process.argv[i + 1];
+}
+
+function argvHasFlag(flag) {
+  return process.argv.includes(flag);
+}
+
+/** Find bag sales matching calendar date (DD/MM/YYYY), brand, feed type, and bags count (normalized like inventory). */
+async function findFeedBagSalesMatchingCriteria(dateStr, brand, feedType, bagsSold) {
+  const day = normalizeInventoryDate(dateStr);
+  if (!day) {
+    throw new Error(`Invalid sale date "${dateStr}". Use DD/MM/YYYY (e.g. 01/05/2026).`);
+  }
+  const wantBags = Number(bagsSold);
+  if (!Number.isFinite(wantBags) || wantBags < 1) {
+    throw new Error("bags must be a positive number.");
+  }
+  const rows = await all("SELECT * FROM sales_bags ORDER BY id DESC");
+  return rows.filter(
+    (r) =>
+      normalizeInventoryDate(r.date) === day &&
+      normalizeBrand(r.brand) === normalizeBrand(brand) &&
+      normalizeFeedType(r.feed_type) === normalizeFeedType(feedType) &&
+      Number(r.bags_sold) === wantBags
+  );
+}
+
+async function runDeleteFeedBagSaleCli() {
+  ensureDb();
+  await initDb();
+  const idRaw = argvFlagValue("--id");
+  const dryRun = argvHasFlag("--dry-run");
+
+  if (idRaw != null) {
+    const idNum = Number(idRaw);
+    if (!Number.isFinite(idNum) || idNum < 1) {
+      throw new Error("Invalid --id (expected a positive integer).");
+    }
+    const row = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
+    if (!row) throw new Error(`No bag sale found with id ${idNum}.`);
+    if (dryRun) {
+      return { dryRun: true, matched: [row], deletedId: null };
+    }
+    await run("BEGIN TRANSACTION");
+    try {
+      await deleteFeedBagSaleRowById(idNum);
+      await run("COMMIT");
+    } catch (err) {
+      try {
+        await run("ROLLBACK");
+      } catch (_e) {
+        // ignore
+      }
+      throw err;
+    }
+    return { dryRun: false, matched: [row], deletedId: idNum };
+  }
+
+  const dateStr = argvFlagValue("--date");
+  const brand = argvFlagValue("--brand");
+  const feedType = argvFlagValue("--feed");
+  const bagsStr = argvFlagValue("--bags");
+  if (!dateStr || !brand || !feedType || bagsStr == null) {
+    throw new Error(
+      "Usage: node scripts/delete-feed-bag-sale.js --id <n> [--dry-run]\n" +
+        "   or: node scripts/delete-feed-bag-sale.js --date DD/MM/YYYY --brand \"Sigma Feeds\" --feed \"Growers bags\" --bags 2 [--dry-run]"
+    );
+  }
+  const matches = await findFeedBagSalesMatchingCriteria(dateStr, brand, feedType, bagsStr);
+  if (matches.length === 0) {
+    throw new Error("No matching bag sale rows (check date, brand, feed type, and bag count).");
+  }
+  if (matches.length > 1) {
+    const ids = matches.map((m) => m.id).join(", ");
+    throw new Error(
+      `Multiple rows match (${ids}). Use --id <id> with one of these, or narrow the criteria.`
+    );
+  }
+  const only = matches[0];
+  if (dryRun) {
+    return { dryRun: true, matched: [only], deletedId: null };
+  }
+  await run("BEGIN TRANSACTION");
+  try {
+    await deleteFeedBagSaleRowById(Number(only.id));
+    await run("COMMIT");
+  } catch (err) {
+    try {
+      await run("ROLLBACK");
+    } catch (_e) {
+      // ignore
+    }
+    throw err;
+  }
+  return { dryRun: false, matched: [only], deletedId: Number(only.id) };
+}
+
 /** Owner: remove all sales history (owner + staff) with full stock/profit reversals. */
 app.post("/api/admin/wipe-all-sales-data", auth, allowRoles("owner"), async (_req, res) => {
   try {
@@ -3078,7 +3185,7 @@ async function stopServer() {
   httpServer = null;
 }
 
-module.exports = { startServer, stopServer, runWipeAllSalesDataCli };
+module.exports = { startServer, stopServer, runWipeAllSalesDataCli, runDeleteFeedBagSaleCli };
 
 if (require.main === module) {
   startServer().catch((error) => {

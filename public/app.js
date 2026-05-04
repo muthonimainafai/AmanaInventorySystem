@@ -677,15 +677,6 @@ function saleWithinEmployeeEditWindow(row) {
   return Date.now() - t <= EMPLOYEE_SALE_EDIT_MS;
 }
 
-/** Chicken sales: editable while there is an unpaid balance; otherwise same 1-hour rule as other sales. */
-function employeeChickenSaleEditable(row) {
-  const total = saleLineTotalChicken(row);
-  const paid = Number(row.money_paid);
-  const paidNum = Number.isFinite(paid) ? paid : 0;
-  if (Number.isFinite(total) && total - paidNum > 0.005) return true;
-  return saleWithinEmployeeEditWindow(row);
-}
-
 function showLoggedOut() {
   landingCard?.classList.remove("hidden");
   loginCard.classList.add("hidden");
@@ -1558,8 +1549,8 @@ function chickenSalesTableRowsHtml() {
     let canEdit = false;
     let canDelete = false;
     if (isEmployeeViewer) {
-      canEdit = employeeChickenSaleEditable(row);
-      canDelete = false;
+      canEdit = true;
+      canDelete = true;
     } else if (state.user.role === "owner") {
       canEdit = isOwnerInventoryRow;
       canDelete = isOwnerInventoryRow;
@@ -2661,17 +2652,10 @@ function wireChickenTableClicks(tbody) {
       if (state.user.role === "owner") {
         clearOwnerCustomerViewPanel();
         highlightChickenRowForOwner(null);
-      }
-      if (state.user.role === "employee") {
-        if (!employeeChickenSaleEditable(row)) {
-          alert(
-            "This sale can no longer be edited (more than 1 hour after it was recorded). Lines with an unpaid balance stay editable until payment is complete."
-          );
+        if (!isChickenRowOwnerInventory(row)) {
+          alert("Only your own inventory rows can be edited here.");
           return;
         }
-      } else if (state.user.role === "owner" && !isChickenRowOwnerInventory(row)) {
-        alert("Only your own inventory rows can be edited here.");
-        return;
       }
       showPage("chicken-inventory");
       state.editChickenId = row.id;
@@ -2716,6 +2700,16 @@ function wireChickenTableClicks(tbody) {
       return;
     }
     if (action === "delete") {
+      if (state.user.role === "employee") {
+        if (!window.confirm("Delete this sale?")) return;
+        try {
+          await api(`/api/chicken-sales/${id}`, { method: "DELETE" });
+          await loadAllData();
+        } catch (error) {
+          alert(error.message);
+        }
+        return;
+      }
       if (state.user.role !== "owner" || !isChickenRowOwnerInventory(row)) return;
       if (!window.confirm("Delete this inventory record?")) return;
       try {
