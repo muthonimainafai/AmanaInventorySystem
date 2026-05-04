@@ -49,6 +49,8 @@ const state = {
   editFeedersDrinkersId: null,
   editMedicamentId: null,
   editGasId: null,
+  expenditureEntries: [],
+  editExpenditureId: null,
 };
 
 const PAGE_HEADINGS = {
@@ -60,6 +62,7 @@ const PAGE_HEADINGS = {
   "feeders-drinkers": "Feeders and Drinkers inventory",
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
+  expenditure: "Expenditure",
 };
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
@@ -183,6 +186,11 @@ const gasSize = document.getElementById("gasSize");
 const gasDateDisplay = document.getElementById("gasDateDisplay");
 const gasDate = document.getElementById("gasDate");
 const gasOpenCalendarBtn = document.getElementById("gasOpenCalendarBtn");
+const expenditureForm = document.getElementById("expenditure-form");
+const expBody = document.getElementById("exp-body");
+const expDateDisplay = document.getElementById("expDateDisplay");
+const expDate = document.getElementById("expDate");
+const expOpenCalendarBtn = document.getElementById("expOpenCalendarBtn");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -397,6 +405,7 @@ function applyEmployeeSalesDateRules() {
     ["sbDateDisplay", "sbDate", "sbOpenCalendarBtn"],
     ["skDateDisplay", "skDate", "skOpenCalendarBtn"],
     ["chDateDisplay", "chDate", "chOpenCalendarBtn"],
+    ["expDateDisplay", "expDate", "expOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -1721,6 +1730,40 @@ function resetGasForm() {
   }
 }
 
+function renderExpenditureTable() {
+  if (!expBody) return;
+  if (state.user?.role !== "employee") return;
+  const rows = state.expenditureEntries || [];
+  const colSpan = 5;
+  if (!rows.length) {
+    expBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
+    return;
+  }
+  expBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${currency(row.money_out)}</td>
+        <td>${currency(row.total)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="exp" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="exp" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+}
+
+function resetExpenditureForm() {
+  if (!expenditureForm) return;
+  expenditureForm.reset();
+  state.editExpenditureId = null;
+  if (expDateDisplay) expDateDisplay.value = "";
+  const saveBtn = document.getElementById("expSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
 function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
@@ -1876,6 +1919,9 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
+  if (page === "expenditure" && state.user?.role !== "employee") {
+    return showPage("sales-bags");
+  }
   state.currentPage = page;
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
@@ -1898,7 +1944,7 @@ function showPage(page) {
   if (page === "gas" && state.user?.role === "employee") {
     pageHeading.textContent = "Gas Sales";
   }
-  if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory") {
+  if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory" || page === "expenditure") {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
   }
@@ -1918,6 +1964,7 @@ function showPage(page) {
   if (page === "feeders-drinkers") renderFeedersDrinkersTable();
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
+  if (page === "expenditure") renderExpenditureTable();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -2089,6 +2136,7 @@ async function loadAllData() {
     api("/api/gas"),
     api("/api/gas/employee-items"),
     api("/api/gas/sales"),
+    api("/api/expenditure"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -2101,6 +2149,7 @@ async function loadAllData() {
   state.gasInventory = extras[8].status === "fulfilled" ? extras[8].value : [];
   state.gasEmployeeItems = extras[9].status === "fulfilled" ? extras[9].value : [];
   state.gasSales = extras[10].status === "fulfilled" ? extras[10].value : [];
+  state.expenditureEntries = extras[11].status === "fulfilled" ? extras[11].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -2124,6 +2173,7 @@ async function loadAllData() {
   renderFeedersDrinkersTable();
   renderMedicamentsTable();
   renderGasTable();
+  renderExpenditureTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
 }
@@ -2464,9 +2514,19 @@ wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
 if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, fdDate, fdOpenCalendarBtn);
 if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
+if (expDateDisplay && expDate && expOpenCalendarBtn) wireDatePicker(expDateDisplay, expDate, expOpenCalendarBtn);
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
+
+document.getElementById("expMoneyOut")?.addEventListener("input", () => {
+  const totalEl = document.getElementById("expTotal");
+  const outEl = document.getElementById("expMoneyOut");
+  if (!totalEl || !outEl) return;
+  if (state.editExpenditureId) return;
+  const t = totalEl.value.trim();
+  if (t === "" || Number(t) === 0) totalEl.value = outEl.value;
+});
 
 document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {
@@ -2497,6 +2557,7 @@ document.getElementById("chClearBtn").addEventListener("click", resetChickenForm
 document.getElementById("fdClearBtn")?.addEventListener("click", resetFeedersDrinkersForm);
 document.getElementById("medClearBtn")?.addEventListener("click", resetMedicamentsForm);
 document.getElementById("gasClearBtn")?.addEventListener("click", resetGasForm);
+document.getElementById("expClearBtn")?.addEventListener("click", resetExpenditureForm);
 
 fdForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2630,6 +2691,30 @@ gasForm?.addEventListener("submit", async (event) => {
       await api("/api/gas", { method: "POST", body: JSON.stringify(payload) });
     }
     resetGasForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+expenditureForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.user?.role !== "employee") return;
+  const dateValue = expDateDisplay.value.trim();
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("expDescription")?.value || "").trim(),
+    money_out: Number(document.getElementById("expMoneyOut")?.value || 0),
+    total: Number(document.getElementById("expTotal")?.value || 0),
+  };
+  try {
+    if (state.editExpenditureId) {
+      await api(`/api/expenditure/${state.editExpenditureId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/expenditure", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetExpenditureForm();
     await loadAllData();
   } catch (error) {
     alert(error.message);
@@ -3272,6 +3357,41 @@ gasBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this record?")) return;
     try {
       await api(`/api/gas/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+expBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "exp") return;
+  if (state.user?.role !== "employee") return;
+  const row = state.expenditureEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editExpenditureId = row.id;
+    if (expDate) expDate.value = toIsoDate(row.date);
+    if (expDateDisplay) expDateDisplay.value = formatDateDMY(row.date);
+    const desc = document.getElementById("expDescription");
+    const out = document.getElementById("expMoneyOut");
+    const tot = document.getElementById("expTotal");
+    if (desc) desc.value = row.description || "";
+    if (out) out.value = row.money_out ?? 0;
+    if (tot) tot.value = row.total ?? 0;
+    const saveBtn = document.getElementById("expSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/expenditure/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
