@@ -43,8 +43,12 @@ const state = {
   medicamentsInventory: [],
   medicamentsEmployeeItems: [],
   medicamentsSales: [],
+  gasInventory: [],
+  gasEmployeeItems: [],
+  gasSales: [],
   editFeedersDrinkersId: null,
   editMedicamentId: null,
+  editGasId: null,
 };
 
 const PAGE_HEADINGS = {
@@ -55,11 +59,19 @@ const PAGE_HEADINGS = {
   "sales-kg": "Sales Per Kg",
   "feeders-drinkers": "Feeders and Drinkers inventory",
   medicaments: "Medicaments inventory",
+  gas: "Gas Inventory",
 };
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
 const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory"]);
-const OWNER_ALLOWED_PAGES = new Set(["inventory", "retail-inventory", "chicken-inventory", "feeders-drinkers", "medicaments"]);
+const OWNER_ALLOWED_PAGES = new Set([
+  "inventory",
+  "retail-inventory",
+  "chicken-inventory",
+  "feeders-drinkers",
+  "medicaments",
+  "gas",
+]);
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
 
@@ -164,6 +176,13 @@ const medItem = document.getElementById("medItem");
 const medDateDisplay = document.getElementById("medDateDisplay");
 const medDate = document.getElementById("medDate");
 const medOpenCalendarBtn = document.getElementById("medOpenCalendarBtn");
+const gasForm = document.getElementById("gas-form");
+const gasBody = document.getElementById("gas-body");
+const gasSizeKg = document.getElementById("gasSizeKg");
+const gasSize = document.getElementById("gasSize");
+const gasDateDisplay = document.getElementById("gasDateDisplay");
+const gasDate = document.getElementById("gasDate");
+const gasOpenCalendarBtn = document.getElementById("gasOpenCalendarBtn");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -301,7 +320,7 @@ function updateChickenProfitDisplay() {
   });
   const shop = state.chickenProfitSummary?.today || state.shopToday || "";
   const meta = shop
-    ? `Shop day ${shop}. Cumulative and today count staff chick sales only. Your inventory lines do not add to these totals; staff rows show margin in the Profit (sale) column.`
+    ? `Shop day ${shop}. Cumulative and today count cleared staff chick sales only (Pending shows KES 0 in the table until cleared). Your inventory lines do not add to these totals.`
     : "";
   document.querySelectorAll(".js-chicken-profit-meta").forEach((el) => {
     el.textContent = meta;
@@ -332,6 +351,20 @@ function updateMedicamentsProfitDisplay() {
     ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of item accumulated profits).`
     : "Cumulative profit from employee sales only (sum of item accumulated profits).";
   document.querySelectorAll(".js-med-accumulated-profit-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
+function updateGasProfitDisplay() {
+  const total = (state.gasInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const val = currency(total);
+  document.querySelectorAll(".js-gas-accumulated-profit-value").forEach((el) => {
+    el.textContent = val;
+  });
+  const meta = state.shopToday
+    ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of size accumulated profits).`
+    : "Cumulative profit from employee sales only (sum of size accumulated profits).";
+  document.querySelectorAll(".js-gas-accumulated-profit-meta").forEach((el) => {
     el.textContent = meta;
   });
 }
@@ -642,20 +675,24 @@ function fillOwnerCustomerViewPanel(row) {
   if (stEl) stEl.value = chickenSalePaymentStatusLabel(row);
 }
 
-/** Profit for this row: margin × chicks. Only owner inventory lines are KES 0 (creator_role owner). */
+function chickenStaffPaymentIsCleared(row) {
+  return String(row?.payment_status ?? "pending").trim().toLowerCase() === "cleared";
+}
+
+/** Profit for this row: margin × chicks for staff only when Payments is Cleared; owner inventory lines stay KES 0. */
 function chickenSaleLineProfit(row) {
   const cr = String(row.creator_role || "").toLowerCase();
   if (cr === "owner") return 0;
   const q = Number(row.quantity_birds) || 0;
-  if (row.margin_snap == null || row.margin_snap === "") return null;
+  if (row.margin_snap == null || row.margin_snap === "") return 0;
   const m = Number(row.margin_snap);
-  if (!Number.isFinite(m)) return null;
+  if (!Number.isFinite(m)) return 0;
+  if (!chickenStaffPaymentIsCleared(row)) return 0;
   return q * m;
 }
 
 function formatChickenSaleProfitCell(row) {
-  const p = chickenSaleLineProfit(row);
-  return p == null ? "—" : currency(p);
+  return currency(chickenSaleLineProfit(row));
 }
 
 /** Rows you recorded as shop inventory (not staff chick sales). */
@@ -669,6 +706,8 @@ function isChickenRowOwnerInventory(row) {
 const EMPLOYEE_SALE_EDIT_MS = 60 * 60 * 1000;
 /** Sales Per Bags (employee): edit/delete allowed within this window after the sale was recorded. */
 const EMPLOYEE_BAG_SALE_EDIT_MS = 4 * 60 * 60 * 1000;
+/** Sales Per Kg (employee): Delete only within this window after the sale was recorded. */
+const EMPLOYEE_KG_SALE_DELETE_MS = 4 * 60 * 60 * 1000;
 
 /** Sales Per Kg and similar: 1 hour after `created_at` / `updated_at`. */
 function saleWithinEmployeeEditWindow(row) {
@@ -685,6 +724,21 @@ function saleWithinEmployeeBagEditWindow(row) {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return false;
   return Date.now() - t <= EMPLOYEE_BAG_SALE_EDIT_MS;
+}
+
+function saleWithinEmployeeKgDeleteWindow(row) {
+  const iso = row.created_at || row.updated_at;
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return false;
+  return Date.now() - t <= EMPLOYEE_KG_SALE_DELETE_MS;
+}
+
+/** Own kg sale row and within 4 hours of record time (matches server DELETE). */
+function employeeKgSaleDeleteAllowed(row) {
+  if (state.user?.role !== "employee") return false;
+  if (String(row?.created_by || "") !== String(state.user?.username || "")) return false;
+  return saleWithinEmployeeKgDeleteWindow(row);
 }
 
 /** Own bag sale row — staff may delete anytime (corrects mistakes; server reverses stock and margin). */
@@ -745,14 +799,15 @@ function showLoggedIn() {
     const shouldShow = isOwner ? OWNER_ALLOWED_PAGES.has(page) : !OWNER_INVENTORY_PAGES.has(page);
     btn.classList.toggle("hidden", !shouldShow);
   });
-  [fdForm, medForm].forEach((frm) => {
+  [fdForm, medForm, gasForm].forEach((frm) => {
     if (!frm) return;
     frm.querySelectorAll("input, select, button").forEach((el) => {
       if (el.classList?.contains("secondary")) return;
-      if (el.id === "fdOpenCalendarBtn" || el.id === "medOpenCalendarBtn") return;
-      if (el.id === "fdDateDisplay" || el.id === "medDateDisplay") return;
+      if (el.id === "fdOpenCalendarBtn" || el.id === "medOpenCalendarBtn" || el.id === "gasOpenCalendarBtn") return;
+      if (el.id === "fdDateDisplay" || el.id === "medDateDisplay" || el.id === "gasDateDisplay") return;
       if (!isOwner && el.closest(".actions")) return;
       if (!isOwner && frm === medForm && (el.tagName === "INPUT" || el.tagName === "SELECT")) el.disabled = true;
+      if (!isOwner && frm === gasForm && (el.tagName === "INPUT" || el.tagName === "SELECT")) el.disabled = true;
       if (isOwner) el.disabled = false;
     });
   });
@@ -772,10 +827,23 @@ function showLoggedIn() {
     });
     if (medDate) medDate.disabled = false;
   }
+  if (gasForm && !isOwner) {
+    gasForm.querySelectorAll("input, select").forEach((el) => {
+      const editable =
+        el.id === "gasDateDisplay" ||
+        el.id === "gasSize" ||
+        el.id === "gasQuantity" ||
+        el.id === "gasEmployeeSellingPrice";
+      el.disabled = !editable;
+    });
+    if (gasDate) gasDate.disabled = false;
+  }
   const fdSaveBtn = document.getElementById("fdSaveBtn");
   if (fdSaveBtn) fdSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
   const medSaveBtn = document.getElementById("medSaveBtn");
   if (medSaveBtn) medSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
+  const gasSaveBtn = document.getElementById("gasSaveBtn");
+  if (gasSaveBtn) gasSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
 }
 
 function showVehicleLoggedIn() {
@@ -1272,12 +1340,13 @@ function renderSalesKgTable() {
     salesKgBody.innerHTML = '<tr><td colspan="11" class="empty">No sales.</td></tr>';
     return;
   }
-  const canDelete = state.user.role === "owner";
   const shopDay = state.shopToday || clientShopTodayDMY();
   salesKgBody.innerHTML = joinRowsWithDateSeparators(state.salesKg, 11, (row) => {
     const canEdit =
       state.user.role === "owner" ||
       (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
+    const canDelete =
+      state.user.role === "owner" || (state.user.role === "employee" && employeeKgSaleDeleteAllowed(row));
     const bagsFromKg =
       row.bags_sold_cumulative != null ? row.bags_sold_cumulative : Number(row.bags_sold || 0);
     const bagOpenedCell =
@@ -1406,6 +1475,23 @@ function populateMedicamentsItems() {
   if (current && [...medItem.options].some((o) => o.value === current)) medItem.value = current;
 }
 
+function populateGasSizes() {
+  if (!gasSize) return;
+  const current = gasSize.value;
+  gasSize.innerHTML = '<option value="">Select size</option>';
+  const items = state.gasEmployeeItems || [];
+  for (const row of items) {
+    const sk = row.size_kg;
+    if (sk == null || sk === "") continue;
+    const opt = document.createElement("option");
+    opt.value = String(sk);
+    const qty = Number(row.quantity_in_stock) || 0;
+    opt.textContent = `${sk} kg (in stock: ${qty})`;
+    gasSize.appendChild(opt);
+  }
+  if (current && [...gasSize.options].some((o) => o.value === current)) gasSize.value = current;
+}
+
 function currentFdSellingPrice(itemName) {
   const rows = (state.feedersDrinkersInventory || []).filter((r) => String(r.item_name || "") === String(itemName || ""));
   if (!rows.length) return null;
@@ -1422,10 +1508,21 @@ function currentMedSellingPrice(itemName) {
   return Number.isFinite(p) ? p : null;
 }
 
+function currentGasSellingPrice(sizeKgKey) {
+  const key = Number(sizeKgKey);
+  if (!Number.isFinite(key) || key <= 0) return null;
+  const rows = (state.gasInventory || []).filter((r) => Number(r.size_kg) === key);
+  if (!rows.length) return null;
+  const row = rows[0];
+  const p = Number(row.selling_price);
+  return Number.isFinite(p) ? p : null;
+}
+
 function refreshEmployeeNewPageSellingPrices() {
   if (state.user?.role !== "employee") return;
   const fdSell = document.getElementById("fdEmployeeSellingPrice");
   const medSell = document.getElementById("medEmployeeSellingPrice");
+  const gasSell = document.getElementById("gasEmployeeSellingPrice");
   if (fdSell) {
     const p = currentFdSellingPrice(fdItem?.value);
     fdSell.value = p == null ? "" : String(p);
@@ -1433,6 +1530,10 @@ function refreshEmployeeNewPageSellingPrices() {
   if (medSell) {
     const p = currentMedSellingPrice(medItem?.value);
     medSell.value = p == null ? "" : String(p);
+  }
+  if (gasSell) {
+    const p = currentGasSellingPrice(gasSize?.value);
+    gasSell.value = p == null ? "" : String(p);
   }
 }
 
@@ -1538,6 +1639,57 @@ function renderMedicamentsTable() {
       </tr>`);
 }
 
+function renderGasTable() {
+  if (!gasBody) return;
+  const isOwner = state.user.role === "owner";
+  const rows = isOwner ? state.gasInventory : state.gasSales;
+  const colSpan = isOwner ? 14 : 7;
+  if (!rows.length) {
+    gasBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
+    return;
+  }
+  if (!isOwner) {
+    gasBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.size_kg}</td>
+        <td>${row.quantity_sold}</td>
+        <td>${currency(row.total_amount)}</td>
+        <td><span class="status-ok">SOLD</span></td>
+        <td>${row.created_by}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="gas-sale" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="gas-sale" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+    return;
+  }
+  gasBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${row.size_kg}</td>
+        <td>${row.quantity_in_stock}</td>
+        <td>${currency((Number(row.accumulated_stock ?? row.quantity_in_stock) || 0) * (Number(row.buying_price) || 0))}</td>
+        <td>${currency(row.buying_price)}</td>
+        <td>${currency(row.selling_price)}</td>
+        <td>${row.quantity_in_stock}</td>
+        <td>${row.accumulated_stock != null ? row.accumulated_stock : row.quantity_in_stock}</td>
+        <td>${currency(row.profit_margin ?? 0)}</td>
+        <td>${currency(row.accumulated_profit ?? 0)}</td>
+        <td>${row.reorder_level}</td>
+        <td>${statusLabel(row)}</td>
+        <td>${row.created_by}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="gas" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="gas" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`);
+}
+
 function resetFeedersDrinkersForm() {
   if (!fdForm) return;
   fdForm.reset();
@@ -1555,6 +1707,17 @@ function resetMedicamentsForm() {
   if (medDateDisplay) medDateDisplay.value = "";
   if (document.getElementById("medSaveBtn")) {
     document.getElementById("medSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
+  }
+}
+
+function resetGasForm() {
+  if (!gasForm) return;
+  gasForm.reset();
+  state.editGasId = null;
+  if (gasSizeKg) gasSizeKg.readOnly = false;
+  if (gasDateDisplay) gasDateDisplay.value = "";
+  if (document.getElementById("gasSaveBtn")) {
+    document.getElementById("gasSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
   }
 }
 
@@ -1642,10 +1805,9 @@ function renderChickenSalesHistoryTable() {
       invBirds += Number(r.quantity_birds) || 0;
       invRevenue += saleLineTotalChicken(r);
     }
-    const p = chickenSaleLineProfit(r);
-    if (p != null) staffMarginSum += p;
+    staffMarginSum += chickenSaleLineProfit(r);
   }
-  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (matches Profit column for staff rows). Highlight above uses the same staff-only totals.`;
+  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (cleared payments only; matches Profit column). Highlight above uses the same basis.`;
 }
 
 function populateChickenBreedSelect() {
@@ -1733,6 +1895,9 @@ function showPage(page) {
   if (page === "medicaments" && state.user?.role === "employee") {
     pageHeading.textContent = "Medicaments";
   }
+  if (page === "gas" && state.user?.role === "employee") {
+    pageHeading.textContent = "Gas Sales";
+  }
   if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory") {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -1752,6 +1917,7 @@ function showPage(page) {
   }
   if (page === "feeders-drinkers") renderFeedersDrinkersTable();
   if (page === "medicaments") renderMedicamentsTable();
+  if (page === "gas") renderGasTable();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -1920,6 +2086,9 @@ async function loadAllData() {
     api("/api/feeders-drinkers/sales"),
     api("/api/medicaments/employee-items"),
     api("/api/medicaments/sales"),
+    api("/api/gas"),
+    api("/api/gas/employee-items"),
+    api("/api/gas/sales"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -1929,16 +2098,21 @@ async function loadAllData() {
   state.feedersDrinkersSales = extras[5].status === "fulfilled" ? extras[5].value : [];
   state.medicamentsEmployeeItems = extras[6].status === "fulfilled" ? extras[6].value : [];
   state.medicamentsSales = extras[7].status === "fulfilled" ? extras[7].value : [];
+  state.gasInventory = extras[8].status === "fulfilled" ? extras[8].value : [];
+  state.gasEmployeeItems = extras[9].status === "fulfilled" ? extras[9].value : [];
+  state.gasSales = extras[10].status === "fulfilled" ? extras[10].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
   updateChickenProfitDisplay();
   updateFeedersDrinkersProfitDisplay();
   updateMedicamentsProfitDisplay();
+  updateGasProfitDisplay();
   updateOwnerCombinedProfitDisplay();
   populateChickenBreedSelect();
   populateFeedersDrinkersItems();
   populateMedicamentsItems();
+  populateGasSizes();
   refreshEmployeeNewPageSellingPrices();
   renderTable();
   renderOwnerPassThroughBagSales();
@@ -1949,6 +2123,7 @@ async function loadAllData() {
   renderRetailInventoryTable();
   renderFeedersDrinkersTable();
   renderMedicamentsTable();
+  renderGasTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
 }
@@ -2288,8 +2463,10 @@ wireDatePicker(skDateDisplay, skDate, skOpenCalendarBtn);
 wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
 if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, fdDate, fdOpenCalendarBtn);
 if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
+if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
+gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 
 document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {
@@ -2319,6 +2496,7 @@ document.getElementById("skClearBtn").addEventListener("click", resetSalesKgForm
 document.getElementById("chClearBtn").addEventListener("click", resetChickenForm);
 document.getElementById("fdClearBtn")?.addEventListener("click", resetFeedersDrinkersForm);
 document.getElementById("medClearBtn")?.addEventListener("click", resetMedicamentsForm);
+document.getElementById("gasClearBtn")?.addEventListener("click", resetGasForm);
 
 fdForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2404,6 +2582,54 @@ medForm?.addEventListener("submit", async (event) => {
       await api("/api/medicaments", { method: "POST", body: JSON.stringify(payload) });
     }
     resetMedicamentsForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+gasForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = gasDateDisplay.value.trim();
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  if (state.user?.role === "employee") {
+    if (!gasSize?.value) return alert("Select a cylinder size.");
+    const payloadSale = {
+      date: dateValue,
+      size_kg: Number(gasSize.value),
+      quantity_sold: Number(document.getElementById("gasQuantity")?.value || 0),
+    };
+    try {
+      if (state.editGasId) {
+        await api(`/api/gas/sales/${state.editGasId}`, { method: "PUT", body: JSON.stringify(payloadSale) });
+      } else {
+        await api("/api/gas/sales", { method: "POST", body: JSON.stringify(payloadSale) });
+      }
+      resetGasForm();
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  const sizeKg = Number(gasSizeKg?.value || 0);
+  if (!Number.isFinite(sizeKg) || sizeKg <= 0) return alert("Cylinder size (kg) must be a positive number.");
+  const payload = {
+    date: dateValue,
+    size_kg: sizeKg,
+    quantity_in_stock: Number(document.getElementById("gasQuantity")?.value || 0),
+    buying_price: Number(document.getElementById("gasBuyingPrice")?.value || 0),
+    selling_price: Number(document.getElementById("gasSellingPrice")?.value || 0),
+    profit_margin: Number(document.getElementById("gasProfitMargin")?.value || 0),
+    reorder_level: Number(document.getElementById("gasReorderLevel")?.value || 0),
+  };
+  try {
+    if (state.editGasId) {
+      await api(`/api/gas/${state.editGasId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/gas", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetGasForm();
     await loadAllData();
   } catch (error) {
     alert(error.message);
@@ -2647,6 +2873,10 @@ salesKgBody.addEventListener("click", async (event) => {
     return;
   }
   if (action === "delete") {
+    if (state.user.role === "employee" && !employeeKgSaleDeleteAllowed(row)) {
+      alert("You can only delete your own kg sales within 4 hours of when they were recorded.");
+      return;
+    }
     if (!window.confirm("Delete this sale?")) return;
     try {
       await api(`/api/sales/kg/${id}`, { method: "DELETE" });
@@ -2972,6 +3202,76 @@ medBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this record?")) return;
     try {
       await api(`/api/medicaments/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+gasBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || (kind !== "gas" && kind !== "gas-sale")) return;
+  const row =
+    kind === "gas"
+      ? state.gasInventory.find((r) => String(r.id) === String(id))
+      : state.gasSales.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (kind === "gas-sale") {
+    if (action === "edit") {
+      state.editGasId = row.id;
+      gasDate.value = toIsoDate(row.date);
+      gasDateDisplay.value = formatDateDMY(row.date);
+      if (gasSize) {
+        const sk = String(row.size_kg);
+        if (![...gasSize.options].some((o) => o.value === sk)) {
+          const opt = document.createElement("option");
+          opt.value = sk;
+          opt.textContent = `${row.size_kg} kg (not in current stock list)`;
+          gasSize.appendChild(opt);
+        }
+        gasSize.value = sk;
+      }
+      document.getElementById("gasQuantity").value = row.quantity_sold;
+      refreshEmployeeNewPageSellingPrices();
+      document.getElementById("gasSaveBtn").textContent = "Update sale";
+      return;
+    }
+    if (action === "delete") {
+      if (!window.confirm("Delete this sale?")) return;
+      try {
+        await api(`/api/gas/sales/${id}`, { method: "DELETE" });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      }
+      return;
+    }
+  }
+  if (action === "edit") {
+    state.editGasId = row.id;
+    gasDate.value = toIsoDate(row.date);
+    gasDateDisplay.value = formatDateDMY(row.date);
+    if (gasSizeKg) {
+      gasSizeKg.value = row.size_kg;
+      gasSizeKg.readOnly = true;
+    }
+    document.getElementById("gasQuantity").value = row.quantity_in_stock;
+    document.getElementById("gasBuyingPrice").value = row.buying_price;
+    document.getElementById("gasSellingPrice").value = row.selling_price;
+    document.getElementById("gasProfitMargin").value = row.profit_margin ?? 0;
+    document.getElementById("gasReorderLevel").value = row.reorder_level;
+    document.getElementById("gasSaveBtn").textContent = "Update record";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this record?")) return;
+    try {
+      await api(`/api/gas/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);

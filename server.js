@@ -446,6 +446,39 @@ async function initDb() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS gas_inventory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      size_kg REAL NOT NULL,
+      quantity_in_stock INTEGER NOT NULL,
+      accumulated_stock INTEGER NOT NULL DEFAULT 0,
+      buying_price REAL NOT NULL,
+      selling_price REAL NOT NULL,
+      profit_margin REAL NOT NULL DEFAULT 0,
+      accumulated_profit REAL NOT NULL DEFAULT 0,
+      reorder_level INTEGER NOT NULL,
+      created_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS gas_sales (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      size_kg REAL NOT NULL,
+      quantity_sold INTEGER NOT NULL,
+      price_per_item REAL NOT NULL,
+      total_amount REAL NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await run(
+    "UPDATE gas_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
+  ).catch(() => {});
+
   const accBagsMigrated = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_bags_v1"]);
   if (!accBagsMigrated || accBagsMigrated.value !== "1") {
     await run(`UPDATE inventory SET accumulated_bags = quantity_in_stock`);
@@ -496,9 +529,46 @@ async function initDb() {
   }
   await run("DELETE FROM vehicle_users WHERE role = 'staff'");
   await zeroOwnerChickenSaleMarginSnaps();
+  await migrateChickenBreedAccumulatedProfitClearedOnlyV1();
 }
 
-const CREATED_BY_TABLES = ["inventory", "sales_bags", "sales_kg", "retail_feed_pricing", "chicken_sales"];
+/** One-time: align per-breed accumulated_profit with cleared staff sales only (pending no longer counts). */
+async function migrateChickenBreedAccumulatedProfitClearedOnlyV1() {
+  await run(
+    `CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)`
+  ).catch(() => {});
+  const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["chicken_profit_cleared_only_v1"]);
+  if (done) return;
+  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'cleared'`;
+  const breeds = await all("SELECT breed FROM chicken_breeds");
+  const nowIso = new Date().toISOString();
+  for (const { breed } of breeds) {
+    const sumRow = await get(
+      `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS s
+       FROM chicken_sales cs
+       INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'
+       WHERE cs.breed = ? AND ${clearedCond}`,
+      [breed]
+    );
+    const sum = Number(sumRow?.s) || 0;
+    await run(`UPDATE chicken_breeds SET accumulated_profit = ?, updated_at = ? WHERE breed = ?`, [
+      sum,
+      nowIso,
+      breed,
+    ]);
+  }
+  await run("INSERT INTO app_migrations (id) VALUES (?)", ["chicken_profit_cleared_only_v1"]);
+}
+
+const CREATED_BY_TABLES = [
+  "inventory",
+  "sales_bags",
+  "sales_kg",
+  "retail_feed_pricing",
+  "chicken_sales",
+  "gas_inventory",
+  "gas_sales",
+];
 
 async function renameCreatedByEverywhere(oldName, newName) {
   if (!oldName || !newName || oldName === newName) return;
@@ -755,10 +825,12 @@ async function adjustRetailAccumulatedProfitDelta(brandKey, feedType, profitDelt
 const EMPLOYEE_SALE_EDIT_WINDOW_MS = 60 * 60 * 1000;
 /** Sales Per Bags only: staff may edit or delete their own rows within this window after `created_at`. */
 const EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS = 4 * 60 * 60 * 1000;
+/** Sales Per Kg: staff may DELETE their own rows within this window after `created_at` (PUT still uses 1h). */
+const EMPLOYEE_KG_SALE_DELETE_WINDOW_MS = 4 * 60 * 60 * 1000;
 
 /**
- * Employees may only PUT/DELETE a bag or kg sale within the allowed window after first record (`created_at`).
- * Bag sales use `EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS` (4h); kg sales use default 1h. Chicken sales are exempt.
+ * Employees may only change a sale within the allowed window after first record (`created_at`).
+ * Bag PUT: `EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS` (4h). Kg PUT: default 1h. Kg DELETE: `EMPLOYEE_KG_SALE_DELETE_WINDOW_MS` (4h). Chicken exempt.
  */
 function assertEmployeeSaleEditAllowed(req, res, saleRow, editWindowMs) {
   if (req.user.role !== "employee") return true;
@@ -1022,6 +1094,11 @@ async function adjustChickenBreedAccumulatedProfit(breed, deltaProfit) {
   );
 }
 
+/** Staff chick sales: margin counts toward breed totals and UI only when payment is Cleared. */
+function chickenStaffSalePaymentIsCleared(row) {
+  return String(row?.payment_status ?? "pending").trim().toLowerCase() === "cleared";
+}
+
 async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
   if (req.user.role !== "employee") return true;
   const row = await get("SELECT selling_price FROM chicken_breeds WHERE breed = ?", [breed]);
@@ -1127,6 +1204,7 @@ async function reverseChickenSaleProfitEffect(row) {
   if (!row || !row.breed) return;
   const u = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
   if (u?.role !== "employee") return;
+  if (!chickenStaffSalePaymentIsCleared(row)) return;
   if (row.margin_snap == null) return;
   const m = Number(row.margin_snap);
   if (!Number.isFinite(m) || m === 0) return;
@@ -1134,20 +1212,36 @@ async function reverseChickenSaleProfitEffect(row) {
   await adjustChickenBreedAccumulatedProfit(row.breed, -q * m);
 }
 
-async function computeChickenProfitSummary() {
+/**
+ * Staff margin totals: only rows with Payments = Cleared (pending counts as 0).
+ * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
+ */
+async function computeChickenProfitSummary(employeeUsernameOnly) {
   const today = todayDMY();
-  const employeeMarginSql = `FROM chicken_sales cs
+  const clearedCond = `(LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'cleared')`;
+  const baseJoin = `FROM chicken_sales cs
      INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'`;
+  const paramsToday = [today];
+  let whereToday = `WHERE cs.date = ? AND ${clearedCond}`;
+  if (employeeUsernameOnly) {
+    whereToday += " AND cs.created_by = ?";
+    paramsToday.push(employeeUsernameOnly);
+  }
   const row = await get(
-    `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS t
-     ${employeeMarginSql}
-     WHERE cs.date = ?`,
-    [today]
+    `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS t ${baseJoin} ${whereToday}`,
+    paramsToday
+  );
+  const paramsCum = [];
+  let whereCum = `WHERE ${clearedCond}`;
+  if (employeeUsernameOnly) {
+    whereCum += " AND cs.created_by = ?";
+    paramsCum.push(employeeUsernameOnly);
+  }
+  const cumRow = await get(
+    `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS c ${baseJoin} ${whereCum}`,
+    paramsCum
   );
   const todayProfit = Number(row?.t) || 0;
-  const cumRow = await get(
-    `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS c ${employeeMarginSql}`
-  );
   const cumulativeProfit = Number(cumRow?.c) || 0;
   return { todayProfit, cumulativeProfit, today, timeZone: AMANA_TZ };
 }
@@ -2117,6 +2211,298 @@ app.delete("/api/medicaments/:id", auth, allowRoles("owner"), async (req, res) =
   res.json({ ok: true });
 });
 
+function normalizeGasSizeKg(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 1000) / 1000;
+}
+
+async function getGasRowsForSize(sizeKg) {
+  const sk = normalizeGasSizeKg(sizeKg);
+  if (sk == null) return [];
+  return await all("SELECT * FROM gas_inventory WHERE size_kg = ? ORDER BY id ASC", [sk]);
+}
+
+async function getGasCurrentLine(sizeKg) {
+  const sk = normalizeGasSizeKg(sizeKg);
+  if (sk == null) return null;
+  const rows = await all("SELECT * FROM gas_inventory WHERE size_kg = ? ORDER BY id DESC", [sk]);
+  return rows.length ? rows[0] : null;
+}
+
+async function adjustGasStock(sizeKg, deltaQty, recordProfit = true) {
+  const rows = await getGasRowsForSize(sizeKg);
+  if (!rows.length) throw new Error("No stock record found for this cylinder size.");
+  const delta = Number(deltaQty);
+  if (!Number.isFinite(delta)) throw new Error("Invalid quantity.");
+  const nowIso = new Date().toISOString();
+  if (delta >= 0) {
+    const target = rows[rows.length - 1];
+    const nextQty = Number(target.quantity_in_stock || 0) + delta;
+    const margin = Number(target.profit_margin || 0);
+    const profitDelta = recordProfit ? -delta * margin : 0;
+    const nextAccumulatedProfit = Number(target.accumulated_profit || 0) + profitDelta;
+    await run("UPDATE gas_inventory SET quantity_in_stock = ?, accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      nextQty,
+      nextAccumulatedProfit,
+      nowIso,
+      target.id,
+    ]);
+    return;
+  }
+  let remaining = -delta;
+  const available = rows.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0);
+  if (available < remaining) throw new Error("Not enough stock for this sale.");
+  for (const row of rows) {
+    if (remaining <= 0) break;
+    const q = Number(row.quantity_in_stock || 0);
+    if (q <= 0) continue;
+    const take = Math.min(q, remaining);
+    const margin = Number(row.profit_margin || 0);
+    const profitDelta = recordProfit ? take * margin : 0;
+    const nextAccumulatedProfit = Number(row.accumulated_profit || 0) + profitDelta;
+    await run("UPDATE gas_inventory SET quantity_in_stock = ?, accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      q - take,
+      nextAccumulatedProfit,
+      nowIso,
+      row.id,
+    ]);
+    remaining -= take;
+  }
+}
+
+app.get("/api/gas", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  const rows = await all("SELECT * FROM gas_inventory ORDER BY id DESC");
+  res.json(rows);
+});
+
+app.get("/api/gas/employee-items", auth, allowRoles("employee"), async (_req, res) => {
+  const rows = await all(
+    `SELECT size_kg, COALESCE(SUM(quantity_in_stock), 0) AS quantity_in_stock
+     FROM gas_inventory
+     GROUP BY size_kg
+     HAVING COALESCE(SUM(quantity_in_stock), 0) > 0
+     ORDER BY size_kg ASC`
+  );
+  res.json(rows);
+});
+
+app.get("/api/gas/sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (req.user.role === "owner") {
+    const rows = await all("SELECT * FROM gas_sales ORDER BY id DESC");
+    return res.json(rows);
+  }
+  const rows = await all("SELECT * FROM gas_sales WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  return res.json(rows);
+});
+
+app.post("/api/gas/sales", auth, allowRoles("employee"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  const sizeKg = normalizeGasSizeKg(p.size_kg);
+  if (sizeKg == null) return res.status(400).json({ error: "Cylinder size (kg) must be a positive number." });
+  const qty = Math.floor(Number(p.quantity_sold));
+  if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
+  const invLine = await getGasCurrentLine(sizeKg);
+  if (!invLine) return res.status(400).json({ error: "No inventory record found for this cylinder size." });
+  const price = Number(invLine.selling_price);
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this size." });
+  try {
+    await adjustGasStock(sizeKg, -qty);
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "Could not process sale." });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO gas_sales
+    (date, size_kg, quantity_sold, price_per_item, total_amount, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, sizeKg, qty, price, qty * price, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  const sizeKg = normalizeGasSizeKg(p.size_kg);
+  if (sizeKg == null) return res.status(400).json({ error: "Cylinder size (kg) must be a positive number." });
+  const qty = Math.floor(Number(p.quantity_sold));
+  if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
+  const invLine = await getGasCurrentLine(sizeKg);
+  if (!invLine) return res.status(400).json({ error: "No inventory record found for this cylinder size." });
+  const price = Number(invLine.selling_price);
+  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this size." });
+  try {
+    await run("BEGIN TRANSACTION");
+    await adjustGasStock(Number(current.size_kg), Number(current.quantity_sold));
+    await adjustGasStock(sizeKg, -qty);
+    await run(
+      `UPDATE gas_sales
+       SET date = ?, size_kg = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, updated_at = ?
+       WHERE id = ?`,
+      [dateCanon, sizeKg, qty, price, qty * price, new Date().toISOString(), id]
+    );
+    await run("COMMIT");
+  } catch (err) {
+    try {
+      await run("ROLLBACK");
+    } catch (_e) {
+      // ignore
+    }
+    return res.status(400).json({ error: err.message || "Could not update sale." });
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const current = await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  try {
+    await adjustGasStock(Number(current.size_kg), Number(current.quantity_sold));
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "Could not delete sale." });
+  }
+  await run("DELETE FROM gas_sales WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/gas", auth, allowRoles("owner"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const sizeKg = normalizeGasSizeKg(p.size_kg);
+  if (sizeKg == null) return res.status(400).json({ error: "Cylinder size (kg) must be a positive number." });
+  const quantity = Number(p.quantity_in_stock);
+  const buying = Number(p.buying_price);
+  const selling = Number(p.selling_price);
+  const margin = Number(p.profit_margin);
+  const reorder = Number(p.reorder_level);
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Quantity in stock must be zero or greater." });
+  }
+  if (!Number.isFinite(buying) || buying < 0 || !Number.isFinite(selling) || selling < 0) {
+    return res.status(400).json({ error: "Buying and selling price must be valid non-negative numbers." });
+  }
+  if (!Number.isFinite(reorder) || reorder < 0) {
+    return res.status(400).json({ error: "Reorder level must be zero or greater." });
+  }
+  if (!Number.isFinite(margin) || margin < 0) {
+    return res.status(400).json({ error: "Profit margin must be zero or greater." });
+  }
+  const qtyAdd = Math.floor(quantity);
+  const existing = await get("SELECT * FROM gas_inventory WHERE size_kg = ? ORDER BY id DESC LIMIT 1", [sizeKg]);
+  if (existing) {
+    await run(
+      `UPDATE gas_inventory SET
+       date = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        dateCanon,
+        Number(existing.quantity_in_stock || 0) + qtyAdd,
+        Number(existing.accumulated_stock || 0) + qtyAdd,
+        buying,
+        selling,
+        margin,
+        Math.floor(reorder),
+        new Date().toISOString(),
+        existing.id,
+      ]
+    );
+  } else {
+    await run(
+      `INSERT INTO gas_inventory
+      (date, size_kg, quantity_in_stock, accumulated_stock, buying_price, selling_price, profit_margin, accumulated_profit, reorder_level, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      [
+        dateCanon,
+        sizeKg,
+        qtyAdd,
+        qtyAdd,
+        buying,
+        selling,
+        margin,
+        Math.floor(reorder),
+        req.user.username,
+        new Date().toISOString(),
+      ]
+    );
+  }
+  res.json({ ok: true });
+});
+
+app.put("/api/gas/:id", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "Invalid inventory id." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const sizeKg = normalizeGasSizeKg(p.size_kg);
+  if (sizeKg == null) return res.status(400).json({ error: "Cylinder size (kg) must be a positive number." });
+  const quantity = Number(p.quantity_in_stock);
+  const buying = Number(p.buying_price);
+  const selling = Number(p.selling_price);
+  const margin = Number(p.profit_margin);
+  const reorder = Number(p.reorder_level);
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    return res.status(400).json({ error: "Quantity in stock must be zero or greater." });
+  }
+  if (!Number.isFinite(buying) || buying < 0 || !Number.isFinite(selling) || selling < 0) {
+    return res.status(400).json({ error: "Buying and selling price must be valid non-negative numbers." });
+  }
+  if (!Number.isFinite(reorder) || reorder < 0) {
+    return res.status(400).json({ error: "Reorder level must be zero or greater." });
+  }
+  if (!Number.isFinite(margin) || margin < 0) {
+    return res.status(400).json({ error: "Profit margin must be zero or greater." });
+  }
+  const existing = await get(
+    "SELECT quantity_in_stock, COALESCE(accumulated_stock, 0) AS accumulated_stock, size_kg FROM gas_inventory WHERE id = ?",
+    [id]
+  );
+  if (!existing) return res.status(404).json({ error: "Inventory record not found." });
+  if (Number(existing.size_kg) !== sizeKg) {
+    return res.status(400).json({ error: "Cylinder size (kg) cannot be changed on an existing row. Add stock under that size instead." });
+  }
+  const nextQty = Math.floor(quantity);
+  const oldQty = Number(existing.quantity_in_stock || 0);
+  const addOnly = Math.max(0, nextQty - oldQty);
+  const nextAccumulated = Number(existing.accumulated_stock || 0) + addOnly;
+  const result = await run(
+    `UPDATE gas_inventory SET
+      date = ?, size_kg = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      dateCanon,
+      sizeKg,
+      nextQty,
+      nextAccumulated,
+      buying,
+      selling,
+      margin,
+      Math.floor(reorder),
+      new Date().toISOString(),
+      id,
+    ]
+  );
+  if (result.changes === 0) return res.status(404).json({ error: "Inventory record not found." });
+  res.json({ ok: true });
+});
+
+app.delete("/api/gas/:id", auth, allowRoles("owner"), async (req, res) => {
+  const result = await run("DELETE FROM gas_inventory WHERE id = ?", [Number(req.params.id)]);
+  if (result.changes === 0) return res.status(404).json({ error: "Inventory record not found." });
+  res.json({ ok: true });
+});
+
 app.get("/api/sales/bags", auth, async (_req, res) => {
   const rows = await all("SELECT * FROM sales_bags ORDER BY id DESC");
   res.json(rows);
@@ -2641,9 +3027,15 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   res.json({ ok: true });
 });
 
-app.delete("/api/sales/kg/:id", auth, allowRoles("owner"), async (req, res) => {
+app.delete("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const current = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(req.params.id)]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
+  if (req.user.role === "employee") {
+    if (current.created_by !== req.user.username) {
+      return res.status(403).json({ error: "You can only delete your own kg sales." });
+    }
+    if (!assertEmployeeSaleEditAllowed(req, res, current, EMPLOYEE_KG_SALE_DELETE_WINDOW_MS)) return;
+  }
   const currentBrandKey = resolveBrandKey(current.brand);
   const defaultBagSize = catalogBagSizeForFeed(currentBrandKey, current.feed_type);
   const idNum = Number(req.params.id);
@@ -2714,7 +3106,7 @@ app.put("/api/chicken-breeds", auth, allowRoles("owner"), async (req, res) => {
 
 app.get("/api/chicken-sales/profit-summary", auth, allowRoles("owner"), async (_req, res) => {
   try {
-    const data = await computeChickenProfitSummary();
+    const data = await computeChickenProfitSummary(null);
     res.json(data);
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -2788,7 +3180,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
-  if (recordsProfit) {
+  if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   const nowIso = new Date().toISOString();
@@ -2844,7 +3236,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
-  if (recordsProfit) {
+  if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   await run(
