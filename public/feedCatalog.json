@@ -40,8 +40,8 @@
   "Dola Feeds": [
     { "type": "Starter bags", "bagSize": 50 },
     { "type": "Finisher bags", "bagSize": 50 },
-    { "type": "Layers bag", "bagSize": 20 },
-    { "type": "Layers", "bagSize": 10 },
+    { "type": "Layers 10kg", "bagSize": 10 },
+    { "type": "Layers 20kg", "bagSize": 20 },
     { "type": "Kienyeji Pellets (50kgs)", "bagSize": 50 },
     { "type": "Kienyeji Mash", "bagSize": 50 }
   ],

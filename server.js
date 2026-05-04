@@ -500,6 +500,23 @@ async function initDb() {
     await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["accumulated_bags_v1", "1"]);
   }
 
+  const dolaLayersRenamed = await get("SELECT value FROM app_meta WHERE key = ?", ["dola_layers_feed_types_v1"]);
+  if (!dolaLayersRenamed || dolaLayersRenamed.value !== "1") {
+    const dolaBrand = "Dola Feeds";
+    const tables = ["inventory", "sales_bags", "sales_kg", "retail_feed_pricing"];
+    for (const t of tables) {
+      await run(
+        `UPDATE ${t} SET feed_type = ? WHERE brand = ? AND bag_size = 10 AND LOWER(TRIM(feed_type)) = 'layers'`,
+        ["Layers 10kg", dolaBrand]
+      ).catch(() => {});
+      await run(
+        `UPDATE ${t} SET feed_type = ? WHERE brand = ? AND bag_size = 20 AND LOWER(TRIM(feed_type)) = 'layers bag'`,
+        ["Layers 20kg", dolaBrand]
+      ).catch(() => {});
+    }
+    await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["dola_layers_feed_types_v1", "1"]);
+  }
+
   await migrateAccumulatedProfitFromSalesIfNeeded();
 
   const anyUser = await get("SELECT id FROM users LIMIT 1");
