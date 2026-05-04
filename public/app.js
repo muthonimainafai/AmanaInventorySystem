@@ -363,6 +363,24 @@ function updateMedicamentsProfitDisplay() {
   });
 }
 
+function updateExpenditureAccumulatedDisplay() {
+  if (state.user?.role !== "employee") return;
+  const rows = state.expenditureEntries || [];
+  const sumTotal = rows.reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const sumMoneyOut = rows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
+  const val = currency(sumTotal);
+  document.querySelectorAll(".js-exp-expenditure-total-value").forEach((el) => {
+    el.textContent = val;
+  });
+  const meta =
+    rows.length === 0
+      ? "No records yet."
+      : `${rows.length} record${rows.length === 1 ? "" : "s"} · Sum of Total: ${currency(sumTotal)} · Sum of Money out: ${currency(sumMoneyOut)}`;
+  document.querySelectorAll(".js-exp-expenditure-total-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
 function updateGasProfitDisplay() {
   const total = (state.gasInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
   const val = currency(total);
@@ -1737,6 +1755,7 @@ function renderExpenditureTable() {
   const colSpan = 5;
   if (!rows.length) {
     expBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
+    updateExpenditureAccumulatedDisplay();
     return;
   }
   expBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
@@ -1752,6 +1771,7 @@ function renderExpenditureTable() {
           </div>
         </td>
       </tr>`);
+  updateExpenditureAccumulatedDisplay();
 }
 
 function resetExpenditureForm() {
