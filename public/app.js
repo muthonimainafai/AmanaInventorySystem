@@ -667,14 +667,32 @@ function isChickenRowOwnerInventory(row) {
 }
 
 const EMPLOYEE_SALE_EDIT_MS = 60 * 60 * 1000;
+/** Sales Per Bags (employee): edit/delete allowed within this window after the sale was recorded. */
+const EMPLOYEE_BAG_SALE_EDIT_MS = 4 * 60 * 60 * 1000;
 
-/** Employees may only edit a sale within 1 hour of when it was recorded (`created_at` / fallback `updated_at`). */
+/** Sales Per Kg and similar: 1 hour after `created_at` / `updated_at`. */
 function saleWithinEmployeeEditWindow(row) {
   const iso = row.created_at || row.updated_at;
   if (!iso) return false;
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return false;
   return Date.now() - t <= EMPLOYEE_SALE_EDIT_MS;
+}
+
+function saleWithinEmployeeBagEditWindow(row) {
+  const iso = row.created_at || row.updated_at;
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return false;
+  return Date.now() - t <= EMPLOYEE_BAG_SALE_EDIT_MS;
+}
+
+/** Employee may use Edit/Delete on Sales Per Bags for their own row, shop-day date rule, and 4-hour window. */
+function employeeBagSaleActionsAllowed(row) {
+  if (state.user?.role !== "employee") return false;
+  if (String(row?.created_by || "") !== String(state.user?.username || "")) return false;
+  const shopDay = state.shopToday || clientShopTodayDMY();
+  return saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeBagEditWindow(row);
 }
 
 function showLoggedOut() {
@@ -1212,12 +1230,11 @@ function renderSalesBagsTable() {
     salesBagsBody.innerHTML = '<tr><td colspan="10" class="empty">No sales.</td></tr>';
     return;
   }
-  const canDelete = state.user.role === "owner";
-  const shopDay = state.shopToday || clientShopTodayDMY();
   salesBagsBody.innerHTML = joinRowsWithDateSeparators(state.salesBags, 10, (row) => {
     const canEdit =
       state.user.role === "owner" ||
-      (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
+      (state.user.role === "employee" && employeeBagSaleActionsAllowed(row));
+    const canDelete = state.user.role === "owner" || (state.user.role === "employee" && employeeBagSaleActionsAllowed(row));
     const viaRaw = String(row.through_party || "").trim();
     const viaCell = viaRaw ? `By ${viaRaw}` : "—";
     return `
@@ -2558,6 +2575,14 @@ salesBagsBody.addEventListener("click", async (event) => {
   if (!id || !action || target.dataset.kind !== "bags") return;
   const row = state.salesBags.find((r) => String(r.id) === String(id));
   if (!row) return;
+  if (state.user.role === "employee" && (action === "edit" || action === "delete")) {
+    if (!employeeBagSaleActionsAllowed(row)) {
+      alert(
+        "You can only edit or delete your own bag sales, within 4 hours of when they were recorded, and for sale dates on or after the current shop day."
+      );
+      return;
+    }
+  }
   if (action === "edit") {
     state.editSalesBagId = row.id;
     sbDate.value = toIsoDate(row.date);

@@ -753,27 +753,36 @@ async function adjustRetailAccumulatedProfitDelta(brandKey, feedType, profitDelt
 }
 
 const EMPLOYEE_SALE_EDIT_WINDOW_MS = 60 * 60 * 1000;
+/** Sales Per Bags only: staff may edit or delete their own rows within this window after `created_at`. */
+const EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS = 4 * 60 * 60 * 1000;
 
-/** Employees may only PUT a bag or kg sale within 1 hour of when it was first recorded (`created_at`). Chicken sales are exempt (see PUT /api/chicken-sales). */
-function assertEmployeeSaleEditAllowed(req, res, saleRow) {
+/**
+ * Employees may only PUT/DELETE a bag or kg sale within the allowed window after first record (`created_at`).
+ * Bag sales use `EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS` (4h); kg sales use default 1h. Chicken sales are exempt.
+ */
+function assertEmployeeSaleEditAllowed(req, res, saleRow, editWindowMs) {
   if (req.user.role !== "employee") return true;
+  const windowMs =
+    Number.isFinite(editWindowMs) && editWindowMs > 0 ? editWindowMs : EMPLOYEE_SALE_EDIT_WINDOW_MS;
+  const hours = windowMs / (60 * 60 * 1000);
+  const hoursLabel = Number.isInteger(hours) ? `${hours} hour${hours === 1 ? "" : "s"}` : `${hours.toFixed(1)} hours`;
   const createdIso = saleRow.created_at || saleRow.updated_at;
   if (!createdIso) {
     res.status(403).json({
-      error: "Employees can only edit a sale within 1 hour of when it was recorded.",
+      error: `Employees can only change a sale within ${hoursLabel} of when it was recorded (record time is missing). Ask the owner.`,
     });
     return false;
   }
   const createdMs = new Date(createdIso).getTime();
   if (!Number.isFinite(createdMs)) {
     res.status(403).json({
-      error: "Employees can only edit a sale within 1 hour of when it was recorded.",
+      error: `Employees can only change a sale within ${hoursLabel} of when it was recorded. Ask the owner.`,
     });
     return false;
   }
-  if (Date.now() - createdMs > EMPLOYEE_SALE_EDIT_WINDOW_MS) {
+  if (Date.now() - createdMs > windowMs) {
     res.status(403).json({
-      error: "This sale can no longer be edited (1 hour after it was recorded). Ask the owner if a change is needed.",
+      error: `This sale can no longer be edited or deleted (${hoursLabel} after it was recorded). Ask the owner if a change is needed.`,
     });
     return false;
   }
@@ -2191,7 +2200,10 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
   const idNum = Number(req.params.id);
   const current = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
-  if (!assertEmployeeSaleEditAllowed(req, res, current)) return;
+  if (req.user.role === "employee" && current.created_by !== req.user.username) {
+    return res.status(403).json({ error: "You can only edit your own bag sales." });
+  }
+  if (!assertEmployeeSaleEditAllowed(req, res, current, EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS)) return;
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
   const brandKeyNew = resolveBrandKey(p.brand);
   const itemNew = await getInventoryItem(brandKeyNew, p.feed_type, bagSize);
@@ -2248,10 +2260,16 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
   res.json({ ok: true });
 });
 
-app.delete("/api/sales/bags/:id", auth, allowRoles("owner"), async (req, res) => {
+app.delete("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const idNum = Number(req.params.id);
   const current = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
+  if (req.user.role === "employee") {
+    if (current.created_by !== req.user.username) {
+      return res.status(403).json({ error: "You can only delete your own bag sales." });
+    }
+    if (!assertEmployeeSaleEditAllowed(req, res, current, EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS)) return;
+  }
   try {
     await deleteFeedBagSaleRowById(idNum);
   } catch (error) {
