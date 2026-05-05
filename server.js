@@ -799,37 +799,106 @@ async function getEmployeeConsolidatedSalesKgRow(dateStr, brandKey, feedType, cr
   );
 }
 
+/** Kg still available from opened bags after all sales strictly before `dateCanon` (same brand + feed). */
+function remainingKgCarryoverBeforeSaleDateWithMap(dateCanonNorm, brandKey, rawFeedType, allBrandRows, wm) {
+  const targetP = parseSaleDateDMY(String(dateCanonNorm || "").trim());
+  if (!targetP) return 0;
+  const ftN = normalizeFeedType(rawFeedType);
+  const bagSize = effectiveKgPerOpenedBagForDisplay(wm, brandKey, rawFeedType);
+  if (!Number.isFinite(bagSize) || bagSize <= 0) return 0;
+  const filtered = [];
+  for (const r of allBrandRows) {
+    if (resolveBrandKey(r.brand) !== brandKey) continue;
+    if (normalizeFeedType(r.feed_type) !== ftN) continue;
+    const rd = parseSaleDateDMY(String(r.date || "").trim());
+    if (!rd) continue;
+    if (compareCalendarDates(rd, targetP) >= 0) continue;
+    filtered.push(r);
+  }
+  filtered.sort((a, b) => {
+    const da = parseSaleDateDMY(String(a.date || "").trim());
+    const db = parseSaleDateDMY(String(b.date || "").trim());
+    if (da && db) {
+      const c = compareCalendarDates(da, db);
+      if (c !== 0) return c;
+    } else if (da && !db) return -1;
+    else if (!da && db) return 1;
+    return Number(a.id) - Number(b.id);
+  });
+  let pool = 0;
+  for (const r of filtered) {
+    pool += Number(r.bag_opened || 0) * bagSize;
+    pool -= Number(r.kg_sold || 0);
+    if (pool < 0) pool = 0;
+  }
+  return pool;
+}
+
+/** Sum bag_opened for this product on the same calendar day (all users), optional exclude row id. */
+async function sumBagOpenedTodayForProduct(brandKey, rawFeedType, dateCanonNorm, excludeId) {
+  const rows = await all("SELECT id, date, feed_type, bag_opened FROM sales_kg WHERE brand = ?", [brandKey]);
+  const ftN = normalizeFeedType(rawFeedType);
+  let sum = 0;
+  for (const r of rows) {
+    if (normalizeInventoryDate(r.date) !== dateCanonNorm) continue;
+    if (normalizeFeedType(r.feed_type) !== ftN) continue;
+    if (excludeId != null && Number(r.id) === Number(excludeId)) continue;
+    sum += Number(r.bag_opened || 0);
+  }
+  return sum;
+}
+
 function enrichSalesKgRowsWithCumulative(rows, weightMap) {
   const wm = weightMap || new Map();
-  const byKey = new Map();
+  const byProduct = new Map();
   for (const r of rows) {
     const bk = resolveBrandKey(r.brand);
-    const key = `${r.date}|${bk}|${normalizeFeedType(r.feed_type)}`;
-    if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key).push(r);
+    const key = `${bk}|${normalizeFeedType(r.feed_type)}`;
+    if (!byProduct.has(key)) byProduct.set(key, []);
+    byProduct.get(key).push(r);
   }
 
   const idToExtra = new Map();
 
-  for (const [, groupRows] of byKey) {
-    const sorted = [...groupRows].sort((a, b) => Number(a.id) - Number(b.id));
-    const bk0 = resolveBrandKey(sorted[0].brand);
-    const bagSize = effectiveKgPerOpenedBagForDisplay(wm, bk0, sorted[0].feed_type);
-    const totalKgForGroup = sorted.reduce((s, r) => s + Number(r.kg_sold || 0), 0);
-    const bagsSoldCumGroup = bagsFromTotalKg(totalKgForGroup, bagSize);
-    const totalBagsOpenedSum = sorted.reduce((s, r) => s + Number(r.bag_opened || 0), 0);
-    const bagOpenedDisplay = totalBagsOpenedSum >= 1 ? 1 : 0;
+  for (const [, productRows] of byProduct) {
+    const sortedChrono = [...productRows].sort((a, b) => {
+      const da = parseSaleDateDMY(String(a.date || "").trim());
+      const db = parseSaleDateDMY(String(b.date || "").trim());
+      if (da && db) {
+        const c = compareCalendarDates(da, db);
+        if (c !== 0) return c;
+      } else if (da && !db) return -1;
+      else if (!da && db) return 1;
+      return Number(a.id) - Number(b.id);
+    });
 
-    let capKg = 0;
-    let soldKg = 0;
-    for (const r of sorted) {
-      capKg += Number(r.bag_opened || 0) * bagSize;
-      soldKg += Number(r.kg_sold || 0);
-      const remaining = Math.max(0, capKg - soldKg);
+    const bk0 = resolveBrandKey(sortedChrono[0].brand);
+    const bagSize = effectiveKgPerOpenedBagForDisplay(wm, bk0, sortedChrono[0].feed_type);
+
+    const byDay = new Map();
+    for (const r of productRows) {
+      const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
+      if (!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(r);
+    }
+
+    let pool = 0;
+    for (const r of sortedChrono) {
+      pool += Number(r.bag_opened || 0) * bagSize;
+      pool -= Number(r.kg_sold || 0);
+      if (pool < 0) pool = 0;
+
+      const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
+      const dayRows = [...(byDay.get(d) || [])].sort((a, b) => Number(a.id) - Number(b.id));
+      const totalKgForDay = dayRows.reduce((s, row) => s + Number(row.kg_sold || 0), 0);
+      const bagsSoldCumGroup = bagsFromTotalKg(totalKgForDay, bagSize);
+      const totalBagsOpenedSumDay = dayRows.reduce((s, row) => s + Number(row.bag_opened || 0), 0);
+      const bagOpenedDisplay = totalBagsOpenedSumDay >= 1 ? 1 : 0;
+
       idToExtra.set(Number(r.id), {
         bags_sold_cumulative: bagsSoldCumGroup,
         bag_opened_display: bagOpenedDisplay,
-        total_kgs_remaining: remaining,
+        total_kgs_remaining: pool,
       });
     }
   }
@@ -2934,14 +3003,23 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
   if (!items || !items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(p.feed_type))) {
     return res.status(400).json({ error: "Invalid brand/feed type combination." });
   }
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
   if (!(await assertEmployeeFeedSalePrices(req, res, "kg", p))) return;
   const defaultBagSize = catalogBagSizeForFeed(brandKey, p.feed_type);
   const nowIso = new Date().toISOString();
 
+  let allSkBrand = [];
+  let wmCoerce = new Map();
+  if (req.user.role === "employee") {
+    allSkBrand = await all("SELECT * FROM sales_kg WHERE brand = ?", [brandKey]);
+    wmCoerce = await getRetailWeightKgByKeyMap();
+  }
+
   /** Employees: kg_sold in the request is only this sale’s kg; merge into the same day’s row for this product. */
   if (req.user.role === "employee") {
-    const existing = await getEmployeeConsolidatedSalesKgRow(p.date, brandKey, p.feed_type, req.user.username);
+    const existing = await getEmployeeConsolidatedSalesKgRow(dateCanon, brandKey, p.feed_type, req.user.username);
     if (existing) {
       const addKg = kgSold;
       if (!Number.isFinite(addKg) || addKg <= 0) {
@@ -2952,9 +3030,27 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
           error: "Price per kg must match the existing line for this product today. Refresh and try again.",
         });
       }
+      const carriedBefore = remainingKgCarryoverBeforeSaleDateWithMap(
+        dateCanon,
+        brandKey,
+        p.feed_type,
+        allSkBrand,
+        wmCoerce
+      );
+      let incrementBag = bagOpened;
+      if (incrementBag > 0) {
+        if (carriedBefore > 1e-6) incrementBag = 0;
+        else {
+          const openedTodayTotal = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
+          if (openedTodayTotal >= 1) incrementBag = 0;
+        }
+      }
+      let baseBagOpened = Number(existing.bag_opened || 0);
+      if (carriedBefore > 1e-6 && baseBagOpened > 0) baseBagOpened = 0;
+
       const newKgSold = Number(existing.kg_sold) + addKg;
-      const newBagOpened = Number(existing.bag_opened || 0) + bagOpened;
-      const others = await sumKgSoldForSalesKgLine(p.date, brandKey, p.feed_type, existing.id);
+      const newBagOpened = baseBagOpened + incrementBag;
+      const others = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, existing.id);
       const oldCum = others + Number(existing.kg_sold);
       const newCum = others + newKgSold;
       const invDelta = bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(oldCum, defaultBagSize);
@@ -2989,8 +3085,26 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     }
   }
 
+  let insertBagOpened = bagOpened;
+  if (req.user.role === "employee") {
+    const carriedBefore = remainingKgCarryoverBeforeSaleDateWithMap(
+      dateCanon,
+      brandKey,
+      p.feed_type,
+      allSkBrand,
+      wmCoerce
+    );
+    if (insertBagOpened > 0) {
+      if (carriedBefore > 1e-6) insertBagOpened = 0;
+      else {
+        const openedToday = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
+        if (openedToday >= 1) insertBagOpened = 0;
+      }
+    }
+  }
+
   const totalAmount = kgSold * pricePerKg;
-  const prevKg = await sumKgSoldForSalesKgLine(p.date, brandKey, p.feed_type, null);
+  const prevKg = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
   const incrementalBags = bagsFromTotalKg(prevKg + kgSold, defaultBagSize) - bagsFromTotalKg(prevKg, defaultBagSize);
   try {
     await adjustInventoryBags({
@@ -3012,14 +3126,14 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     `INSERT INTO sales_kg (date, brand, feed_type, bags_sold, kg_sold, price_per_kg, total_amount, bag_opened, retail_margin_per_kg, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      p.date,
+      dateCanon,
       brandKey,
       p.feed_type,
       incrementalBags,
       kgSold,
       pricePerKg,
       totalAmount,
-      bagOpened,
+      insertBagOpened,
       retailMarginSnap,
       req.user.username,
       nowIso,
@@ -3039,6 +3153,8 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   if (!items || !items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(p.feed_type))) {
     return res.status(400).json({ error: "Invalid brand/feed type combination." });
   }
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const totalAmount = kgSold * pricePerKg;
   const current = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(req.params.id)]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
@@ -3049,15 +3165,36 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   const currentBrandKey = resolveBrandKey(current.brand);
   const currentBagSize = catalogBagSizeForFeed(currentBrandKey, current.feed_type);
   const idNum = Number(req.params.id);
+  const dateCanonCurrent = normalizeInventoryDate(current.date) || String(current.date || "").trim();
+
+  let effectiveBagOpenedPut = bagOpened;
+  if (req.user.role === "employee") {
+    const allSkBrandPut = await all("SELECT * FROM sales_kg WHERE brand = ?", [brandKey]);
+    const wmPut = await getRetailWeightKgByKeyMap();
+    const carriedPut = remainingKgCarryoverBeforeSaleDateWithMap(
+      dateCanon,
+      brandKey,
+      p.feed_type,
+      allSkBrandPut,
+      wmPut
+    );
+    if (effectiveBagOpenedPut > 0) {
+      if (carriedPut > 1e-6) effectiveBagOpenedPut = 0;
+      else {
+        const openedOthersPut = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, idNum);
+        if (openedOthersPut >= 1) effectiveBagOpenedPut = 0;
+      }
+    }
+  }
 
   try {
     const sameItem =
-      String(current.date).trim() === String(p.date).trim() &&
+      dateCanonCurrent === dateCanon &&
       currentBrandKey === brandKey &&
       normalizeFeedType(current.feed_type) === normalizeFeedType(p.feed_type);
 
     if (sameItem) {
-      const others = await sumKgSoldForSalesKgLine(p.date, brandKey, p.feed_type, idNum);
+      const others = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
       const oldCum = others + Number(current.kg_sold);
       const newCum = others + kgSold;
       const invDelta = bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(oldCum, defaultBagSize);
@@ -3068,7 +3205,7 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
         deltaBags: -invDelta,
       });
     } else {
-      const othersOld = await sumKgSoldForSalesKgLine(current.date, currentBrandKey, current.feed_type, idNum);
+      const othersOld = await sumKgSoldForSalesKgLine(dateCanonCurrent, currentBrandKey, current.feed_type, idNum);
       const oldCum = othersOld + Number(current.kg_sold);
       const revertDelta = bagsFromTotalKg(oldCum, currentBagSize) - bagsFromTotalKg(othersOld, currentBagSize);
       await adjustInventoryBags({
@@ -3078,7 +3215,7 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
         deltaBags: revertDelta,
       });
 
-      const othersNew = await sumKgSoldForSalesKgLine(p.date, brandKey, p.feed_type, idNum);
+      const othersNew = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
       const newCum = othersNew + kgSold;
       const applyDelta = bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(othersNew, defaultBagSize);
       await adjustInventoryBags({
@@ -3105,21 +3242,21 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
     await adjustRetailAccumulatedProfit(brandKey, p.feed_type, kgSold * newRetailSnap);
   }
 
-  const othersAfter = await sumKgSoldForSalesKgLine(p.date, brandKey, p.feed_type, idNum);
+  const othersAfter = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
   const incrementalStored =
     bagsFromTotalKg(othersAfter + kgSold, defaultBagSize) - bagsFromTotalKg(othersAfter, defaultBagSize);
 
   await run(
     `UPDATE sales_kg SET date=?, brand=?, feed_type=?, bags_sold=?, kg_sold=?, price_per_kg=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, updated_at=? WHERE id=?`,
     [
-      p.date,
+      dateCanon,
       brandKey,
       p.feed_type,
       incrementalStored,
       kgSold,
       pricePerKg,
       totalAmount,
-      bagOpened,
+      effectiveBagOpenedPut,
       newRetailSnap,
       new Date().toISOString(),
       idNum,

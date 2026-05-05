@@ -1036,6 +1036,46 @@ function bagSizeFor(brand, feedType) {
   return loose ? loose.bagSize : 0;
 }
 
+/** Kg per opened bag for SK form (owner retail weight override or catalog). */
+function skEffectiveKgPerOpenedBagForSkRow(brand, feedType) {
+  const rw = findRetailWeightKg(brand, feedType);
+  if (rw != null && Number(rw) > 0) return Number(rw);
+  return bagSizeFor(brand, feedType);
+}
+
+/** Kg remaining after all sales strictly before selDateDMY — matches server cumulative pool logic. */
+function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
+  const sel = parseDMYParts(selDateDMY);
+  if (!sel) return 0;
+  const bk = resolveBrandKey(brand);
+  const ftWant = feedTypeCatalogValue(bk, feedType);
+  const bagSize = skEffectiveKgPerOpenedBagForSkRow(brand, feedType);
+  if (!bagSize || bagSize <= 0) return 0;
+  const filtered = [];
+  for (const r of state.salesKg || []) {
+    if (resolveBrandKey(r.brand) !== bk) continue;
+    if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
+    const rd = parseDMYParts(r.date);
+    if (!rd) continue;
+    if (compareDMYParts(rd, sel) >= 0) continue;
+    filtered.push(r);
+  }
+  filtered.sort((a, b) => {
+    const da = parseDMYParts(a.date);
+    const db = parseDMYParts(b.date);
+    const c = compareDMYParts(da, db);
+    if (c !== 0) return c;
+    return Number(a.id) - Number(b.id);
+  });
+  let pool = 0;
+  for (const r of filtered) {
+    pool += Number(r.bag_opened || 0) * bagSize;
+    pool -= Number(r.kg_sold || 0);
+    if (pool < 0) pool = 0;
+  }
+  return pool;
+}
+
 /** Sum of bag_opened for the same calendar line (for defaulting the form). Excludes the row being edited. */
 function sumBagOpenedForSkLine(dateStr, brand, feedType) {
   if (!dateStr || !brand || !feedType) return 0;
@@ -1052,7 +1092,7 @@ function sumBagOpenedForSkLine(dateStr, brand, feedType) {
   return sum;
 }
 
-/** First sale for this product/day defaults bag opened to 1; after a bag is open, default 0 for extra lines. */
+/** Default bag opened: 0 if a bag is already open from a prior day or earlier today; otherwise 1 for the first open. */
 function applyDefaultSkBagOpened() {
   if (state.editSalesKgId) return;
   const dateStr = skDateDisplay?.value?.trim();
@@ -1061,7 +1101,12 @@ function applyDefaultSkBagOpened() {
   const el = document.getElementById("skBagOpened");
   if (!el) return;
   const sum = sumBagOpenedForSkLine(dateStr, skBrand.value, skFeedType.value);
-  el.value = sum >= 1 ? "0" : "1";
+  if (sum >= 1) {
+    el.value = "0";
+    return;
+  }
+  const carry = skCarryoverKgBeforeSelectedDate(dateStr, skBrand.value, skFeedType.value);
+  el.value = carry > 1e-6 ? "0" : "1";
 }
 
 /** Matches server getInventoryItem: same bag_size, normalized brand + feed; first row wins (list is id DESC). */
@@ -1388,7 +1433,7 @@ function renderSalesKgTable() {
         <td>${displayBrand(row.brand)}</td>
         <td>${displayFeedType(row.feed_type)}</td>
         <td title="1 once at least one bag is opened for this product on this date.">${bagOpenedCell}</td>
-        <td title="Kg left from opened bags after this sale (bag size × bags opened − kg sold so far).">${rem}</td>
+        <td title="Kg left after this sale: running pool across calendar days (bag opens add kg per bag; kg sold subtracts per row).">${rem}</td>
         <td title="Full bags represented by total kg sold this day for this product (bag size from catalog).">${bagsFromKg}</td>
         <td>${row.kg_sold}</td>
         <td>${currency(row.price_per_kg)}</td>
