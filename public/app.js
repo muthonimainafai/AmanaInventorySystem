@@ -159,6 +159,7 @@ const salesKgBody = document.getElementById("sales-kg-body");
 const skDateDisplay = document.getElementById("skDateDisplay");
 const skDate = document.getElementById("skDate");
 const skOpenCalendarBtn = document.getElementById("skOpenCalendarBtn");
+const skSaleType = document.getElementById("skSaleType");
 const retailInventoryBody = document.getElementById("retail-inventory-body");
 const retailPricingBody = document.getElementById("retail-pricing-body");
 const retailFeedForm = document.getElementById("retail-feed-form");
@@ -170,18 +171,21 @@ const chickenInventoryBody = document.getElementById("chicken-inventory-body");
 const chDateDisplay = document.getElementById("chDateDisplay");
 const chDate = document.getElementById("chDate");
 const chOpenCalendarBtn = document.getElementById("chOpenCalendarBtn");
+const chSaleType = document.getElementById("chSaleType");
 const fdForm = document.getElementById("fd-form");
 const fdBody = document.getElementById("fd-body");
 const fdItem = document.getElementById("fdItem");
 const fdDateDisplay = document.getElementById("fdDateDisplay");
 const fdDate = document.getElementById("fdDate");
 const fdOpenCalendarBtn = document.getElementById("fdOpenCalendarBtn");
+const fdSaleType = document.getElementById("fdSaleType");
 const medForm = document.getElementById("med-form");
 const medBody = document.getElementById("med-body");
 const medItem = document.getElementById("medItem");
 const medDateDisplay = document.getElementById("medDateDisplay");
 const medDate = document.getElementById("medDate");
 const medOpenCalendarBtn = document.getElementById("medOpenCalendarBtn");
+const medSaleType = document.getElementById("medSaleType");
 const gasForm = document.getElementById("gas-form");
 const gasBody = document.getElementById("gas-body");
 const gasSizeKg = document.getElementById("gasSizeKg");
@@ -189,6 +193,7 @@ const gasSize = document.getElementById("gasSize");
 const gasDateDisplay = document.getElementById("gasDateDisplay");
 const gasDate = document.getElementById("gasDate");
 const gasOpenCalendarBtn = document.getElementById("gasOpenCalendarBtn");
+const gasSaleType = document.getElementById("gasSaleType");
 const expenditureForm = document.getElementById("expenditure-form");
 const expBody = document.getElementById("exp-body");
 const expDateDisplay = document.getElementById("expDateDisplay");
@@ -1496,11 +1501,11 @@ function renderSalesBagsTable() {
 
 function renderSalesKgTable() {
   if (!state.salesKg.length) {
-    salesKgBody.innerHTML = '<tr><td colspan="11" class="empty">No sales.</td></tr>';
+    salesKgBody.innerHTML = '<tr><td colspan="12" class="empty">No sales.</td></tr>';
     return;
   }
   const shopDay = state.shopToday || clientShopTodayDMY();
-  salesKgBody.innerHTML = joinRowsWithDateSeparators(state.salesKg, 11, (row) => {
+  salesKgBody.innerHTML = joinRowsWithDateSeparators(state.salesKg, 12, (row) => {
     const canEdit =
       state.user.role === "owner" ||
       (saleDateOnOrAfterShopDay(row.date, shopDay) && saleWithinEmployeeEditWindow(row));
@@ -1514,6 +1519,8 @@ function renderSalesKgTable() {
       row.total_kgs_remaining != null
         ? Number(row.total_kgs_remaining).toFixed(2)
         : "—";
+    const viaRaw = String(row.through_party || "").trim();
+    const viaCell = viaRaw ? `By ${viaRaw}` : "—";
     return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
@@ -1525,6 +1532,7 @@ function renderSalesKgTable() {
         <td>${row.kg_sold}</td>
         <td>${currency(row.price_per_kg)}</td>
         <td>${currency(saleLineTotalKg(row))}</td>
+        <td>${viaCell}</td>
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -1700,7 +1708,7 @@ function renderFeedersDrinkersTable() {
   if (!fdBody) return;
   const isOwner = state.user.role === "owner";
   const rows = isOwner ? state.feedersDrinkersInventory : state.feedersDrinkersSales;
-  const colSpan = isOwner ? 14 : 7;
+  const colSpan = isOwner ? 14 : 8;
   if (!rows.length) {
     fdBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
     return;
@@ -1713,6 +1721,7 @@ function renderFeedersDrinkersTable() {
         <td>${row.quantity_sold}</td>
         <td>${currency(row.total_amount)}</td>
         <td><span class="status-ok">SOLD</span></td>
+        <td>${String(row.through_party || "").trim() ? `By ${String(row.through_party || "").trim()}` : "—"}</td>
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -1751,7 +1760,7 @@ function renderMedicamentsTable() {
   if (!medBody) return;
   const isOwner = state.user.role === "owner";
   const rows = isOwner ? state.medicamentsInventory : state.medicamentsSales;
-  const colSpan = isOwner ? 14 : 7;
+  const colSpan = isOwner ? 14 : 8;
   if (!rows.length) {
     medBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
     return;
@@ -1764,6 +1773,7 @@ function renderMedicamentsTable() {
         <td>${row.quantity_sold}</td>
         <td>${currency(row.total_amount)}</td>
         <td><span class="status-ok">SOLD</span></td>
+        <td>${String(row.through_party || "").trim() ? `By ${String(row.through_party || "").trim()}` : "—"}</td>
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -1802,7 +1812,7 @@ function renderGasTable() {
   if (!gasBody) return;
   const isOwner = state.user.role === "owner";
   const rows = isOwner ? state.gasInventory : state.gasSales;
-  const colSpan = isOwner ? 14 : 7;
+  const colSpan = isOwner ? 14 : 8;
   if (!rows.length) {
     gasBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
     return;
@@ -1815,6 +1825,7 @@ function renderGasTable() {
         <td>${row.quantity_sold}</td>
         <td>${currency(row.total_amount)}</td>
         <td><span class="status-ok">SOLD</span></td>
+        <td>${String(row.through_party || "").trim() ? `By ${String(row.through_party || "").trim()}` : "—"}</td>
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -1853,6 +1864,7 @@ function resetFeedersDrinkersForm() {
   if (!fdForm) return;
   fdForm.reset();
   state.editFeedersDrinkersId = null;
+  if (fdSaleType) fdSaleType.value = "";
   if (fdDateDisplay) fdDateDisplay.value = "";
   if (document.getElementById("fdSaveBtn")) {
     document.getElementById("fdSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
@@ -1863,6 +1875,7 @@ function resetMedicamentsForm() {
   if (!medForm) return;
   medForm.reset();
   state.editMedicamentId = null;
+  if (medSaleType) medSaleType.value = "";
   if (medDateDisplay) medDateDisplay.value = "";
   if (document.getElementById("medSaveBtn")) {
     document.getElementById("medSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
@@ -1873,6 +1886,7 @@ function resetGasForm() {
   if (!gasForm) return;
   gasForm.reset();
   state.editGasId = null;
+  if (gasSaleType) gasSaleType.value = "";
   if (gasSizeKg) gasSizeKg.readOnly = false;
   if (gasDateDisplay) gasDateDisplay.value = "";
   if (document.getElementById("gasSaveBtn")) {
@@ -1985,7 +1999,7 @@ function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
   const isEmployeeViewer = state.user.role === "employee";
-  const colSpan = isEmployeeViewer ? 13 : 14;
+  const colSpan = isEmployeeViewer ? 14 : 15;
   if (!state.chickenSales.length) {
     return `<tr><td colspan="${colSpan}" class="empty">${emptyMsg}</td></tr>`;
   }
@@ -2004,6 +2018,8 @@ function chickenSalesTableRowsHtml() {
     const notesCell = row.description ? row.description : "—";
     const customerCells = chickenSaleCustomerCellsHtml(row);
     const profitCell = isEmployeeViewer ? "" : `<td>${formatChickenSaleProfitCell(row)}</td>`;
+    const viaRaw = String(row.through_party || "").trim();
+    const viaCell = viaRaw ? `By ${viaRaw}` : "—";
     return `
       <tr data-chicken-row-id="${row.id}">
         <td>${formatDateDMY(row.date)}</td>
@@ -2014,6 +2030,7 @@ function chickenSalesTableRowsHtml() {
         <td>${currency(saleLineTotalChicken(row))}</td>
         ${customerCells}
         ${profitCell}
+        <td>${viaCell}</td>
         <td>${row.created_by}</td>
         <td>
           <div class="row-actions">
@@ -2108,6 +2125,7 @@ function resetSalesKgForm() {
   skDateDisplay.value = "";
   skFeedType.innerHTML = '<option value="">Select feed type</option>';
   skFeedType.disabled = true;
+  if (skSaleType) skSaleType.value = "";
   document.getElementById("skSaveBtn").textContent = "Save sale";
   applyEmployeeSalesDateRules();
   applyEmployeeFeedSalePricingUi();
@@ -2118,6 +2136,7 @@ function resetChickenForm() {
   chickenForm.reset();
   state.editChickenId = null;
   chDateDisplay.value = "";
+  if (chSaleType) chSaleType.value = "";
   const chSave = document.getElementById("chSaveBtn");
   if (chSave) chSave.textContent = state.user?.role === "owner" ? "Save inventory" : "Save sale";
   populateChickenBreedSelect();
@@ -2805,6 +2824,7 @@ fdForm?.addEventListener("submit", async (event) => {
       date: dateValue,
       item_name: fdItem.value,
       quantity_sold: Number(document.getElementById("fdQuantity")?.value || 0),
+      through_party: String(fdSaleType?.value || "").trim() || null,
     };
     try {
       if (state.editFeedersDrinkersId) {
@@ -2850,6 +2870,7 @@ medForm?.addEventListener("submit", async (event) => {
       date: dateValue,
       item_name: medItem.value,
       quantity_sold: Number(document.getElementById("medQuantity")?.value || 0),
+      through_party: String(medSaleType?.value || "").trim() || null,
     };
     try {
       if (state.editMedicamentId) {
@@ -2896,6 +2917,7 @@ gasForm?.addEventListener("submit", async (event) => {
       date: dateValue,
       size_kg: Number(gasSize.value),
       quantity_sold: Number(document.getElementById("gasQuantity")?.value || 0),
+      through_party: String(gasSaleType?.value || "").trim() || null,
     };
     try {
       if (state.editGasId) {
@@ -3006,6 +3028,7 @@ salesKgForm.addEventListener("submit", async (event) => {
     bag_opened: Number(document.getElementById("skBagOpened").value || 0),
     kg_sold: Number(document.getElementById("skKgSold").value || 0),
     price_per_kg: Number(document.getElementById("skPricePerKg").value || 0),
+    through_party: String(skSaleType?.value || "").trim() || null,
   };
   const saveBtn = document.getElementById("skSaveBtn");
   saveBtn.disabled = true;
@@ -3059,6 +3082,7 @@ chickenForm.addEventListener("submit", async (event) => {
     description: document.getElementById("chDescription").value.trim(),
     quantity_birds: qty,
     weight_kg: null,
+    through_party: String(chSaleType?.value || "").trim() || null,
   };
   const PRICE_MATCH_CH = 0.015;
   if (state.user.role === "owner") {
@@ -3216,6 +3240,7 @@ salesKgBody.addEventListener("click", async (event) => {
     skFeedType.value = row.feed_type;
     document.getElementById("skBagOpened").value = row.bag_opened != null ? row.bag_opened : 0;
     document.getElementById("skKgSold").value = row.kg_sold;
+    if (skSaleType) skSaleType.value = String(row.through_party || "").trim();
     if (state.user.role === "employee") applyEmployeeSalesKgPriceFromInventory();
     else document.getElementById("skPricePerKg").value = row.price_per_kg;
     document.getElementById("skSaveBtn").textContent = "Update sale";
@@ -3275,6 +3300,7 @@ function wireChickenTableClicks(tbody) {
       if (br && row.breed) br.value = row.breed;
       document.getElementById("chDescription").value = row.description || "";
       document.getElementById("chQuantity").value = row.quantity_birds;
+      if (chSaleType) chSaleType.value = String(row.through_party || "").trim();
       if (state.user.role === "owner") {
         const sell = Number(row.unit_price);
         const m =
@@ -3461,6 +3487,7 @@ fdBody?.addEventListener("click", async (event) => {
       fdDateDisplay.value = formatDateDMY(row.date);
       fdItem.value = row.item_name;
       document.getElementById("fdQuantity").value = row.quantity_sold;
+      if (fdSaleType) fdSaleType.value = String(row.through_party || "").trim();
       refreshEmployeeNewPageSellingPrices();
       document.getElementById("fdSaveBtn").textContent = "Update sale";
       return;
@@ -3519,6 +3546,7 @@ medBody?.addEventListener("click", async (event) => {
       medDateDisplay.value = formatDateDMY(row.date);
       medItem.value = row.item_name;
       document.getElementById("medQuantity").value = row.quantity_sold;
+      if (medSaleType) medSaleType.value = String(row.through_party || "").trim();
       refreshEmployeeNewPageSellingPrices();
       document.getElementById("medSaveBtn").textContent = "Update sale";
       return;
@@ -3586,6 +3614,7 @@ gasBody?.addEventListener("click", async (event) => {
         gasSize.value = sk;
       }
       document.getElementById("gasQuantity").value = row.quantity_sold;
+      if (gasSaleType) gasSaleType.value = String(row.through_party || "").trim();
       refreshEmployeeNewPageSellingPrices();
       document.getElementById("gasSaveBtn").textContent = "Update sale";
       return;

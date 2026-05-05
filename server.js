@@ -312,6 +312,7 @@ async function initDb() {
   await run(`UPDATE sales_kg SET created_at = updated_at WHERE created_at IS NULL OR created_at = ''`).catch(() => {});
   await run("ALTER TABLE sales_kg ADD COLUMN bag_opened INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await run("ALTER TABLE sales_kg ADD COLUMN retail_margin_per_kg REAL").catch(() => {});
+  await run("ALTER TABLE sales_kg ADD COLUMN through_party TEXT").catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS retail_feed_pricing (
@@ -363,6 +364,7 @@ async function initDb() {
   await run("ALTER TABLE chicken_sales ADD COLUMN customer_phone TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN money_paid REAL").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN payment_status TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN through_party TEXT").catch(() => {});
 
   await run("ALTER TABLE inventory ADD COLUMN profit_margin_per_bag REAL NOT NULL DEFAULT 0").catch(() => {});
   await run("ALTER TABLE inventory ADD COLUMN accumulated_profit REAL NOT NULL DEFAULT 0").catch(() => {});
@@ -419,9 +421,11 @@ async function initDb() {
   await run(
     "UPDATE feeders_drinkers_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
+  await run("ALTER TABLE feeders_drinkers_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run(
     "UPDATE medicaments_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
+  await run("ALTER TABLE medicaments_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run(`
     CREATE TABLE IF NOT EXISTS feeders_drinkers_sales (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -481,6 +485,7 @@ async function initDb() {
   await run(
     "UPDATE gas_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
+  await run("ALTER TABLE gas_sales ADD COLUMN through_party TEXT").catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS employee_expenditure (
@@ -1867,6 +1872,7 @@ app.get("/api/feeders-drinkers/sales", auth, allowRoles("owner", "employee"), as
 
 app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -1894,9 +1900,9 @@ app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req
   const total = quantitySold * price;
   await run(
     `INSERT INTO feeders_drinkers_sales
-    (date, item_name, quantity_sold, price_per_item, total_amount, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, item.name, quantitySold, price, total, req.user.username, nowIso, nowIso]
+    (date, item_name, quantity_sold, price_per_item, total_amount, through_party, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, item.name, quantitySold, price, total, throughParty, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -1906,6 +1912,7 @@ app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (
   const current = await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -1923,9 +1930,9 @@ app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (
     await adjustFeedersDrinkersStock(item.name, -qty);
     await run(
       `UPDATE feeders_drinkers_sales
-       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, updated_at = ?
+       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, updated_at = ?
        WHERE id = ?`,
-      [dateCanon, item.name, qty, price, qty * price, new Date().toISOString(), id]
+      [dateCanon, item.name, qty, price, qty * price, throughParty, new Date().toISOString(), id]
     );
     await run("COMMIT");
   } catch (err) {
@@ -2160,6 +2167,7 @@ app.get("/api/medicaments/sales", auth, allowRoles("owner", "employee"), async (
 
 app.post("/api/medicaments/sales", auth, allowRoles("employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -2179,9 +2187,9 @@ app.post("/api/medicaments/sales", auth, allowRoles("employee"), async (req, res
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO medicaments_sales
-    (date, item_name, quantity_sold, price_per_item, total_amount, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, item, qty, price, qty * price, req.user.username, nowIso, nowIso]
+    (date, item_name, quantity_sold, price_per_item, total_amount, through_party, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, item, qty, price, qty * price, throughParty, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -2191,6 +2199,7 @@ app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, 
   const current = await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -2208,9 +2217,9 @@ app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, 
     await adjustMedicamentsStock(item, -qty);
     await run(
       `UPDATE medicaments_sales
-       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, updated_at = ?
+       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, updated_at = ?
        WHERE id = ?`,
-      [dateCanon, item, qty, price, qty * price, new Date().toISOString(), id]
+      [dateCanon, item, qty, price, qty * price, throughParty, new Date().toISOString(), id]
     );
     await run("COMMIT");
   } catch (err) {
@@ -2445,6 +2454,7 @@ app.get("/api/gas/sales", auth, allowRoles("owner", "employee"), async (req, res
 
 app.post("/api/gas/sales", auth, allowRoles("employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -2464,9 +2474,9 @@ app.post("/api/gas/sales", auth, allowRoles("employee"), async (req, res) => {
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO gas_sales
-    (date, size_kg, quantity_sold, price_per_item, total_amount, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, sizeKg, qty, price, qty * price, req.user.username, nowIso, nowIso]
+    (date, size_kg, quantity_sold, price_per_item, total_amount, through_party, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, sizeKg, qty, price, qty * price, throughParty, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -2476,6 +2486,7 @@ app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => 
   const current = await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -2493,9 +2504,9 @@ app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => 
     await adjustGasStock(sizeKg, -qty);
     await run(
       `UPDATE gas_sales
-       SET date = ?, size_kg = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, updated_at = ?
+       SET date = ?, size_kg = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, updated_at = ?
        WHERE id = ?`,
-      [dateCanon, sizeKg, qty, price, qty * price, new Date().toISOString(), id]
+      [dateCanon, sizeKg, qty, price, qty * price, throughParty, new Date().toISOString(), id]
     );
     await run("COMMIT");
   } catch (err) {
@@ -2926,6 +2937,7 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
       const bk = resolveBrandKey(r.brand);
       const bagSize = effectiveKgPerOpenedBagForDisplay(weightMap, bk, r.feed_type);
       const totalKg = Number(r.total_kg_sold) || 0;
+      const hadOpenedBag = (Number(r.bags_opened) || 0) > 0 || totalKg > 0;
       return {
         date: r.date,
         brand: r.brand,
@@ -2933,7 +2945,8 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
         bag_size: bagSize,
         total_kg_sold: totalKg,
         employee_kg_sold: Number(r.employee_kg_sold) || 0,
-        bags_opened: Number(r.bags_opened) || 0,
+        // Display as a simple flag: once any bag is open for that day/product, show 1.
+        bags_opened: hadOpenedBag ? 1 : 0,
         bags_sold_from_kg: bagsFromTotalKg(totalKg, bagSize),
       };
     });
@@ -3063,6 +3076,7 @@ app.delete("/api/retail-feed-pricing/:id", auth, allowRoles("owner"), async (req
 
 app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const brandKey = resolveBrandKey(p.brand);
   const kgSold = Number(p.kg_sold);
   const pricePerKg = Number(p.price_per_kg);
@@ -3146,8 +3160,8 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
         bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(others, defaultBagSize);
       const totalAmount = newKgSold * Number(existing.price_per_kg);
       await run(
-        `UPDATE sales_kg SET bags_sold=?, kg_sold=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, updated_at=? WHERE id=?`,
-        [bagsSoldCol, newKgSold, totalAmount, newBagOpened, retailMarginSnap, nowIso, existing.id]
+        `UPDATE sales_kg SET bags_sold=?, kg_sold=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, through_party=?, updated_at=? WHERE id=?`,
+        [bagsSoldCol, newKgSold, totalAmount, newBagOpened, retailMarginSnap, throughParty, nowIso, existing.id]
       );
       return res.json({ ok: true, merged: true });
     }
@@ -3191,8 +3205,8 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     await adjustRetailAccumulatedProfit(brandKey, p.feed_type, kgSold * retailMarginSnap);
   }
   await run(
-    `INSERT INTO sales_kg (date, brand, feed_type, bags_sold, kg_sold, price_per_kg, total_amount, bag_opened, retail_margin_per_kg, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sales_kg (date, brand, feed_type, bags_sold, kg_sold, price_per_kg, total_amount, bag_opened, retail_margin_per_kg, through_party, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       dateCanon,
       brandKey,
@@ -3203,6 +3217,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
       totalAmount,
       insertBagOpened,
       retailMarginSnap,
+      throughParty,
       req.user.username,
       nowIso,
       nowIso,
@@ -3213,6 +3228,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
 
 app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const brandKey = resolveBrandKey(p.brand);
   const kgSold = Number(p.kg_sold);
   const pricePerKg = Number(p.price_per_kg);
@@ -3315,7 +3331,7 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
     bagsFromTotalKg(othersAfter + kgSold, defaultBagSize) - bagsFromTotalKg(othersAfter, defaultBagSize);
 
   await run(
-    `UPDATE sales_kg SET date=?, brand=?, feed_type=?, bags_sold=?, kg_sold=?, price_per_kg=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, updated_at=? WHERE id=?`,
+    `UPDATE sales_kg SET date=?, brand=?, feed_type=?, bags_sold=?, kg_sold=?, price_per_kg=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, through_party=?, updated_at=? WHERE id=?`,
     [
       dateCanon,
       brandKey,
@@ -3326,6 +3342,7 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
       totalAmount,
       effectiveBagOpenedPut,
       newRetailSnap,
+      throughParty,
       new Date().toISOString(),
       idNum,
     ]
@@ -3466,6 +3483,7 @@ app.post("/api/chicken-sales/clear-all", auth, allowRoles("owner"), async (_req,
 
 app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const breed = normalizeChickenBreed(p.breed);
   if (!breed) return res.status(400).json({ error: "Select a valid breed." });
   const qty = Number(p.quantity_birds);
@@ -3491,8 +3509,8 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, through_party, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       p.date,
       description,
@@ -3506,6 +3524,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
       cust.customer_phone,
       cust.money_paid,
       cust.payment_status,
+      throughParty,
       req.user.username,
       nowIso,
       nowIso,
@@ -3517,6 +3536,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
 
 app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
+  const throughParty = normalizeThroughParty(p.through_party);
   const breed = normalizeChickenBreed(p.breed);
   if (!breed) return res.status(400).json({ error: "Select a valid breed." });
   const qty = Number(p.quantity_birds);
@@ -3546,7 +3566,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   await run(
-    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, updated_at=? WHERE id=?`,
+    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, through_party=?, updated_at=? WHERE id=?`,
     [
       p.date,
       description,
@@ -3560,6 +3580,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
       cust.customer_phone,
       cust.money_paid,
       cust.payment_status,
+      throughParty,
       new Date().toISOString(),
       Number(req.params.id),
     ]

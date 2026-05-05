@@ -386,7 +386,7 @@
                     <th>Feed Type</th>
                     <th>Bag size</th>
                     <th>Bags opened</th>
-                    <th title="Sum of kg sold that day for this product (all users).">Total kg sold</th>
+                    <th title="Kg sold from Sales Per Kg for that day and product.">Kg sold</th>
                     <th title="Kg sold on lines recorded by staff (not the owner account).">Kg sold (employee)</th>
                     <th title="Floor of total kg ÷ bag size — e.g. 50 kg → 1 when bag is 50 kg.">Bags sold (from kg)</th>
                   </tr>
@@ -459,6 +459,13 @@
                 <label class="employee-only-action hidden">
                   Price per chick
                   <input type="number" id="chUnitPrice" min="0" step="0.01" />
+                </label>
+                <label>
+                  Sale recorded for
+                  <select id="chSaleType">
+                    <option value="">Shop sale (normal)</option>
+                    <option value="Ufaray">By Ufaray</option>
+                  </select>
                 </label>
               </div>
               <fieldset class="chicken-customer-fieldset employee-only-action hidden">
@@ -580,13 +587,14 @@
                     <th>Balance</th>
                     <th>Payments</th>
                     <th class="owner-only-highlight hidden" title="Your inventory: KES 0. Staff sales: margin × chicks only when Payments is Cleared; otherwise KES 0.">Profit (sale)</th>
+                    <th>Via</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="chicken-inventory-body">
                   <tr>
-                    <td colspan="14" class="empty chicken-inventory-empty-msg">Loading…</td>
+                    <td colspan="15" class="empty chicken-inventory-empty-msg">Loading…</td>
                   </tr>
                 </tbody>
               </table>
@@ -696,6 +704,13 @@
                   <input type="number" id="skKgSold" min="0.01" step="0.01" required />
                 </label>
                 <label>
+                  Sale recorded for
+                  <select id="skSaleType">
+                    <option value="">Shop sale (normal)</option>
+                    <option value="Ufaray">By Ufaray</option>
+                  </select>
+                </label>
+                <label>
                   Price per kg
                   <input type="number" id="skPricePerKg" min="0" step="0.01" required />
                 </label>
@@ -727,11 +742,12 @@
                     <th title="Total kg on this line (adds up when you record more sales for the same product/day).">Kg sold (total)</th>
                     <th>Price/kg</th>
                     <th title="Cumulative line total: total kg on this line × price per kg.">Total</th>
+                    <th>Via</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="sales-kg-body"><tr><td colspan="11" class="empty">No sales.</td></tr></tbody>
+                <tbody id="sales-kg-body"><tr><td colspan="12" class="empty">No sales.</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -762,6 +778,13 @@
                 <label>
                   Quantity
                   <input type="number" id="fdQuantity" min="0" step="1" required />
+                </label>
+                <label class="employee-only-action hidden">
+                  Sale recorded for
+                  <select id="fdSaleType">
+                    <option value="">Shop sale (normal)</option>
+                    <option value="Ufaray">By Ufaray</option>
+                  </select>
                 </label>
                 <label class="employee-only-action hidden">
                   Selling price
@@ -819,6 +842,7 @@
                     <th class="owner-only-highlight hidden">Accumulated Profit</th>
                     <th class="owner-only-highlight hidden">Reorder</th>
                     <th>Status</th>
+                    <th class="employee-only-action hidden">Via</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
@@ -854,6 +878,13 @@
                 <label>
                   Quantity
                   <input type="number" id="medQuantity" min="0" step="1" required />
+                </label>
+                <label class="employee-only-action hidden">
+                  Sale recorded for
+                  <select id="medSaleType">
+                    <option value="">Shop sale (normal)</option>
+                    <option value="Ufaray">By Ufaray</option>
+                  </select>
                 </label>
                 <label class="employee-only-action hidden">
                   Selling price
@@ -911,6 +942,7 @@
                     <th class="owner-only-highlight hidden">Accumulated Profit</th>
                     <th class="owner-only-highlight hidden">Reorder</th>
                     <th>Status</th>
+                    <th class="employee-only-action hidden">Via</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
@@ -950,6 +982,13 @@
                 <label>
                   Quantity
                   <input type="number" id="gasQuantity" min="0" step="1" required />
+                </label>
+                <label class="employee-only-action hidden">
+                  Sale recorded for
+                  <select id="gasSaleType">
+                    <option value="">Shop sale (normal)</option>
+                    <option value="Ufaray">By Ufaray</option>
+                  </select>
                 </label>
                 <label class="employee-only-action hidden">
                   Selling price
@@ -1007,6 +1046,7 @@
                     <th class="owner-only-highlight hidden">Accumulated Profit</th>
                     <th class="owner-only-highlight hidden">Reorder</th>
                     <th>Status</th>
+                    <th class="employee-only-action hidden">Via</th>
                     <th>By</th>
                     <th>Actions</th>
                   </tr>
