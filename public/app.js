@@ -51,6 +51,7 @@ const state = {
   editGasId: null,
   expenditureEntries: [],
   editExpenditureId: null,
+  calculatorValues: {},
 };
 
 const PAGE_HEADINGS = {
@@ -397,6 +398,26 @@ function calculatorRowsFromCatalog() {
     }
   }
   return rows;
+}
+
+function calculatorRowKey(brand, feedType, bagSize) {
+  return `${resolveBrandKey(brand)}|${String(feedType || "").trim()}|${Number(bagSize) || 0}`;
+}
+
+function calculatorRememberRowFromInputs(tr) {
+  if (!(tr instanceof HTMLTableRowElement)) return;
+  const brand = tr.dataset.calcBrand || "";
+  const feedType = tr.dataset.calcFeedType || "";
+  const bagSize = Number(tr.dataset.calcBagSize || 0);
+  if (!brand || !feedType || !Number.isFinite(bagSize) || bagSize <= 0) return;
+  const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+  const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+  if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement)) return;
+  const key = calculatorRowKey(brand, feedType, bagSize);
+  state.calculatorValues[key] = {
+    bags: Number(bagsEl.value || 0),
+    buying: Number(buyEl.value || 0),
+  };
 }
 
 function updateCalculatorGrandTotalDisplay() {
@@ -1879,12 +1900,12 @@ function renderCalculatorTable() {
   calcBody.innerHTML = rows
     .map(
       (row) => `
-      <tr>
+      <tr data-calc-brand="${escapeHtmlCell(row.brand)}" data-calc-feed-type="${escapeHtmlCell(row.feedType)}" data-calc-bag-size="${row.bagSize}">
         <td>${displayBrand(row.brand)}</td>
         <td>${displayFeedType(row.feedType)}</td>
         <td>${row.bagSize}</td>
-        <td><input type="number" data-kind="calc-bags" min="0" step="1" value="0" /></td>
-        <td><input type="number" data-kind="calc-buying" min="0" step="0.01" value="0" /></td>
+        <td><input type="number" data-kind="calc-bags" min="0" step="1" value="${Number(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.bags || 0)}" /></td>
+        <td><input type="number" data-kind="calc-buying" min="0" step="0.01" value="${Number(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.buying || 0)}" /></td>
         <td class="js-calc-row-total">${currency(0)}</td>
       </tr>`
     )
@@ -2674,10 +2695,12 @@ calcBody?.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
   if (target.dataset.kind !== "calc-bags" && target.dataset.kind !== "calc-buying") return;
+  calculatorRememberRowFromInputs(target.closest("tr"));
   updateCalculatorGrandTotalDisplay();
 });
 document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   if (!calcBody) return;
+  state.calculatorValues = {};
   calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying']").forEach((el) => {
     if (el instanceof HTMLInputElement) el.value = "0";
   });
