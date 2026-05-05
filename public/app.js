@@ -2793,6 +2793,60 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   updateCalculatorGrandTotalDisplay();
 });
 
+function downloadCalculatorPdf() {
+  const card = document.querySelector("#page-calculator .card");
+  if (!(card instanceof HTMLElement)) return;
+  const copy = card.cloneNode(true);
+  if (!(copy instanceof HTMLElement)) return;
+
+  // Show entered values as plain text in the print/PDF output.
+  copy.querySelectorAll("input").forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) return;
+    const span = document.createElement("span");
+    span.textContent = String(input.value || "").trim() || "—";
+    input.replaceWith(span);
+  });
+  copy.querySelectorAll(".actions").forEach((el) => el.remove());
+
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  if (!win) {
+    alert("Pop-up blocked. Allow pop-ups and try again.");
+    return;
+  }
+  const today = new Date().toLocaleDateString("en-GB");
+  win.document.open();
+  win.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Calculator - ${today}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
+      h3, h4 { margin: 0 0 8px; }
+      p { margin: 6px 0 10px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { border: 1px solid #bbb; padding: 8px; text-align: left; font-size: 13px; }
+      .profit-highlight-above-table { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
+      .profit-highlight-amount { font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <h3>Calculator</h3>
+    <p>Date: ${today}</p>
+    ${copy.innerHTML}
+    <script>
+      window.onload = () => {
+        window.print();
+        setTimeout(() => window.close(), 600);
+      };
+    </script>
+  </body>
+</html>`);
+  win.document.close();
+}
+
+document.getElementById("calcDownloadBtn")?.addEventListener("click", downloadCalculatorPdf);
+
 document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {
     applyEmployeeChickenPriceFromBreeds();

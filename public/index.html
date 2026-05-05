@@ -257,37 +257,6 @@
           </div>
         </div>
 
-        <div class="card owner-only-highlight hidden" id="ufaraySalesCard">
-          <h3 class="card-title">Bag sales via Ufaray &amp; pass-through</h3>
-          <p class="field-hint">
-            Each row is a staff-recorded <strong>Sales Per Bags</strong> entry with <strong>By Ufaray</strong> (or another agent).
-            <strong>Total</strong> is buying cost × bags; customer price per bag is shown for reference. Edit or delete under <strong>Sales Per Bags</strong>.
-          </p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Brand</th>
-                  <th>Feed Type</th>
-                  <th>Bag Size</th>
-                  <th>Bags</th>
-                  <th title="Price the customer paid per bag.">Price/bag</th>
-                  <th title="Buying cost × bags (at time of sale logic).">Total (cost)</th>
-                  <th>Via</th>
-                  <th>Status</th>
-                  <th>Recorded by</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="ufaray-bag-sales-body">
-                <tr>
-                  <td colspan="11" class="empty">No pass-through bag sales yet.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
         </div>
 
         <div id="page-retail-inventory" class="app-page hidden">
@@ -1094,6 +1063,7 @@
             </div>
             <div class="actions">
               <button type="button" class="secondary" id="calcClearBtn">Clear calculator</button>
+              <button type="button" id="calcDownloadBtn">Download PDF</button>
             </div>
           </div>
         </div>
@@ -1166,6 +1136,38 @@
                 <tbody id="exp-body"><tr><td colspan="5" class="empty">No records.</td></tr></tbody>
               </table>
             </div>
+
+        <div class="card owner-only-highlight hidden" id="ufaraySalesCard">
+          <h3 class="card-title">Bag sales via Ufaray &amp; pass-through</h3>
+          <p class="field-hint">
+            Each row is a staff-recorded <strong>Sales Per Bags</strong> entry with <strong>By Ufaray</strong> (or another agent).
+            <strong>Total</strong> is buying cost × bags; customer price per bag is shown for reference. Edit or delete under <strong>Sales Per Bags</strong>.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Brand</th>
+                  <th>Feed Type</th>
+                  <th>Bag Size</th>
+                  <th>Bags</th>
+                  <th title="Price the customer paid per bag.">Price/bag</th>
+                  <th title="Buying cost × bags (at time of sale logic).">Total (cost)</th>
+                  <th>Via</th>
+                  <th>Status</th>
+                  <th>Recorded by</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="ufaray-bag-sales-body">
+                <tr>
+                  <td colspan="11" class="empty">No pass-through bag sales yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
           </div>
         </div>
 
