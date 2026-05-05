@@ -1069,8 +1069,12 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
   });
   let pool = 0;
   for (const r of filtered) {
-    pool += Number(r.bag_opened || 0) * bagSize;
-    pool -= Number(r.kg_sold || 0);
+    const sold = Number(r.kg_sold || 0);
+    if (sold > pool) {
+      const autoOpen = Math.ceil((sold - pool) / bagSize);
+      pool += autoOpen * bagSize;
+    }
+    pool -= sold;
     if (pool < 0) pool = 0;
   }
   return pool;
