@@ -1734,14 +1734,8 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const margin = Number(payload.profit_margin_per_bag);
-    const oldQty = Number(existing.quantity_in_stock);
-    const qtyDelta = quantity - oldQty;
-    // Accumulated bags track total intake and should not reduce on manual edits/sales corrections.
-    const nextAccumulatedBags = Math.max(
-      Number(existing.accumulated_bags || 0),
-      Number(existing.accumulated_bags || 0) + Math.max(0, qtyDelta),
-      quantity
-    );
+    // On owner edit, accumulated_bags should mirror the edited current quantity for that record.
+    const nextAccumulatedBags = Math.max(0, quantity);
 
     const dateCanon = normalizeInventoryDate(payload.date);
     if (!dateCanon) {
