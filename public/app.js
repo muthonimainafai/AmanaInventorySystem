@@ -414,9 +414,15 @@ function calculatorRememberRowFromInputs(tr) {
   const buyEl = tr.querySelector("input[data-kind='calc-buying']");
   if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement)) return;
   const key = calculatorRowKey(brand, feedType, bagSize);
+  const bagsRaw = bagsEl.value;
+  const buyingRaw = buyEl.value;
+  if (!bagsRaw.trim() && !buyingRaw.trim()) {
+    delete state.calculatorValues[key];
+    return;
+  }
   state.calculatorValues[key] = {
-    bags: Number(bagsEl.value || 0),
-    buying: Number(buyEl.value || 0),
+    bags: bagsRaw,
+    buying: buyingRaw,
   };
 }
 
@@ -429,9 +435,9 @@ function updateCalculatorGrandTotalDisplay() {
     const buyEl = tr.querySelector("input[data-kind='calc-buying']");
     const totalCell = tr.querySelector(".js-calc-row-total");
     if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
-    const bags = Number(bagsEl.value || 0);
-    const buying = Number(buyEl.value || 0);
-    const rowTotal = Math.max(0, bags) * Math.max(0, buying);
+    const bags = Number(String(bagsEl.value || "").trim());
+    const buying = Number(String(buyEl.value || "").trim());
+    const rowTotal = Math.max(0, Number.isFinite(bags) ? bags : 0) * Math.max(0, Number.isFinite(buying) ? buying : 0);
     totalCell.textContent = currency(rowTotal);
     if (rowTotal > 0) linesWithValues += 1;
     grand += rowTotal;
@@ -1924,8 +1930,8 @@ function renderCalculatorTable() {
         <td>${displayBrand(row.brand)}</td>
         <td>${displayFeedType(row.feedType)}</td>
         <td>${row.bagSize}</td>
-        <td><input type="number" data-kind="calc-bags" min="0" step="1" value="${Number(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.bags || 0)}" /></td>
-        <td><input type="number" data-kind="calc-buying" min="0" step="0.01" value="${Number(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.buying || 0)}" /></td>
+        <td><input type="text" data-kind="calc-bags" inputmode="numeric" placeholder="Bags" value="${escapeHtmlCell(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.bags || "")}" /></td>
+        <td><input type="text" data-kind="calc-buying" inputmode="decimal" placeholder="Buying price" value="${escapeHtmlCell(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.buying || "")}" /></td>
         <td class="js-calc-row-total">${currency(0)}</td>
       </tr>`
     )
@@ -2743,7 +2749,7 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   if (!calcBody) return;
   state.calculatorValues = {};
   calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying']").forEach((el) => {
-    if (el instanceof HTMLInputElement) el.value = "0";
+    if (el instanceof HTMLInputElement) el.value = "";
   });
   updateCalculatorGrandTotalDisplay();
 });
