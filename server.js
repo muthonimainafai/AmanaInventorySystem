@@ -70,6 +70,7 @@ const FEEDERS_DRINKERS_CATALOG = [
   { name: "Feeder round small (Metal)", item_type: "feeder", capacity_liters: null },
   { name: "Feeder round big (Plastic)", item_type: "feeder", capacity_liters: null },
   { name: "Feeding trough (Plastic)", item_type: "feeder", capacity_liters: null },
+  { name: "Jiko Big", item_type: "feeder", capacity_liters: null },
 ];
 
 const MEDICAMENTS_CATALOG = [
@@ -81,7 +82,6 @@ const MEDICAMENTS_CATALOG = [
   "Booster 1kg",
   "Paraffin 100ml",
   "Paraffin 250ml",
-  "Jiko Big",
   "Jiko small",
 ];
 
@@ -2922,6 +2922,10 @@ app.get("/api/sales/kg", auth, async (_req, res) => {
 /** Owner: retail view — aggregates from employee “Sales Per Kg” (kg sold, bags opened, bags completed from kg). */
 app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res) => {
   try {
+    const keyForDayProduct = (dateVal, brandVal, feedVal) => {
+      const dateCanon = normalizeInventoryDate(dateVal) || String(dateVal || "").trim();
+      return `${dateCanon}|${resolveBrandKey(brandVal)}|${normalizeFeedType(feedVal)}`;
+    };
     const rows = await all(
       `SELECT sk.date AS date, sk.brand AS brand, sk.feed_type AS feed_type,
         SUM(sk.kg_sold) AS total_kg_sold,
@@ -2933,17 +2937,34 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
        ORDER BY sk.date DESC, sk.brand ASC, sk.feed_type ASC`
     );
     const weightMap = await getRetailWeightKgByKeyMap();
+    const detailRows = await all("SELECT id, date, brand, feed_type, kg_sold, bag_opened FROM sales_kg ORDER BY id DESC");
+    const detailEnriched = enrichSalesKgRowsWithCumulative(detailRows, weightMap);
+    const remainingByDayProduct = new Map();
+    for (const dRow of detailEnriched) {
+      const key = keyForDayProduct(dRow.date, dRow.brand, dRow.feed_type);
+      const existing = remainingByDayProduct.get(key);
+      const rowId = Number(dRow.id) || 0;
+      if (!existing || rowId > existing.id) {
+        remainingByDayProduct.set(key, {
+          id: rowId,
+          remaining: Number(dRow.total_kgs_remaining) || 0,
+        });
+      }
+    }
     const enriched = rows.map((r) => {
       const bk = resolveBrandKey(r.brand);
       const bagSize = effectiveKgPerOpenedBagForDisplay(weightMap, bk, r.feed_type);
       const totalKg = Number(r.total_kg_sold) || 0;
       const hadOpenedBag = (Number(r.bags_opened) || 0) > 0 || totalKg > 0;
+      const key = keyForDayProduct(r.date, r.brand, r.feed_type);
+      const remaining = Number(remainingByDayProduct.get(key)?.remaining || 0);
       return {
         date: r.date,
         brand: r.brand,
         feed_type: r.feed_type,
         bag_size: bagSize,
         total_kg_sold: totalKg,
+        remaining_kg: remaining,
         employee_kg_sold: Number(r.employee_kg_sold) || 0,
         // Display as a simple flag: once any bag is open for that day/product, show 1.
         bags_opened: hadOpenedBag ? 1 : 0,

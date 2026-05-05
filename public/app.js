@@ -918,7 +918,11 @@ function showLoggedIn() {
   if (fdForm && !isOwner) {
     fdForm.querySelectorAll("input, select").forEach((el) => {
       const editable =
-        el.id === "fdDateDisplay" || el.id === "fdItem" || el.id === "fdQuantity" || el.id === "fdEmployeeSellingPrice";
+        el.id === "fdDateDisplay" ||
+        el.id === "fdItem" ||
+        el.id === "fdQuantity" ||
+        el.id === "fdSaleType" ||
+        el.id === "fdEmployeeSellingPrice";
       el.disabled = !editable;
     });
     if (fdDate) fdDate.disabled = false;
@@ -926,7 +930,11 @@ function showLoggedIn() {
   if (medForm && !isOwner) {
     medForm.querySelectorAll("input, select").forEach((el) => {
       const editable =
-        el.id === "medDateDisplay" || el.id === "medItem" || el.id === "medQuantity" || el.id === "medEmployeeSellingPrice";
+        el.id === "medDateDisplay" ||
+        el.id === "medItem" ||
+        el.id === "medQuantity" ||
+        el.id === "medSaleType" ||
+        el.id === "medEmployeeSellingPrice";
       el.disabled = !editable;
     });
     if (medDate) medDate.disabled = false;
@@ -937,6 +945,7 @@ function showLoggedIn() {
         el.id === "gasDateDisplay" ||
         el.id === "gasSize" ||
         el.id === "gasQuantity" ||
+        el.id === "gasSaleType" ||
         el.id === "gasEmployeeSellingPrice";
       el.disabled = !editable;
     });
@@ -1597,7 +1606,7 @@ function renderRetailInventoryTable() {
         <td>${displayFeedType(row.feed_type)}</td>
         <td>${row.bag_size} kg</td>
         <td>${Number(row.bags_opened || 0)}</td>
-        <td>${Number(row.total_kg_sold || 0)}</td>
+        <td>${Number(row.remaining_kg ?? 0)}</td>
         <td>${Number(row.employee_kg_sold ?? 0)}</td>
         <td>${Number(row.bags_sold_from_kg || 0)}</td>
       </tr>`;
