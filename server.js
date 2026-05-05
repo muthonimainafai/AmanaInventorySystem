@@ -500,6 +500,38 @@ async function initDb() {
     await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["accumulated_bags_v1", "1"]);
   }
 
+  const ufarayStockFixV1 = await get("SELECT value FROM app_meta WHERE key = ?", ["ufaray_stock_fix_v1"]);
+  if (!ufarayStockFixV1 || ufarayStockFixV1.value !== "1") {
+    const passRows = await all(
+      `SELECT brand, feed_type, bag_size, COALESCE(SUM(bags_sold), 0) AS t
+       FROM sales_bags
+       WHERE through_party IS NOT NULL AND TRIM(COALESCE(through_party, '')) <> ''
+       GROUP BY brand, feed_type, bag_size`
+    );
+    const passMap = new Map();
+    for (const r of passRows) {
+      passMap.set(inventoryProfitKey(r.brand, r.feed_type, r.bag_size), Number(r.t) || 0);
+    }
+    const invRows = await all("SELECT id, brand, feed_type, bag_size, quantity_in_stock, COALESCE(accumulated_bags, 0) AS accumulated_bags FROM inventory");
+    for (const row of invRows) {
+      const key = inventoryProfitKey(row.brand, row.feed_type, row.bag_size);
+      const pass = Number(passMap.get(key) || 0);
+      const qty = Math.max(0, Number(row.quantity_in_stock || 0));
+      let acc = Math.max(0, Number(row.accumulated_bags || 0), qty);
+      const soldAccounted = Math.max(0, acc - qty);
+      const missingPassDeduction = Math.max(0, pass - soldAccounted);
+      const nextQty = Math.max(0, qty - missingPassDeduction);
+      acc = Math.max(acc, nextQty);
+      if (nextQty !== qty || acc !== Number(row.accumulated_bags || 0)) {
+        await run(
+          "UPDATE inventory SET quantity_in_stock = ?, total_stock = ?, accumulated_bags = ?, updated_at = ? WHERE id = ?",
+          [nextQty, nextQty * Number(row.bag_size || 0), acc, new Date().toISOString(), row.id]
+        );
+      }
+    }
+    await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["ufaray_stock_fix_v1", "1"]);
+  }
+
   const dolaLayersRenamed = await get("SELECT value FROM app_meta WHERE key = ?", ["dola_layers_feed_types_v1"]);
   if (!dolaLayersRenamed || dolaLayersRenamed.value !== "1") {
     const dolaBrand = "Dola Feeds";
@@ -1698,7 +1730,12 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     const margin = Number(payload.profit_margin_per_bag);
     const oldQty = Number(existing.quantity_in_stock);
     const qtyDelta = quantity - oldQty;
-    const nextAccumulatedBags = Math.max(0, Number(existing.accumulated_bags) + qtyDelta);
+    // Accumulated bags track total intake and should not reduce on manual edits/sales corrections.
+    const nextAccumulatedBags = Math.max(
+      Number(existing.accumulated_bags || 0),
+      Number(existing.accumulated_bags || 0) + Math.max(0, qtyDelta),
+      quantity
+    );
 
     const dateCanon = normalizeInventoryDate(payload.date);
     if (!dateCanon) {
