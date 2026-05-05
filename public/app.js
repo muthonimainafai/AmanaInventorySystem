@@ -1891,6 +1891,26 @@ function renderExpenditureTable() {
 
 function renderCalculatorTable() {
   if (!calcBody) return;
+  const activeEl = document.activeElement;
+  let activeKey = "";
+  let activeKind = "";
+  let selStart = null;
+  let selEnd = null;
+  let activeBrand = "";
+  let activeFeedType = "";
+  let activeBagSize = 0;
+  if (activeEl instanceof HTMLInputElement && calcBody.contains(activeEl)) {
+    const tr = activeEl.closest("tr");
+    if (tr instanceof HTMLTableRowElement) {
+      activeBrand = tr.dataset.calcBrand || "";
+      activeFeedType = tr.dataset.calcFeedType || "";
+      activeBagSize = Number(tr.dataset.calcBagSize || 0);
+      activeKey = calculatorRowKey(activeBrand, activeFeedType, activeBagSize);
+      activeKind = activeEl.dataset.kind || "";
+      selStart = activeEl.selectionStart;
+      selEnd = activeEl.selectionEnd;
+    }
+  }
   const rows = calculatorRowsFromCatalog();
   if (!rows.length) {
     calcBody.innerHTML = '<tr><td colspan="6" class="empty">No feed catalog loaded.</td></tr>';
@@ -1911,6 +1931,27 @@ function renderCalculatorTable() {
     )
     .join("");
   updateCalculatorGrandTotalDisplay();
+  if (activeKey && (activeKind === "calc-bags" || activeKind === "calc-buying")) {
+    const tr = [...calcBody.querySelectorAll("tr")].find(
+      (row) =>
+        row instanceof HTMLTableRowElement &&
+        calculatorRowKey(row.dataset.calcBrand || "", row.dataset.calcFeedType || "", Number(row.dataset.calcBagSize || 0)) ===
+          calculatorRowKey(activeBrand, activeFeedType, activeBagSize)
+    );
+    if (tr instanceof HTMLTableRowElement) {
+      const input = tr.querySelector(`input[data-kind='${activeKind}']`);
+      if (input instanceof HTMLInputElement) {
+        input.focus();
+        if (selStart != null && selEnd != null) {
+          try {
+            input.setSelectionRange(selStart, selEnd);
+          } catch (_e) {
+            // ignore unsupported range types
+          }
+        }
+      }
+    }
+  }
 }
 
 function resetExpenditureForm() {
