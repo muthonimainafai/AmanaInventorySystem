@@ -62,11 +62,12 @@ const PAGE_HEADINGS = {
   "feeders-drinkers": "Feeders and Drinkers inventory",
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
+  calculator: "Calculator",
   expenditure: "Expenditure",
 };
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
-const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory"]);
+const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator"]);
 const OWNER_ALLOWED_PAGES = new Set([
   "inventory",
   "retail-inventory",
@@ -74,6 +75,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "feeders-drinkers",
   "medicaments",
   "gas",
+  "calculator",
 ]);
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
@@ -191,6 +193,7 @@ const expBody = document.getElementById("exp-body");
 const expDateDisplay = document.getElementById("expDateDisplay");
 const expDate = document.getElementById("expDate");
 const expOpenCalendarBtn = document.getElementById("expOpenCalendarBtn");
+const calcBody = document.getElementById("calc-body");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -377,6 +380,48 @@ function updateExpenditureAccumulatedDisplay() {
       ? "No records yet."
       : `${rows.length} record${rows.length === 1 ? "" : "s"} · Sum of Total: ${currency(sumTotal)} · Sum of Money out: ${currency(sumMoneyOut)}`;
   document.querySelectorAll(".js-exp-expenditure-total-meta").forEach((el) => {
+    el.textContent = meta;
+  });
+}
+
+function calculatorRowsFromCatalog() {
+  const rows = [];
+  const brands = Object.keys(state.catalog || {}).sort((a, b) => a.localeCompare(b));
+  for (const brand of brands) {
+    const items = Array.isArray(state.catalog[brand]) ? state.catalog[brand] : [];
+    for (const item of items) {
+      const feedType = String(item?.type || "").trim();
+      const bagSize = Number(item?.bagSize || 0);
+      if (!feedType || !Number.isFinite(bagSize) || bagSize <= 0) continue;
+      rows.push({ brand, feedType, bagSize });
+    }
+  }
+  return rows;
+}
+
+function updateCalculatorGrandTotalDisplay() {
+  if (!calcBody) return;
+  let grand = 0;
+  let linesWithValues = 0;
+  calcBody.querySelectorAll("tr").forEach((tr) => {
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+    const totalCell = tr.querySelector(".js-calc-row-total");
+    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
+    const bags = Number(bagsEl.value || 0);
+    const buying = Number(buyEl.value || 0);
+    const rowTotal = Math.max(0, bags) * Math.max(0, buying);
+    totalCell.textContent = currency(rowTotal);
+    if (rowTotal > 0) linesWithValues += 1;
+    grand += rowTotal;
+  });
+  document.querySelectorAll(".js-calc-grand-total-value").forEach((el) => {
+    el.textContent = currency(grand);
+  });
+  const meta = linesWithValues
+    ? `${linesWithValues} line${linesWithValues === 1 ? "" : "s"} with values. Grand total purchase cost: ${currency(grand)}.`
+    : "Enter number of bags and buying price to calculate purchase cost.";
+  document.querySelectorAll(".js-calc-grand-total-meta").forEach((el) => {
     el.textContent = meta;
   });
 }
@@ -1823,6 +1868,30 @@ function renderExpenditureTable() {
   updateExpenditureAccumulatedDisplay();
 }
 
+function renderCalculatorTable() {
+  if (!calcBody) return;
+  const rows = calculatorRowsFromCatalog();
+  if (!rows.length) {
+    calcBody.innerHTML = '<tr><td colspan="6" class="empty">No feed catalog loaded.</td></tr>';
+    updateCalculatorGrandTotalDisplay();
+    return;
+  }
+  calcBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${displayBrand(row.brand)}</td>
+        <td>${displayFeedType(row.feedType)}</td>
+        <td>${row.bagSize}</td>
+        <td><input type="number" data-kind="calc-bags" min="0" step="1" value="0" /></td>
+        <td><input type="number" data-kind="calc-buying" min="0" step="0.01" value="0" /></td>
+        <td class="js-calc-row-total">${currency(0)}</td>
+      </tr>`
+    )
+    .join("");
+  updateCalculatorGrandTotalDisplay();
+}
+
 function resetExpenditureForm() {
   if (!expenditureForm) return;
   expenditureForm.reset();
@@ -1988,6 +2057,9 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
+  if (page === "calculator" && state.user?.role !== "owner") {
+    return showPage("sales-bags");
+  }
   if (page === "expenditure" && state.user?.role !== "employee") {
     return showPage("sales-bags");
   }
@@ -2033,6 +2105,7 @@ function showPage(page) {
   if (page === "feeders-drinkers") renderFeedersDrinkersTable();
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
+  if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
@@ -2242,6 +2315,7 @@ async function loadAllData() {
   renderFeedersDrinkersTable();
   renderMedicamentsTable();
   renderGasTable();
+  renderCalculatorTable();
   renderExpenditureTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
@@ -2595,6 +2669,19 @@ document.getElementById("expMoneyOut")?.addEventListener("input", () => {
   if (state.editExpenditureId) return;
   const t = totalEl.value.trim();
   if (t === "" || Number(t) === 0) totalEl.value = outEl.value;
+});
+calcBody?.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.dataset.kind !== "calc-bags" && target.dataset.kind !== "calc-buying") return;
+  updateCalculatorGrandTotalDisplay();
+});
+document.getElementById("calcClearBtn")?.addEventListener("click", () => {
+  if (!calcBody) return;
+  calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying']").forEach((el) => {
+    if (el instanceof HTMLInputElement) el.value = "0";
+  });
+  updateCalculatorGrandTotalDisplay();
 });
 
 document.getElementById("chBreed")?.addEventListener("change", () => {

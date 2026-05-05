@@ -107,6 +107,7 @@
             <span class="owner-only-tab">Gas Inventory</span>
             <span class="employee-only-action hidden">Gas Sales</span>
           </button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
         </nav>
 
@@ -1010,6 +1011,47 @@
                 </thead>
                 <tbody id="gas-body"><tr><td colspan="7" class="empty">No records.</td></tr></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-calculator" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Calculator</h3>
+            <p class="field-hint">
+              Enter the number of bags and buying price for each feed line. Total per row is <strong>bags × buying price</strong>.
+            </p>
+          </div>
+          <div class="card">
+            <div class="profit-highlight-above-table owner-only-highlight" aria-live="polite">
+              <div class="profit-highlight-inner">
+                <div class="profit-highlight-text">
+                  <p class="profit-highlight-title">Total purchase cost</p>
+                  <p class="profit-highlight-sub">
+                    Sum of all row totals based on the number of bags you plan to buy.
+                  </p>
+                </div>
+                <span class="js-calc-grand-total-value profit-highlight-amount">KES 0</span>
+              </div>
+              <p class="profit-highlight-example js-calc-grand-total-meta"></p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Brand</th>
+                    <th>Feed Type</th>
+                    <th>Bag Size (kg)</th>
+                    <th>Number of bags</th>
+                    <th>Buying price (per bag)</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody id="calc-body"><tr><td colspan="6" class="empty">No feed catalog loaded.</td></tr></tbody>
+              </table>
+            </div>
+            <div class="actions">
+              <button type="button" class="secondary" id="calcClearBtn">Clear calculator</button>
             </div>
           </div>
         </div>
