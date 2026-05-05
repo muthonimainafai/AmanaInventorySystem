@@ -979,6 +979,8 @@ function showLoggedIn() {
   if (medSaveBtn) medSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
   const gasSaveBtn = document.getElementById("gasSaveBtn");
   if (gasSaveBtn) gasSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
+  // Re-apply tenant-specific visibility after role-based show/hide rules.
+  applyAppTheme();
 }
 
 function showVehicleLoggedIn() {

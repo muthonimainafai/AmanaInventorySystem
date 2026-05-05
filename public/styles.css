@@ -295,8 +295,8 @@ h1 {
 }
 
 #landingCard #openUfarayBtn {
-  background: linear-gradient(135deg, #198754, #157347);
-  box-shadow: 0 6px 14px rgba(25, 135, 84, 0.24);
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  box-shadow: 0 6px 14px rgba(91, 33, 182, 0.28);
 }
 
 #landingCard #openVehicleBtn {
@@ -305,24 +305,24 @@ h1 {
 }
 
 body.ufaray-theme {
-  background: #eef5f8;
-  color: #112131;
+  background: #f6f2ff;
+  color: #25123f;
 }
 
 body.ufaray-theme .page-title,
 body.ufaray-theme .chicken-inventory-main-title {
-  color: #0f3b66;
+  color: #5b21b6;
 }
 
 body.ufaray-theme .nav-tab.active {
-  background: #0f3b66;
+  background: #5b21b6;
   color: #fff;
 }
 
 body.ufaray-theme .profit-highlight-above-table {
-  border-color: #0f3b66;
-  background: linear-gradient(160deg, #d6ebf8 0%, #eff8ff 45%, #fff 100%);
-  box-shadow: 0 2px 8px rgba(15, 59, 102, 0.14);
+  border-color: #5b21b6;
+  background: linear-gradient(160deg, #ede3ff 0%, #f6f0ff 45%, #fff 100%);
+  box-shadow: 0 2px 8px rgba(91, 33, 182, 0.16);
 }
 
 #landingCard button:hover {
