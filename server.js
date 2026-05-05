@@ -665,14 +665,14 @@ async function initDb() {
   await migrateChickenBreedAccumulatedProfitClearedOnlyV1();
 }
 
-/** One-time: align per-breed accumulated_profit with cleared staff sales only (pending no longer counts). */
+/** One-time: align per-breed accumulated_profit with delivered/cleared staff sales only (pending no longer counts). */
 async function migrateChickenBreedAccumulatedProfitClearedOnlyV1() {
   await run(
     `CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)`
   ).catch(() => {});
   const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["chicken_profit_cleared_only_v1"]);
   if (done) return;
-  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'cleared'`;
+  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared')`;
   const breeds = await all("SELECT breed FROM chicken_breeds");
   const nowIso = new Date().toISOString();
   for (const { breed } of breeds) {
@@ -1310,9 +1310,10 @@ async function adjustChickenBreedAccumulatedProfit(breed, deltaProfit) {
   );
 }
 
-/** Staff chick sales: margin counts toward breed totals and UI only when payment is Cleared. */
+/** Staff chick sales: margin counts toward breed totals/UI only when payment is Delivered. */
 function chickenStaffSalePaymentIsCleared(row) {
-  return String(row?.payment_status ?? "pending").trim().toLowerCase() === "cleared";
+  const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
+  return s === "delivered" || s === "cleared";
 }
 
 async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
@@ -1341,8 +1342,9 @@ function normalizeChickenCustomerPayment(p, totalAmount, role) {
   let money_paid = p.money_paid === "" || p.money_paid == null ? 0 : Number(p.money_paid);
   if (!Number.isFinite(money_paid) || money_paid < 0) money_paid = 0;
   let payment_status = String(p.payment_status || "pending").toLowerCase();
-  if (payment_status !== "cleared" && payment_status !== "pending") payment_status = "pending";
-  if (payment_status === "cleared" && money_paid < totalAmount - 1e-9) {
+  if (payment_status === "cleared") payment_status = "delivered";
+  if (payment_status !== "delivered" && payment_status !== "pending") payment_status = "pending";
+  if (payment_status === "delivered" && money_paid < totalAmount - 1e-9) {
     money_paid = totalAmount;
   }
   return { customer_name, customer_phone, money_paid, payment_status };
@@ -1429,12 +1431,12 @@ async function reverseChickenSaleProfitEffect(row) {
 }
 
 /**
- * Staff margin totals: only rows with Payments = Cleared (pending counts as 0).
+ * Staff margin totals: only rows with Payments = Delivered (pending counts as 0).
  * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
  */
 async function computeChickenProfitSummary(employeeUsernameOnly) {
   const today = todayDMY();
-  const clearedCond = `(LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'cleared')`;
+  const clearedCond = `(LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared'))`;
   const baseJoin = `FROM chicken_sales cs
      INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'`;
   const paramsToday = [today];

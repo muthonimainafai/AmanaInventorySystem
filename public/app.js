@@ -356,7 +356,7 @@ function updateChickenProfitDisplay() {
   });
   const shop = state.chickenProfitSummary?.today || state.shopToday || "";
   const meta = shop
-    ? `Shop day ${shop}. Cumulative and today count cleared staff chick sales only (Pending shows KES 0 in the table until cleared). Your inventory lines do not add to these totals.`
+    ? `Shop day ${shop}. Cumulative and today count delivered staff chick sales only (Pending shows KES 0 in the table until delivered). Your inventory lines do not add to these totals.`
     : "";
   document.querySelectorAll(".js-chicken-profit-meta").forEach((el) => {
     el.textContent = meta;
@@ -696,7 +696,8 @@ function escapeHtmlCell(text) {
 
 function chickenSalePaymentStatusLabel(row) {
   const s = String(row.payment_status || "pending").toLowerCase();
-  return s === "cleared" ? "Cleared" : "Pending";
+  if (s === "delivered" || s === "cleared") return "Delivered";
+  return "Pending";
 }
 
 function chickenSaleCustomerCellsHtml(row) {
@@ -726,7 +727,7 @@ function updateChickenCustomerAmounts() {
 function onChickenPaymentStatusChange() {
   if (state.user?.role !== "employee") return;
   const sel = document.getElementById("chPaymentStatus");
-  if (!sel || sel.value !== "cleared") return;
+  if (!sel || sel.value !== "delivered") return;
   const qty = Number(document.getElementById("chQuantity")?.value || 0);
   const unit = Number(document.getElementById("chUnitPrice")?.value || 0);
   const total = Number.isFinite(qty) && Number.isFinite(unit) ? qty * unit : NaN;
@@ -799,10 +800,11 @@ function fillOwnerCustomerViewPanel(row) {
 }
 
 function chickenStaffPaymentIsCleared(row) {
-  return String(row?.payment_status ?? "pending").trim().toLowerCase() === "cleared";
+  const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
+  return s === "delivered" || s === "cleared";
 }
 
-/** Profit for this row: margin × chicks for staff only when Payments is Cleared; owner inventory lines stay KES 0. */
+/** Profit for this row: margin × chicks for staff only when Payments is Delivered; owner inventory lines stay KES 0. */
 function chickenSaleLineProfit(row) {
   const cr = String(row.creator_role || "").toLowerCase();
   if (cr === "owner") return 0;
@@ -2117,7 +2119,7 @@ function renderChickenSalesHistoryTable() {
     }
     staffMarginSum += chickenSaleLineProfit(r);
   }
-  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (cleared payments only; matches Profit column). Highlight above uses the same basis.`;
+  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (delivered payments only; matches Profit column). Highlight above uses the same basis.`;
 }
 
 function populateChickenBreedSelect() {
@@ -3212,9 +3214,9 @@ chickenForm.addEventListener("submit", async (event) => {
     const unitForLine = Number(payload.unit_price);
     const lineTotal = qty * unitForLine;
     const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
-    const payStatus = document.getElementById("chPaymentStatus")?.value === "cleared" ? "cleared" : "pending";
-    if (payStatus === "cleared" && moneyPaid + 0.005 < lineTotal) {
-      alert("When Payments is Cleared, money paid must cover the sale total.");
+    const payStatus = document.getElementById("chPaymentStatus")?.value === "delivered" ? "delivered" : "pending";
+    if (payStatus === "delivered" && moneyPaid + 0.005 < lineTotal) {
+      alert("When Payments is Delivered, money paid must cover the sale total.");
       return;
     }
     payload.customer_name = document.getElementById("chCustomerName")?.value.trim() ?? "";
@@ -3420,7 +3422,10 @@ function wireChickenTableClicks(tbody) {
         if (cn) cn.value = row.customer_name || "";
         if (cp) cp.value = row.customer_phone || "";
         if (mp) mp.value = row.money_paid != null && row.money_paid !== "" ? String(row.money_paid) : "0";
-        if (ps) ps.value = String(row.payment_status || "pending").toLowerCase() === "cleared" ? "cleared" : "pending";
+        if (ps) {
+          const st = String(row.payment_status || "pending").toLowerCase();
+          ps.value = st === "delivered" || st === "cleared" ? "delivered" : "pending";
+        }
         updateChickenCustomerAmounts();
       }
       document.getElementById("chSaveBtn").textContent =
