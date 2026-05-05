@@ -305,6 +305,7 @@ async function initDb() {
   `);
   await run("ALTER TABLE sales_kg ADD COLUMN bags_sold INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await run("ALTER TABLE sales_bags ADD COLUMN through_party TEXT").catch(() => {});
+  await run("ALTER TABLE sales_bags ADD COLUMN pass_through_status TEXT").catch(() => {});
   await run("ALTER TABLE sales_bags ADD COLUMN created_at TEXT").catch(() => {});
   await run("ALTER TABLE sales_kg ADD COLUMN created_at TEXT").catch(() => {});
   await run(`UPDATE sales_bags SET created_at = updated_at WHERE created_at IS NULL OR created_at = ''`).catch(() => {});
@@ -768,6 +769,11 @@ function inventoryProfitKey(brand, feedType, bagSize) {
 function normalizeThroughParty(val) {
   const s = String(val ?? "").trim();
   return s === "" ? null : s;
+}
+
+function normalizePassThroughStatus(val) {
+  const s = String(val || "").trim().toLowerCase();
+  return s === "solved" ? "solved" : "pending";
 }
 
 function isThroughPartyBagSaleRow(row) {
@@ -2730,6 +2736,7 @@ app.post("/api/sales/bags", auth, allowRoles("owner", "employee"), async (req, r
   const pricePerBag = Number(p.price_per_bag);
   const throughParty = normalizeThroughParty(p.through_party);
   const isThrough = throughParty != null;
+  const passThroughStatus = isThrough ? normalizePassThroughStatus(p.pass_through_status) : null;
   if (!validateFeed(p.brand, p.feed_type, bagSize)) {
     return res.status(400).json({ error: "Invalid brand/feed type/bag size combination." });
   }
@@ -2763,8 +2770,8 @@ app.post("/api/sales/bags", auth, allowRoles("owner", "employee"), async (req, r
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO sales_bags (date, brand, feed_type, bag_size, bags_sold, price_per_bag, total_amount, through_party, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sales_bags (date, brand, feed_type, bag_size, bags_sold, price_per_bag, total_amount, through_party, pass_through_status, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       p.date,
       p.brand,
@@ -2774,6 +2781,7 @@ app.post("/api/sales/bags", auth, allowRoles("owner", "employee"), async (req, r
       pricePerBag,
       totalAmount,
       throughParty,
+      passThroughStatus,
       req.user.username,
       nowIso,
       nowIso,
@@ -2801,6 +2809,9 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
   const idNum = Number(req.params.id);
   const current = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
+  const passThroughStatus = isThrough
+    ? normalizePassThroughStatus(p.pass_through_status ?? current.pass_through_status)
+    : null;
   if (req.user.role === "employee" && current.created_by !== req.user.username) {
     return res.status(403).json({ error: "You can only edit your own bag sales." });
   }
@@ -2835,7 +2846,7 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
       recordProfit: !isThrough,
     });
     await run(
-      `UPDATE sales_bags SET date=?, brand=?, feed_type=?, bag_size=?, bags_sold=?, price_per_bag=?, total_amount=?, through_party=?, updated_at=? WHERE id=?`,
+      `UPDATE sales_bags SET date=?, brand=?, feed_type=?, bag_size=?, bags_sold=?, price_per_bag=?, total_amount=?, through_party=?, pass_through_status=?, updated_at=? WHERE id=?`,
       [
         p.date,
         p.brand,
@@ -2845,6 +2856,7 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
         pricePerBag,
         totalAmount,
         throughParty,
+        passThroughStatus,
         new Date().toISOString(),
         idNum,
       ]
@@ -2858,6 +2870,23 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
     }
     return res.status(400).json({ error: error.message || "Could not update sale." });
   }
+  res.json({ ok: true });
+});
+
+app.put("/api/sales/bags/:id/pass-through-status", auth, allowRoles("owner"), async (req, res) => {
+  const idNum = Number(req.params.id);
+  if (!Number.isFinite(idNum) || idNum < 1) return res.status(400).json({ error: "Invalid sale id." });
+  const current = await get("SELECT id, through_party FROM sales_bags WHERE id = ?", [idNum]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  if (!normalizeThroughParty(current.through_party)) {
+    return res.status(400).json({ error: "Status is only available for pass-through sales." });
+  }
+  const status = normalizePassThroughStatus(req.body?.status);
+  await run("UPDATE sales_bags SET pass_through_status = ?, updated_at = ? WHERE id = ?", [
+    status,
+    new Date().toISOString(),
+    idNum,
+  ]);
   res.json({ ok: true });
 });
 
