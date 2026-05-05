@@ -1,4 +1,5 @@
 const state = {
+  appInstance: (localStorage.getItem("amanaAppInstance") || "amana").trim().toLowerCase() === "ufaray" ? "ufaray" : "amana",
   token: (localStorage.getItem("amanaToken") || "").trim(),
   user: JSON.parse(localStorage.getItem("amanaUser") || "null"),
   vehicleToken: (localStorage.getItem("vehicleToken") || "").trim(),
@@ -204,8 +205,26 @@ const calcBody = document.getElementById("calc-body");
 let refreshTimer = null;
 let catalogInitialized = false;
 
+function persistAppInstance() {
+  localStorage.setItem("amanaAppInstance", state.appInstance === "ufaray" ? "ufaray" : "amana");
+}
+
+function applyAppTheme() {
+  const isUfaray = state.appInstance === "ufaray";
+  document.body.classList.toggle("ufaray-theme", isUfaray);
+  document.title = isUfaray ? "Ufaray Feeds - Desktop Inventory" : "Amana Kuku Feeds - Desktop Inventory";
+  const loginTitle = document.getElementById("loginCardTitle");
+  if (loginTitle) {
+    loginTitle.textContent = isUfaray ? "Ufaray Feeds Login" : "Amana Kuku Feeds Login";
+  }
+}
+
 async function api(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const headers = {
+    "Content-Type": "application/json",
+    "X-App-Instance": state.appInstance === "ufaray" ? "ufaray" : "amana",
+    ...(options.headers || {}),
+  };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
 
   const response = await fetch(path, { ...options, headers });
@@ -858,6 +877,7 @@ function employeeBagSaleEditAllowed(row) {
 }
 
 function showLoggedOut() {
+  applyAppTheme();
   landingCard?.classList.remove("hidden");
   loginCard.classList.add("hidden");
   vehicleLoginCard?.classList.add("hidden");
@@ -866,6 +886,7 @@ function showLoggedOut() {
 }
 
 function showLoginCard() {
+  applyAppTheme();
   landingCard?.classList.add("hidden");
   loginCard.classList.remove("hidden");
   vehicleLoginCard?.classList.add("hidden");
@@ -882,6 +903,7 @@ function showVehicleLoginCard() {
 }
 
 function showLoggedIn() {
+  applyAppTheme();
   landingCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   appCard.classList.remove("hidden");
@@ -2460,6 +2482,14 @@ vehicleLoginForm?.addEventListener("reset", () => {
 });
 
 document.getElementById("openAmanaBtn")?.addEventListener("click", () => {
+  state.appInstance = "amana";
+  persistAppInstance();
+  showLoginCard();
+});
+
+document.getElementById("openUfarayBtn")?.addEventListener("click", () => {
+  state.appInstance = "ufaray";
+  persistAppInstance();
   showLoginCard();
 });
 

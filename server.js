@@ -4,6 +4,7 @@ const fs = require("fs");
 const sqlite3 = require("sqlite3").verbose();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { AsyncLocalStorage } = require("async_hooks");
 
 /** Load `/.env` into process.env (no extra npm package). */
 function loadEnvFile() {
@@ -43,17 +44,67 @@ const VEHICLE_ADMIN_USERNAME = String(process.env.VEHICLE_ADMIN_USERNAME || "veh
 const VEHICLE_ADMIN_PASSWORD = String(process.env.VEHICLE_ADMIN_PASSWORD || "VehicleAdmin@123");
 const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "Vehicle Admin").trim() || "Vehicle Admin";
 
-let db = null;
+const tenantContext = new AsyncLocalStorage();
+const dbByTenant = new Map();
+const dbInitDone = new Set();
+const dbInitInFlight = new Map();
 
-function ensureDb() {
-  if (db) return db;
+function normalizeAppTenant(value) {
+  return String(value || "amana").trim().toLowerCase() === "ufaray" ? "ufaray" : "amana";
+}
+
+function activeTenant() {
+  return normalizeAppTenant(tenantContext.getStore()?.tenant);
+}
+
+function dbFileNameForTenant(tenant) {
+  const t = normalizeAppTenant(tenant);
+  return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
+}
+
+function ensureDb(tenantOverride) {
+  const tenant = normalizeAppTenant(tenantOverride || activeTenant());
+  const cached = dbByTenant.get(tenant);
+  if (cached) return cached;
   const dataDir = process.env.AMANA_DATA_DIR || path.join(__dirname, "data");
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-  const dbPath = path.join(dataDir, "inventory.db");
-  db = new sqlite3.Database(dbPath);
+  const dbPath = path.join(dataDir, dbFileNameForTenant(tenant));
+  const db = new sqlite3.Database(dbPath);
+  dbByTenant.set(tenant, db);
   return db;
+}
+
+function runInTenantContext(tenant, fn) {
+  const normalized = normalizeAppTenant(tenant);
+  return new Promise((resolve, reject) => {
+    tenantContext.run({ tenant: normalized }, () => {
+      Promise.resolve()
+        .then(fn)
+        .then(resolve, reject);
+    });
+  });
+}
+
+async function ensureTenantInitialized(tenant) {
+  const normalized = normalizeAppTenant(tenant);
+  if (dbInitDone.has(normalized)) return;
+  if (dbInitInFlight.has(normalized)) {
+    await dbInitInFlight.get(normalized);
+    return;
+  }
+  const initPromise = runInTenantContext(normalized, async () => {
+    ensureDb(normalized);
+    await initDb();
+    dbInitDone.add(normalized);
+  });
+  dbInitInFlight.set(normalized, initPromise);
+  try {
+    await initPromise;
+  } finally {
+    dbInitInFlight.delete(normalized);
+  }
 }
 
 /** Brand / feed types / bag sizes — single source (original Amana Kuku Feeds specification). */
@@ -136,6 +187,18 @@ app.use((req, res, next) => {
   return next();
 });
 /** Static files are registered after all API routes (see bottom of file) so /api/* always hits JSON routes first. */
+
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith("/api") || req.path.startsWith("/api/vehicle/")) return next();
+  const tenant = normalizeAppTenant(req.headers["x-app-instance"]);
+  req.appTenant = tenant;
+  try {
+    await ensureTenantInitialized(tenant);
+  } catch (error) {
+    return next(error);
+  }
+  return tenantContext.run({ tenant }, () => next());
+});
 
 function run(sql, params = []) {
   const database = ensureDb();
@@ -3734,8 +3797,7 @@ async function wipeAllSalesDataForAllUsers() {
 
 /** Same wipe as POST /api/admin/wipe-all-sales-data; for CLI (`node scripts/wipe-all-sales.js`). */
 async function runWipeAllSalesDataCli() {
-  ensureDb();
-  await initDb();
+  await ensureTenantInitialized("amana");
   await run("BEGIN TRANSACTION");
   try {
     const stats = await wipeAllSalesDataForAllUsers();
@@ -3878,8 +3940,7 @@ async function findFeedBagSalesMatchingCriteria(dateStr, brand, feedType, bagsSo
 }
 
 async function runDeleteFeedBagSaleCli() {
-  ensureDb();
-  await initDb();
+  await ensureTenantInitialized("amana");
   const idRaw = argvFlagValue("--id");
   const dryRun = argvHasFlag("--dry-run");
 
@@ -4007,8 +4068,7 @@ let httpServer = null;
 
 async function startServer(port = PORT) {
   if (httpServer) return httpServer;
-  ensureDb();
-  await initDb();
+  await ensureTenantInitialized("amana");
 
   await new Promise((resolve, reject) => {
     httpServer = app

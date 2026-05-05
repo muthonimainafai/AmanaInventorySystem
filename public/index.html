@@ -9,23 +9,27 @@
   <body>
     <main class="container">
       <header>
-        <h1>Amana Kuku Feeds Inventory</h1>
-        <p>Two-user system for Owner and Employee.</p>
+        <h1>Business Inventory Portal</h1>
+        <p>Choose your system to continue.</p>
       </header>
 
       <section id="landingCard" class="card auth-card">
         <div class="portal-brand">
           <div class="portal-brand-mark" aria-hidden="true">A</div>
           <div class="portal-brand-copy">
-            <p class="portal-brand-kicker">Amana Business Portal</p>
+            <p class="portal-brand-kicker">Business Portal</p>
             <h2>Welcome</h2>
             <p class="hint">Choose the system you want to access.</p>
           </div>
         </div>
         <div class="portal-grid">
           <button type="button" id="openAmanaBtn" class="portal-option">
-            <span class="portal-option-title">Amana Inventory</span>
-            <span class="portal-option-sub">Feeds, retail, chicken, and stock management</span>
+            <span class="portal-option-title">Amana Kuku Feeds</span>
+            <span class="portal-option-sub">Existing live system and current records</span>
+          </button>
+          <button type="button" id="openUfarayBtn" class="portal-option">
+            <span class="portal-option-title">Ufaray Feeds</span>
+            <span class="portal-option-sub">Fresh copy with same features and empty data</span>
           </button>
           <button type="button" class="secondary portal-option" id="openVehicleBtn">
             <span class="portal-option-title">Vehicle Inventory</span>
@@ -35,7 +39,7 @@
       </section>
 
       <section id="loginCard" class="card auth-card hidden">
-        <h2>Sign In</h2>
+        <h2 id="loginCardTitle">Sign In</h2>
         <form id="loginForm">
           <label>
             Username
@@ -1136,6 +1140,8 @@
                 <tbody id="exp-body"><tr><td colspan="5" class="empty">No records.</td></tr></tbody>
               </table>
             </div>
+          </div>
+        </div>
 
         <div class="card owner-only-highlight hidden" id="ufaraySalesCard">
           <h3 class="card-title">Bag sales via Ufaray &amp; pass-through</h3>
@@ -1166,8 +1172,6 @@
                 </tr>
               </tbody>
             </table>
-          </div>
-        </div>
           </div>
         </div>
 
