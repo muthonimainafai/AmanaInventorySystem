@@ -851,6 +851,18 @@ function isLayersFeedType(name) {
   return /\blayers?\b/.test(String(name || "").toLowerCase());
 }
 
+function isDolaBrand(name) {
+  return normalizeBrand(name) === normalizeBrand("Dola Feeds");
+}
+
+function canonicalFeedTypeForLookup(brand, feedType, bagSizeHint) {
+  if (!isDolaBrand(brand) || !isLayersFeedType(feedType)) return feedType;
+  const kg = extractKgFromFeedType(feedType) || Number(bagSizeHint) || null;
+  if (kg === 10) return "Layers 10kg";
+  if (kg === 20) return "Layers 20kg";
+  return feedType;
+}
+
 /** Treat legacy labels like "Layers", "Layers bag", and "Layers 10kg" as equivalent when kg matches. */
 function feedTypeEquivalent(a, b, aBagSizeHint, bBagSizeHint) {
   if (normalizeFeedType(a) === normalizeFeedType(b)) return true;
@@ -1353,11 +1365,12 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
   const items = feedCatalog[brandKey];
   const defaultBagSize =
     items?.find((i) => normalizeFeedType(i.type) === normalizeFeedType(p.feed_type))?.bagSize || 50;
+  const lookupFeedType = canonicalFeedTypeForLookup(brandKey, p.feed_type, defaultBagSize);
   const item =
     mode === "bags"
-      ? await getInventoryItem(brandKey, p.feed_type, Number(p.bag_size))
-      : await getInventoryItem(brandKey, p.feed_type, defaultBagSize);
-  let itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, p.feed_type, defaultBagSize));
+      ? await getInventoryItem(brandKey, lookupFeedType, Number(p.bag_size))
+      : await getInventoryItem(brandKey, lookupFeedType, defaultBagSize);
+  let itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, lookupFeedType, defaultBagSize));
   if (!itemResolved && mode === "kg") {
     itemResolved =
       (await getInventoryItemByBrandAndBagSize(brandKey, defaultBagSize)) ||
@@ -1385,7 +1398,7 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
       res.status(400).json({ error: "Invalid bag size for this product in inventory." });
       return false;
     }
-    const rf = await getRetailFeedLine(brandKey, p.feed_type);
+    const rf = await getRetailFeedLine(brandKey, lookupFeedType);
     if (rf) {
       if (!salePriceMatchesInventory(Number(rf.price_per_kg), p.price_per_kg)) {
         res.status(400).json({
