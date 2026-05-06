@@ -1260,6 +1260,23 @@ async function getInventoryItemAnyBagSize(brand, feedType) {
   return matched.length ? matched[matched.length - 1] : null;
 }
 
+/** Newest inventory row for same brand and bag size, regardless of feed type (fallback for legacy feed labels). */
+async function getInventoryItemByBrandAndBagSize(brand, bagSize) {
+  const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
+  const targetBag = Number(bagSize);
+  const matched = rows.filter(
+    (r) => normalizeBrand(r.brand) === normalizeBrand(brand) && Number(r.bag_size) === targetBag
+  );
+  return matched.length ? matched[matched.length - 1] : null;
+}
+
+/** Newest inventory row for this brand, regardless of feed type and bag size (last-resort fallback). */
+async function getInventoryItemByBrandAny(brand) {
+  const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
+  const matched = rows.filter((r) => normalizeBrand(r.brand) === normalizeBrand(brand));
+  return matched.length ? matched[matched.length - 1] : null;
+}
+
 /** Inventory lines saved on this same calendar date with matching brand, feed type, and bag size (for owner merge on new save). Dates are compared in canonical form. */
 async function findInventoryRowsSameDayProduct(dateStr, brand, feedType, bagSize) {
   const targetDay = normalizeInventoryDate(dateStr);
@@ -1320,7 +1337,12 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
     mode === "bags"
       ? await getInventoryItem(brandKey, p.feed_type, Number(p.bag_size))
       : await getInventoryItem(brandKey, p.feed_type, defaultBagSize);
-  const itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, p.feed_type));
+  let itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, p.feed_type));
+  if (!itemResolved && mode === "kg") {
+    itemResolved =
+      (await getInventoryItemByBrandAndBagSize(brandKey, defaultBagSize)) ||
+      (await getInventoryItemByBrandAny(brandKey));
+  }
   if (!itemResolved) {
     res.status(400).json({
       error: "No inventory record for this product. The owner must add it under Feed Inventory first.",
