@@ -711,7 +711,18 @@ function chickenSaleCustomerCellsHtml(row) {
   const total = saleLineTotalChicken(row);
   const bal = total - (Number(row.money_paid) || 0);
   const balStr = currency(bal);
-  const st = escapeHtmlCell(chickenSalePaymentStatusLabel(row));
+  const isOwnerStaffRow = state.user?.role === "owner" && !isChickenRowOwnerInventory(row);
+  const currentStatus =
+    String(row.payment_status || "pending").toLowerCase() === "delivered" ? "delivered" : "pending";
+  const st = isOwnerStaffRow
+    ? `<div class="row-actions">
+         <select data-kind="chicken-pay-status" data-id="${row.id}">
+           <option value="pending" ${currentStatus === "pending" ? "selected" : ""}>Pending</option>
+           <option value="delivered" ${currentStatus === "delivered" ? "selected" : ""}>Delivered</option>
+         </select>
+         <button type="button" data-kind="chicken-pay-save" data-id="${row.id}">Save</button>
+       </div>`
+    : escapeHtmlCell(chickenSalePaymentStatusLabel(row));
   return `<td>${name}</td><td>${phone}</td><td>${paid}</td><td>${balStr}</td><td>${st}</td>`;
 }
 
@@ -3367,6 +3378,30 @@ function wireChickenTableClicks(tbody) {
   tbody.addEventListener("click", async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    if (target.dataset.kind === "chicken-pay-save" && state.user.role === "owner") {
+      const idNum = Number(target.dataset.id);
+      if (!Number.isFinite(idNum) || idNum < 1) return;
+      const row = state.chickenSales.find((r) => Number(r.id) === idNum);
+      if (!row || isChickenRowOwnerInventory(row)) return;
+      const tr = target.closest("tr");
+      if (!(tr instanceof HTMLTableRowElement)) return;
+      const sel = tr.querySelector(`select[data-kind="chicken-pay-status"][data-id="${idNum}"]`);
+      if (!(sel instanceof HTMLSelectElement)) return;
+      const nextStatus = sel.value === "delivered" ? "delivered" : "pending";
+      target.setAttribute("disabled", "disabled");
+      try {
+        await api(`/api/chicken-sales/${idNum}/payment-status`, {
+          method: "PUT",
+          body: JSON.stringify({ payment_status: nextStatus }),
+        });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        target.removeAttribute("disabled");
+      }
+      return;
+    }
     if (state.user.role === "owner" && !target.closest("button")) {
       const tr = target.closest("tr[data-chicken-row-id]");
       if (tr) {
@@ -3388,26 +3423,9 @@ function wireChickenTableClicks(tbody) {
         clearOwnerCustomerViewPanel();
         highlightChickenRowForOwner(null);
         if (!isChickenRowOwnerInventory(row)) {
-          const currentStatus =
-            String(row.payment_status || "pending").toLowerCase() === "delivered" ? "delivered" : "pending";
-          const answer = window
-            .prompt("Set payment status for this staff sale: pending or delivered", currentStatus)
-            ?.trim()
-            .toLowerCase();
-          if (!answer) return;
-          if (answer !== "pending" && answer !== "delivered") {
-            alert("Payment status must be either pending or delivered.");
-            return;
-          }
-          try {
-            await api(`/api/chicken-sales/${id}/payment-status`, {
-              method: "PUT",
-              body: JSON.stringify({ payment_status: answer }),
-            });
-            await loadAllData();
-          } catch (error) {
-            alert(error.message);
-          }
+          const tr = target.closest("tr");
+          const sel = tr?.querySelector(`select[data-kind="chicken-pay-status"][data-id="${row.id}"]`);
+          if (sel instanceof HTMLSelectElement) sel.focus();
           return;
         }
       }

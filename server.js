@@ -44,6 +44,38 @@ const VEHICLE_ADMIN_USERNAME = String(process.env.VEHICLE_ADMIN_USERNAME || "veh
 const VEHICLE_ADMIN_PASSWORD = String(process.env.VEHICLE_ADMIN_PASSWORD || "VehicleAdmin@123");
 const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "Vehicle Admin").trim() || "Vehicle Admin";
 
+function tenantLoginEnv(tenant) {
+  const t = normalizeAppTenant(tenant);
+  if (t === "ufaray") {
+    const ufarayOwnerUsername = String(process.env.UFARAY_OWNER_USERNAME || "").trim();
+    const ufarayOwnerPassword = String(process.env.UFARAY_OWNER_PASSWORD || "");
+    const ufarayOwnerFullName = String(process.env.UFARAY_OWNER_FULL_NAME || "").trim();
+    const ufarayEmployeeUsername = String(process.env.UFARAY_EMPLOYEE_USERNAME || "").trim();
+    const ufarayEmployeePassword = String(process.env.UFARAY_EMPLOYEE_PASSWORD || "");
+    const ufarayEmployeeFullName = String(process.env.UFARAY_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "ufaray",
+      owner: {
+        username: ufarayOwnerUsername || AMANA_OWNER_USERNAME,
+        password: ufarayOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: ufarayOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: ufarayEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: ufarayEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: ufarayEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel: ufarayOwnerUsername || ufarayEmployeeUsername || ufarayOwnerPassword || ufarayEmployeePassword ? "UFARAY_*" : "AMANA_* (fallback)",
+    };
+  }
+  return {
+    tenant: "amana",
+    owner: { username: AMANA_OWNER_USERNAME, password: AMANA_OWNER_PASSWORD, fullName: AMANA_OWNER_FULL_NAME },
+    employee: { username: AMANA_EMPLOYEE_USERNAME, password: AMANA_EMPLOYEE_PASSWORD, fullName: AMANA_EMPLOYEE_FULL_NAME },
+    sourceLabel: "AMANA_*",
+  };
+}
+
 const tenantContext = new AsyncLocalStorage();
 const dbByTenant = new Map();
 const dbInitDone = new Set();
@@ -621,34 +653,35 @@ async function initDb() {
   await migrateAccumulatedProfitFromSalesIfNeeded();
 
   const anyUser = await get("SELECT id FROM users LIMIT 1");
+  const login = tenantLoginEnv(activeTenant());
   if (!anyUser) {
-    if (AMANA_OWNER_USERNAME.toLowerCase() === AMANA_EMPLOYEE_USERNAME.toLowerCase()) {
+    if (login.owner.username.toLowerCase() === login.employee.username.toLowerCase()) {
       throw new Error(
-        "AMANA_OWNER_USERNAME and AMANA_EMPLOYEE_USERNAME must differ. Fix your .env and restart."
+        `${login.tenant.toUpperCase()}: owner and staff usernames must differ. Fix your .env and restart.`
       );
     }
-    if (AMANA_OWNER_PASSWORD.length < 8 || AMANA_EMPLOYEE_PASSWORD.length < 8) {
+    if (login.owner.password.length < 8 || login.employee.password.length < 8) {
       // eslint-disable-next-line no-console
       console.warn(
-        "[amana] AMANA_OWNER_PASSWORD and AMANA_EMPLOYEE_PASSWORD should be at least 8 characters. Using configured values anyway."
+        `[${login.tenant}] ${login.sourceLabel} passwords should be at least 8 characters. Using configured values anyway.`
       );
     }
-    const ownerHash = await bcrypt.hash(AMANA_OWNER_PASSWORD, 10);
-    const employeeHash = await bcrypt.hash(AMANA_EMPLOYEE_PASSWORD, 10);
+    const ownerHash = await bcrypt.hash(login.owner.password, 10);
+    const employeeHash = await bcrypt.hash(login.employee.password, 10);
     await run(
       "INSERT INTO users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
-      [AMANA_OWNER_USERNAME, ownerHash, "owner", AMANA_OWNER_FULL_NAME]
+      [login.owner.username, ownerHash, "owner", login.owner.fullName]
     );
     await run(
       "INSERT INTO users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
-      [AMANA_EMPLOYEE_USERNAME, employeeHash, "employee", AMANA_EMPLOYEE_FULL_NAME]
+      [login.employee.username, employeeHash, "employee", login.employee.fullName]
     );
     // eslint-disable-next-line no-console
     console.log(
-      `[amana] Created default users: owner “${AMANA_OWNER_USERNAME}”, staff “${AMANA_EMPLOYEE_USERNAME}”. Set AMANA_* in .env for your own credentials (new databases only).`
+      `[${login.tenant}] Created default users: owner “${login.owner.username}”, staff “${login.employee.username}”. Set ${login.sourceLabel} in .env for your own credentials.`
     );
   } else {
-    await syncLoginUsersFromEnv();
+    await syncLoginUsersFromEnv(login);
   }
   const anyVehicleUser = await get("SELECT id FROM vehicle_users LIMIT 1");
   if (!anyVehicleUser) {
@@ -712,25 +745,25 @@ async function renameCreatedByEverywhere(oldName, newName) {
 }
 
 /** Sync .env into existing DB rows by role (owner / employee), including username renames from legacy defaults. */
-async function syncLoginUsersFromEnv() {
+async function syncLoginUsersFromEnv(login) {
   const owner = await get("SELECT id, username FROM users WHERE role = ? ORDER BY id LIMIT 1", ["owner"]);
   if (owner) {
-    await renameCreatedByEverywhere(owner.username, AMANA_OWNER_USERNAME);
-    const hash = await bcrypt.hash(AMANA_OWNER_PASSWORD, 10);
+    await renameCreatedByEverywhere(owner.username, login.owner.username);
+    const hash = await bcrypt.hash(login.owner.password, 10);
     await run("UPDATE users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
-      AMANA_OWNER_USERNAME,
-      AMANA_OWNER_FULL_NAME,
+      login.owner.username,
+      login.owner.fullName,
       hash,
       owner.id,
     ]);
   }
   const employee = await get("SELECT id, username FROM users WHERE role = ? ORDER BY id LIMIT 1", ["employee"]);
   if (employee) {
-    await renameCreatedByEverywhere(employee.username, AMANA_EMPLOYEE_USERNAME);
-    const hash = await bcrypt.hash(AMANA_EMPLOYEE_PASSWORD, 10);
+    await renameCreatedByEverywhere(employee.username, login.employee.username);
+    const hash = await bcrypt.hash(login.employee.password, 10);
     await run("UPDATE users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
-      AMANA_EMPLOYEE_USERNAME,
-      AMANA_EMPLOYEE_FULL_NAME,
+      login.employee.username,
+      login.employee.fullName,
       hash,
       employee.id,
     ]);
