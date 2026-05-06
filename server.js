@@ -4013,13 +4013,19 @@ async function deleteFeedBagSaleRowById(idNum) {
   if (!current) {
     throw new Error(`No bag sale found with id ${idNum}.`);
   }
-  await adjustInventoryBags({
-    brand: current.brand,
-    feedType: current.feed_type,
-    bagSize: current.bag_size,
-    deltaBags: Number(current.bags_sold),
-    recordProfit: !isThroughPartyBagSaleRow(current),
-  });
+  try {
+    await adjustInventoryBags({
+      brand: current.brand,
+      feedType: current.feed_type,
+      bagSize: current.bag_size,
+      deltaBags: Number(current.bags_sold),
+      recordProfit: !isThroughPartyBagSaleRow(current),
+    });
+  } catch (error) {
+    const msg = String(error?.message || "");
+    if (!msg.includes("No matching feed inventory item found")) throw error;
+    // Owner may have deleted the inventory line already; still allow sale cleanup.
+  }
   await run("DELETE FROM sales_bags WHERE id = ?", [idNum]);
   return current;
 }
