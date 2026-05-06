@@ -517,10 +517,12 @@ async function initDb() {
     "UPDATE feeders_drinkers_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
   await run("ALTER TABLE feeders_drinkers_sales ADD COLUMN through_party TEXT").catch(() => {});
+  await run("ALTER TABLE feeders_drinkers_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
   await run(
     "UPDATE medicaments_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
   await run("ALTER TABLE medicaments_sales ADD COLUMN through_party TEXT").catch(() => {});
+  await run("ALTER TABLE medicaments_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
   await run(`
     CREATE TABLE IF NOT EXISTS feeders_drinkers_sales (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -529,6 +531,8 @@ async function initDb() {
       quantity_sold INTEGER NOT NULL,
       price_per_item REAL NOT NULL,
       total_amount REAL NOT NULL,
+      through_party TEXT,
+      pass_through_status TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -542,6 +546,8 @@ async function initDb() {
       quantity_sold INTEGER NOT NULL,
       price_per_item REAL NOT NULL,
       total_amount REAL NOT NULL,
+      through_party TEXT,
+      pass_through_status TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -572,6 +578,8 @@ async function initDb() {
       quantity_sold INTEGER NOT NULL,
       price_per_item REAL NOT NULL,
       total_amount REAL NOT NULL,
+      through_party TEXT,
+      pass_through_status TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -581,6 +589,7 @@ async function initDb() {
     "UPDATE gas_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
   await run("ALTER TABLE gas_sales ADD COLUMN through_party TEXT").catch(() => {});
+  await run("ALTER TABLE gas_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS employee_expenditure (
@@ -1971,6 +1980,8 @@ app.get("/api/feeders-drinkers/sales", auth, allowRoles("owner", "employee"), as
 app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req, res) => {
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
+  const passThroughStatus = isThrough ? normalizePassThroughStatus(p.pass_through_status) : null;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -1984,12 +1995,14 @@ app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req
   if (!line) {
     return res.status(400).json({ error: "No inventory record found for this item." });
   }
-  const price = Number(line.selling_price);
-  if (!Number.isFinite(price) || price < 0) {
-    return res.status(400).json({ error: "Selling price is not set for this item." });
+  const selling = Number(line.selling_price);
+  const buying = Number(line.buying_price);
+  if (!Number.isFinite(selling) || selling < 0 || !Number.isFinite(buying) || buying < 0) {
+    return res.status(400).json({ error: "Prices are not set for this item." });
   }
+  const price = isThrough ? buying : selling;
   try {
-    await adjustFeedersDrinkersStock(item.name, -Math.floor(qty));
+    await adjustFeedersDrinkersStock(item.name, -Math.floor(qty), !isThrough);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Could not process sale." });
   }
@@ -1998,19 +2011,27 @@ app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req
   const total = quantitySold * price;
   await run(
     `INSERT INTO feeders_drinkers_sales
-    (date, item_name, quantity_sold, price_per_item, total_amount, through_party, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, item.name, quantitySold, price, total, throughParty, req.user.username, nowIso, nowIso]
+    (date, item_name, quantity_sold, price_per_item, total_amount, through_party, pass_through_status, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, item.name, quantitySold, price, total, throughParty, passThroughStatus, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
 
-app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const current = await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const current =
+    req.user.role === "employee"
+      ? await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username])
+      : await get("SELECT * FROM feeders_drinkers_sales WHERE id = ?", [id]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
+  const passThroughStatus = isThrough
+    ? normalizePassThroughStatus(p.pass_through_status ?? current.pass_through_status)
+    : null;
+  const wasThrough = normalizeThroughParty(current.through_party) != null;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   // Allow editing historical records without blocking by current shop day.
@@ -2020,17 +2041,21 @@ app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
   const invLine = await getFeedersDrinkersCurrentLine(item.name);
   if (!invLine) return res.status(400).json({ error: "No inventory record found for this item." });
-  const price = Number(invLine.selling_price);
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this item." });
+  const selling = Number(invLine.selling_price);
+  const buying = Number(invLine.buying_price);
+  if (!Number.isFinite(selling) || selling < 0 || !Number.isFinite(buying) || buying < 0) {
+    return res.status(400).json({ error: "Prices are not set for this item." });
+  }
+  const price = isThrough ? buying : selling;
   try {
     await run("BEGIN TRANSACTION");
-    await adjustFeedersDrinkersStock(current.item_name, Number(current.quantity_sold));
-    await adjustFeedersDrinkersStock(item.name, -qty);
+    await adjustFeedersDrinkersStock(current.item_name, Number(current.quantity_sold), !wasThrough);
+    await adjustFeedersDrinkersStock(item.name, -qty, !isThrough);
     await run(
       `UPDATE feeders_drinkers_sales
-       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, updated_at = ?
+       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, pass_through_status = ?, updated_at = ?
        WHERE id = ?`,
-      [dateCanon, item.name, qty, price, qty * price, throughParty, new Date().toISOString(), id]
+      [dateCanon, item.name, qty, price, qty * price, throughParty, passThroughStatus, new Date().toISOString(), id]
     );
     await run("COMMIT");
   } catch (err) {
@@ -2040,16 +2065,36 @@ app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (
   res.json({ ok: true });
 });
 
-app.delete("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+app.delete("/api/feeders-drinkers/sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const current = await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const current =
+    req.user.role === "employee"
+      ? await get("SELECT * FROM feeders_drinkers_sales WHERE id = ? AND created_by = ?", [id, req.user.username])
+      : await get("SELECT * FROM feeders_drinkers_sales WHERE id = ?", [id]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   try {
-    await adjustFeedersDrinkersStock(current.item_name, Number(current.quantity_sold));
+    const wasThrough = normalizeThroughParty(current.through_party) != null;
+    await adjustFeedersDrinkersStock(current.item_name, Number(current.quantity_sold), !wasThrough);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Could not delete sale." });
   }
   await run("DELETE FROM feeders_drinkers_sales WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+app.put("/api/feeders-drinkers/sales/:id/pass-through-status", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  const row = await get("SELECT * FROM feeders_drinkers_sales WHERE id = ?", [id]);
+  if (!row) return res.status(404).json({ error: "Sale not found." });
+  if (normalizeThroughParty(row.through_party) == null) {
+    return res.status(400).json({ error: "Only pass-through sales have status." });
+  }
+  const status = normalizePassThroughStatus(req.body?.status);
+  await run("UPDATE feeders_drinkers_sales SET pass_through_status = ?, updated_at = ? WHERE id = ?", [
+    status,
+    new Date().toISOString(),
+    id,
+  ]);
   res.json({ ok: true });
 });
 
@@ -2266,6 +2311,8 @@ app.get("/api/medicaments/sales", auth, allowRoles("owner", "employee"), async (
 app.post("/api/medicaments/sales", auth, allowRoles("employee"), async (req, res) => {
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
+  const passThroughStatus = isThrough ? normalizePassThroughStatus(p.pass_through_status) : null;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -2275,29 +2322,41 @@ app.post("/api/medicaments/sales", auth, allowRoles("employee"), async (req, res
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
   const invLine = await getMedicamentsCurrentLine(item);
   if (!invLine) return res.status(400).json({ error: "No inventory record found for this item." });
-  const price = Number(invLine.selling_price);
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this item." });
+  const selling = Number(invLine.selling_price);
+  const buying = Number(invLine.buying_price);
+  if (!Number.isFinite(selling) || selling < 0 || !Number.isFinite(buying) || buying < 0) {
+    return res.status(400).json({ error: "Prices are not set for this item." });
+  }
+  const price = isThrough ? buying : selling;
   try {
-    await adjustMedicamentsStock(item, -qty);
+    await adjustMedicamentsStock(item, -qty, !isThrough);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Could not process sale." });
   }
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO medicaments_sales
-    (date, item_name, quantity_sold, price_per_item, total_amount, through_party, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, item, qty, price, qty * price, throughParty, req.user.username, nowIso, nowIso]
+    (date, item_name, quantity_sold, price_per_item, total_amount, through_party, pass_through_status, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, item, qty, price, qty * price, throughParty, passThroughStatus, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
 
-app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+app.put("/api/medicaments/sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const current = await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const current =
+    req.user.role === "employee"
+      ? await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username])
+      : await get("SELECT * FROM medicaments_sales WHERE id = ?", [id]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
+  const passThroughStatus = isThrough
+    ? normalizePassThroughStatus(p.pass_through_status ?? current.pass_through_status)
+    : null;
+  const wasThrough = normalizeThroughParty(current.through_party) != null;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   // Allow editing historical records without blocking by current shop day.
@@ -2307,17 +2366,21 @@ app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, 
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
   const invLine = await getMedicamentsCurrentLine(item);
   if (!invLine) return res.status(400).json({ error: "No inventory record found for this item." });
-  const price = Number(invLine.selling_price);
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this item." });
+  const selling = Number(invLine.selling_price);
+  const buying = Number(invLine.buying_price);
+  if (!Number.isFinite(selling) || selling < 0 || !Number.isFinite(buying) || buying < 0) {
+    return res.status(400).json({ error: "Prices are not set for this item." });
+  }
+  const price = isThrough ? buying : selling;
   try {
     await run("BEGIN TRANSACTION");
-    await adjustMedicamentsStock(current.item_name, Number(current.quantity_sold));
-    await adjustMedicamentsStock(item, -qty);
+    await adjustMedicamentsStock(current.item_name, Number(current.quantity_sold), !wasThrough);
+    await adjustMedicamentsStock(item, -qty, !isThrough);
     await run(
       `UPDATE medicaments_sales
-       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, updated_at = ?
+       SET date = ?, item_name = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, pass_through_status = ?, updated_at = ?
        WHERE id = ?`,
-      [dateCanon, item, qty, price, qty * price, throughParty, new Date().toISOString(), id]
+      [dateCanon, item, qty, price, qty * price, throughParty, passThroughStatus, new Date().toISOString(), id]
     );
     await run("COMMIT");
   } catch (err) {
@@ -2327,16 +2390,36 @@ app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, 
   res.json({ ok: true });
 });
 
-app.delete("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+app.delete("/api/medicaments/sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const current = await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const current =
+    req.user.role === "employee"
+      ? await get("SELECT * FROM medicaments_sales WHERE id = ? AND created_by = ?", [id, req.user.username])
+      : await get("SELECT * FROM medicaments_sales WHERE id = ?", [id]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   try {
-    await adjustMedicamentsStock(current.item_name, Number(current.quantity_sold));
+    const wasThrough = normalizeThroughParty(current.through_party) != null;
+    await adjustMedicamentsStock(current.item_name, Number(current.quantity_sold), !wasThrough);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Could not delete sale." });
   }
   await run("DELETE FROM medicaments_sales WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+app.put("/api/medicaments/sales/:id/pass-through-status", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  const row = await get("SELECT * FROM medicaments_sales WHERE id = ?", [id]);
+  if (!row) return res.status(404).json({ error: "Sale not found." });
+  if (normalizeThroughParty(row.through_party) == null) {
+    return res.status(400).json({ error: "Only pass-through sales have status." });
+  }
+  const status = normalizePassThroughStatus(req.body?.status);
+  await run("UPDATE medicaments_sales SET pass_through_status = ?, updated_at = ? WHERE id = ?", [
+    status,
+    new Date().toISOString(),
+    id,
+  ]);
   res.json({ ok: true });
 });
 
@@ -2553,6 +2636,8 @@ app.get("/api/gas/sales", auth, allowRoles("owner", "employee"), async (req, res
 app.post("/api/gas/sales", auth, allowRoles("employee"), async (req, res) => {
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
+  const passThroughStatus = isThrough ? normalizePassThroughStatus(p.pass_through_status) : null;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
@@ -2562,29 +2647,41 @@ app.post("/api/gas/sales", auth, allowRoles("employee"), async (req, res) => {
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
   const invLine = await getGasCurrentLine(sizeKg);
   if (!invLine) return res.status(400).json({ error: "No inventory record found for this cylinder size." });
-  const price = Number(invLine.selling_price);
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this size." });
+  const selling = Number(invLine.selling_price);
+  const buying = Number(invLine.buying_price);
+  if (!Number.isFinite(selling) || selling < 0 || !Number.isFinite(buying) || buying < 0) {
+    return res.status(400).json({ error: "Prices are not set for this size." });
+  }
+  const price = isThrough ? buying : selling;
   try {
-    await adjustGasStock(sizeKg, -qty);
+    await adjustGasStock(sizeKg, -qty, !isThrough);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Could not process sale." });
   }
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO gas_sales
-    (date, size_kg, quantity_sold, price_per_item, total_amount, through_party, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, sizeKg, qty, price, qty * price, throughParty, req.user.username, nowIso, nowIso]
+    (date, size_kg, quantity_sold, price_per_item, total_amount, through_party, pass_through_status, created_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, sizeKg, qty, price, qty * price, throughParty, passThroughStatus, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
 
-app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+app.put("/api/gas/sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const current = await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const current =
+    req.user.role === "employee"
+      ? await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username])
+      : await get("SELECT * FROM gas_sales WHERE id = ?", [id]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
+  const passThroughStatus = isThrough
+    ? normalizePassThroughStatus(p.pass_through_status ?? current.pass_through_status)
+    : null;
+  const wasThrough = normalizeThroughParty(current.through_party) != null;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   // Allow editing historical records without blocking by current shop day.
@@ -2594,17 +2691,21 @@ app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => 
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
   const invLine = await getGasCurrentLine(sizeKg);
   if (!invLine) return res.status(400).json({ error: "No inventory record found for this cylinder size." });
-  const price = Number(invLine.selling_price);
-  if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Selling price is not set for this size." });
+  const selling = Number(invLine.selling_price);
+  const buying = Number(invLine.buying_price);
+  if (!Number.isFinite(selling) || selling < 0 || !Number.isFinite(buying) || buying < 0) {
+    return res.status(400).json({ error: "Prices are not set for this size." });
+  }
+  const price = isThrough ? buying : selling;
   try {
     await run("BEGIN TRANSACTION");
-    await adjustGasStock(Number(current.size_kg), Number(current.quantity_sold));
-    await adjustGasStock(sizeKg, -qty);
+    await adjustGasStock(Number(current.size_kg), Number(current.quantity_sold), !wasThrough);
+    await adjustGasStock(sizeKg, -qty, !isThrough);
     await run(
       `UPDATE gas_sales
-       SET date = ?, size_kg = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, updated_at = ?
+       SET date = ?, size_kg = ?, quantity_sold = ?, price_per_item = ?, total_amount = ?, through_party = ?, pass_through_status = ?, updated_at = ?
        WHERE id = ?`,
-      [dateCanon, sizeKg, qty, price, qty * price, throughParty, new Date().toISOString(), id]
+      [dateCanon, sizeKg, qty, price, qty * price, throughParty, passThroughStatus, new Date().toISOString(), id]
     );
     await run("COMMIT");
   } catch (err) {
@@ -2618,16 +2719,36 @@ app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => 
   res.json({ ok: true });
 });
 
-app.delete("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => {
+app.delete("/api/gas/sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const current = await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const current =
+    req.user.role === "employee"
+      ? await get("SELECT * FROM gas_sales WHERE id = ? AND created_by = ?", [id, req.user.username])
+      : await get("SELECT * FROM gas_sales WHERE id = ?", [id]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   try {
-    await adjustGasStock(Number(current.size_kg), Number(current.quantity_sold));
+    const wasThrough = normalizeThroughParty(current.through_party) != null;
+    await adjustGasStock(Number(current.size_kg), Number(current.quantity_sold), !wasThrough);
   } catch (err) {
     return res.status(400).json({ error: err.message || "Could not delete sale." });
   }
   await run("DELETE FROM gas_sales WHERE id = ?", [id]);
+  res.json({ ok: true });
+});
+
+app.put("/api/gas/sales/:id/pass-through-status", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  const row = await get("SELECT * FROM gas_sales WHERE id = ?", [id]);
+  if (!row) return res.status(404).json({ error: "Sale not found." });
+  if (normalizeThroughParty(row.through_party) == null) {
+    return res.status(400).json({ error: "Only pass-through sales have status." });
+  }
+  const status = normalizePassThroughStatus(req.body?.status);
+  await run("UPDATE gas_sales SET pass_through_status = ?, updated_at = ? WHERE id = ?", [
+    status,
+    new Date().toISOString(),
+    id,
+  ]);
   res.json({ ok: true });
 });
 

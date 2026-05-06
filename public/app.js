@@ -1470,6 +1470,97 @@ function renderOwnerPassThroughBagSales() {
   });
 }
 
+function renderOwnerUfarayNewPageSales() {
+  if (state.user.role !== "owner") return;
+  const render = (tbodyId, rows, rowHtml) => {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No pass-through sales yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = joinRowsWithDateSeparators(rows, 9, rowHtml);
+  };
+
+  const fdRows = (state.feedersDrinkersSales || []).filter((r) => String(r.through_party || "").trim() !== "");
+  render("ufaray-fd-sales-body", fdRows, (row) => {
+    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const via = String(row.through_party || "").trim();
+    return `<tr>
+      <td>${formatDateDMY(row.date)}</td>
+      <td>${row.item_name}</td>
+      <td>${row.quantity_sold}</td>
+      <td>${currency(row.price_per_item)}</td>
+      <td>${currency(row.total_amount)}</td>
+      <td>${via ? `By ${via}` : "—"}</td>
+      <td>
+        <select data-kind="ufaray-fd-status" data-id="${row.id}">
+          <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
+          <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+        </select>
+      </td>
+      <td>${row.created_by}</td>
+      <td><div class="row-actions">
+        <button type="button" data-kind="ufaray-fd-status-save" data-id="${row.id}">Save</button>
+        <button type="button" data-kind="ufaray-fd-sale" data-action="edit" data-id="${row.id}">Edit</button>
+        <button type="button" class="danger" data-kind="ufaray-fd-sale" data-action="delete" data-id="${row.id}">Delete</button>
+      </div></td>
+    </tr>`;
+  });
+
+  const medRows = (state.medicamentsSales || []).filter((r) => String(r.through_party || "").trim() !== "");
+  render("ufaray-med-sales-body", medRows, (row) => {
+    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const via = String(row.through_party || "").trim();
+    return `<tr>
+      <td>${formatDateDMY(row.date)}</td>
+      <td>${row.item_name}</td>
+      <td>${row.quantity_sold}</td>
+      <td>${currency(row.price_per_item)}</td>
+      <td>${currency(row.total_amount)}</td>
+      <td>${via ? `By ${via}` : "—"}</td>
+      <td>
+        <select data-kind="ufaray-med-status" data-id="${row.id}">
+          <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
+          <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+        </select>
+      </td>
+      <td>${row.created_by}</td>
+      <td><div class="row-actions">
+        <button type="button" data-kind="ufaray-med-status-save" data-id="${row.id}">Save</button>
+        <button type="button" data-kind="ufaray-med-sale" data-action="edit" data-id="${row.id}">Edit</button>
+        <button type="button" class="danger" data-kind="ufaray-med-sale" data-action="delete" data-id="${row.id}">Delete</button>
+      </div></td>
+    </tr>`;
+  });
+
+  const gasRows = (state.gasSales || []).filter((r) => String(r.through_party || "").trim() !== "");
+  render("ufaray-gas-sales-body", gasRows, (row) => {
+    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const via = String(row.through_party || "").trim();
+    return `<tr>
+      <td>${formatDateDMY(row.date)}</td>
+      <td>${row.size_kg} kg</td>
+      <td>${row.quantity_sold}</td>
+      <td>${currency(row.price_per_item)}</td>
+      <td>${currency(row.total_amount)}</td>
+      <td>${via ? `By ${via}` : "—"}</td>
+      <td>
+        <select data-kind="ufaray-gas-status" data-id="${row.id}">
+          <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
+          <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+        </select>
+      </td>
+      <td>${row.created_by}</td>
+      <td><div class="row-actions">
+        <button type="button" data-kind="ufaray-gas-status-save" data-id="${row.id}">Save</button>
+        <button type="button" data-kind="ufaray-gas-sale" data-action="edit" data-id="${row.id}">Edit</button>
+        <button type="button" class="danger" data-kind="ufaray-gas-sale" data-action="delete" data-id="${row.id}">Delete</button>
+      </div></td>
+    </tr>`;
+  });
+}
+
 function renderTable() {
   if (!state.records.length) {
     tableBody.innerHTML = '<tr><td colspan="15" class="empty">No records.</td></tr>';
@@ -2245,6 +2336,9 @@ function showPage(page) {
   if (page === "inventory") {
     renderOwnerPassThroughBagSales();
   }
+  if (page === "feeders-drinkers" || page === "medicaments" || page === "gas") {
+    renderOwnerUfarayNewPageSales();
+  }
   if (page === "retail-inventory") {
     renderRetailPricingTable();
     renderRetailInventoryTable();
@@ -2455,6 +2549,7 @@ async function loadAllData() {
   refreshEmployeeNewPageSellingPrices();
   renderTable();
   renderOwnerPassThroughBagSales();
+  renderOwnerUfarayNewPageSales();
   renderSalesBagsTable();
   renderSalesKgTable();
   renderChickenSalesHistoryTable();
@@ -3334,6 +3429,107 @@ document.getElementById("ufaray-bag-sales-body")?.addEventListener("click", asyn
     target.removeAttribute("disabled");
   }
 });
+
+function wireOwnerUfarayExtraTable(tableId, statusKind, statusSaveKind, saleKind, statusEndpointBase, saleEndpointBase) {
+  document.getElementById(tableId)?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const id = Number(target.dataset.id);
+    if (!Number.isFinite(id) || id < 1) return;
+    if (target.dataset.kind === statusSaveKind) {
+      const tr = target.closest("tr");
+      if (!(tr instanceof HTMLTableRowElement)) return;
+      const sel = tr.querySelector(`select[data-kind='${statusKind}']`);
+      if (!(sel instanceof HTMLSelectElement)) return;
+      const status = sel.value === "solved" ? "solved" : "pending";
+      target.setAttribute("disabled", "disabled");
+      try {
+        await api(`${statusEndpointBase}/${id}/pass-through-status`, {
+          method: "PUT",
+          body: JSON.stringify({ status }),
+        });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        target.removeAttribute("disabled");
+      }
+      return;
+    }
+    if (target.dataset.kind !== saleKind) return;
+    const action = target.dataset.action;
+    if (action === "delete") {
+      if (!window.confirm("Delete this pass-through sale?")) return;
+      try {
+        await api(`${saleEndpointBase}/${id}`, { method: "DELETE" });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      }
+      return;
+    }
+    if (action === "edit") {
+      const qtyInput = window.prompt("Enter updated quantity sold", "");
+      if (qtyInput == null) return;
+      const qty = Math.floor(Number(qtyInput));
+      if (!Number.isFinite(qty) || qty < 1) {
+        alert("Quantity must be at least 1.");
+        return;
+      }
+      let row = null;
+      if (saleKind === "ufaray-fd-sale") row = state.feedersDrinkersSales.find((r) => Number(r.id) === id);
+      if (saleKind === "ufaray-med-sale") row = state.medicamentsSales.find((r) => Number(r.id) === id);
+      if (saleKind === "ufaray-gas-sale") row = state.gasSales.find((r) => Number(r.id) === id);
+      if (!row) return;
+      const payload = {
+        date: row.date,
+        through_party: row.through_party,
+        pass_through_status: row.pass_through_status || "pending",
+      };
+      if (saleKind === "ufaray-fd-sale") {
+        payload.item_name = row.item_name;
+        payload.quantity_sold = qty;
+      } else if (saleKind === "ufaray-med-sale") {
+        payload.item_name = row.item_name;
+        payload.quantity_sold = qty;
+      } else {
+        payload.size_kg = row.size_kg;
+        payload.quantity_sold = qty;
+      }
+      try {
+        await api(`${saleEndpointBase}/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  });
+}
+
+wireOwnerUfarayExtraTable(
+  "ufaray-fd-sales-body",
+  "ufaray-fd-status",
+  "ufaray-fd-status-save",
+  "ufaray-fd-sale",
+  "/api/feeders-drinkers/sales",
+  "/api/feeders-drinkers/sales"
+);
+wireOwnerUfarayExtraTable(
+  "ufaray-med-sales-body",
+  "ufaray-med-status",
+  "ufaray-med-status-save",
+  "ufaray-med-sale",
+  "/api/medicaments/sales",
+  "/api/medicaments/sales"
+);
+wireOwnerUfarayExtraTable(
+  "ufaray-gas-sales-body",
+  "ufaray-gas-status",
+  "ufaray-gas-status-save",
+  "ufaray-gas-sale",
+  "/api/gas/sales",
+  "/api/gas/sales"
+);
 
 salesKgBody.addEventListener("click", async (event) => {
   const target = event.target;
