@@ -823,7 +823,6 @@ function chickenStaffPaymentIsCleared(row) {
 function chickenSaleLineProfit(row) {
   const cr = String(row.creator_role || "").toLowerCase();
   if (cr === "owner") return 0;
-  if (String(row.through_party || "").trim() !== "") return 0;
   const q = Number(row.quantity_birds) || 0;
   if (row.margin_snap == null || row.margin_snap === "") return 0;
   const m = Number(row.margin_snap);
@@ -1486,8 +1485,7 @@ function renderOwnerUfarayChickenSales() {
     const margin = Number(row.margin_snap) || 0;
     const buyingPerChick = Math.max(0, unit - margin);
     const totalAmount = qty * buyingPerChick;
-    const statusRaw = String(row.payment_status || "pending").toLowerCase();
-    const status = statusRaw === "delivered" || statusRaw === "cleared" ? "solved" : "pending";
+    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
     return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
@@ -1495,16 +1493,16 @@ function renderOwnerUfarayChickenSales() {
         <td>${currency(buyingPerChick)}</td>
         <td>${currency(totalAmount)}</td>
         <td>
-          <select data-kind="ufaray-chicken-status" data-id="${row.id}">
+          <select data-kind="ufaray-ch-status" data-id="${row.id}">
             <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
             <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
           </select>
         </td>
         <td>${row.created_by}</td>
         <td><div class="row-actions">
-          <button type="button" data-kind="ufaray-chicken-status-save" data-id="${row.id}">Save</button>
-          <button type="button" data-kind="ufaray-chicken-sale" data-action="edit" data-id="${row.id}">Edit</button>
-          <button type="button" class="danger" data-kind="ufaray-chicken-sale" data-action="delete" data-id="${row.id}">Delete</button>
+          <button type="button" data-kind="ufaray-ch-status-save" data-id="${row.id}">Save</button>
+          <button type="button" data-kind="ufaray-ch-sale" data-action="edit" data-id="${row.id}">Edit</button>
+          <button type="button" class="danger" data-kind="ufaray-ch-sale" data-action="delete" data-id="${row.id}">Delete</button>
         </div></td>
       </tr>`;
   });
@@ -3580,17 +3578,17 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
   if (!(target instanceof HTMLElement)) return;
   const id = Number(target.dataset.id);
   if (!Number.isFinite(id) || id < 1) return;
-  if (target.dataset.kind === "ufaray-chicken-status-save") {
+  if (target.dataset.kind === "ufaray-ch-status-save") {
     const tr = target.closest("tr");
     if (!(tr instanceof HTMLTableRowElement)) return;
-    const sel = tr.querySelector("select[data-kind='ufaray-chicken-status']");
+    const sel = tr.querySelector("select[data-kind='ufaray-ch-status']");
     if (!(sel instanceof HTMLSelectElement)) return;
-    const payment_status = sel.value === "solved" ? "delivered" : "pending";
+    const status = sel.value === "solved" ? "solved" : "pending";
     target.setAttribute("disabled", "disabled");
     try {
-      await api(`/api/chicken-sales/${id}/payment-status`, {
+      await api(`/api/chicken-sales/${id}/pass-through-status`, {
         method: "PUT",
-        body: JSON.stringify({ payment_status }),
+        body: JSON.stringify({ status }),
       });
       await loadAllData();
     } catch (error) {
@@ -3600,11 +3598,12 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
     }
     return;
   }
-  if (target.dataset.kind !== "ufaray-chicken-sale") return;
+  if (target.dataset.kind !== "ufaray-ch-sale") return;
   const row = state.chickenSales.find((r) => Number(r.id) === id);
   if (!row) return;
-  if (target.dataset.action === "delete") {
-    if (!window.confirm("Delete this chicken sale?")) return;
+  const action = target.dataset.action;
+  if (action === "delete") {
+    if (!window.confirm("Delete this Ufaray chicken sale?")) return;
     try {
       await api(`/api/chicken-sales/${id}`, { method: "DELETE" });
       await loadAllData();
@@ -3613,11 +3612,35 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
     }
     return;
   }
-  if (target.dataset.action === "edit") {
-    const mainEditBtn = document.querySelector(
-      `button[data-kind="chicken"][data-action="edit"][data-id="${id}"]`
-    );
-    if (mainEditBtn instanceof HTMLButtonElement) mainEditBtn.click();
+  if (action === "edit") {
+    const qtyInput = window.prompt("Enter updated number of chicks", String(Number(row.quantity_birds) || 0));
+    if (qtyInput == null) return;
+    const qty = Math.floor(Number(qtyInput));
+    if (!Number.isFinite(qty) || qty < 50) {
+      alert("Number of chicks must be at least 50.");
+      return;
+    }
+    const payload = {
+      date: row.date,
+      breed: row.breed,
+      description: row.description || "",
+      quantity_birds: qty,
+      weight_kg: row.weight_kg ?? null,
+      unit_price: Number(row.unit_price) || 0,
+      through_party: row.through_party,
+      customer_name: row.customer_name || "",
+      customer_phone: row.customer_phone || "",
+      money_paid: Number(row.money_paid) || 0,
+      payment_status:
+        String(row.payment_status || "").toLowerCase() === "delivered" ? "delivered" : "pending",
+      pass_through_status: String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending",
+    };
+    try {
+      await api(`/api/chicken-sales/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
   }
 });
 
