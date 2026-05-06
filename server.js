@@ -23,7 +23,11 @@ function loadEnvFile() {
       val = val.slice(1, -1);
     }
     if (!key) continue;
-    const fromFile = key.startsWith("AMANA_") || key.startsWith("VEHICLE_") || key === "JWT_SECRET";
+    const fromFile =
+      key.startsWith("AMANA_") ||
+      key.startsWith("UFARAY_") ||
+      key.startsWith("VEHICLE_") ||
+      key === "JWT_SECRET";
     if (fromFile || process.env[key] === undefined) process.env[key] = val;
   }
 }
@@ -47,9 +51,15 @@ const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "V
 function tenantLoginEnv(tenant) {
   const t = normalizeAppTenant(tenant);
   if (t === "ufaray") {
-    const ufarayOwnerUsername = String(process.env.UFARAY_OWNER_USERNAME || "").trim();
-    const ufarayOwnerPassword = String(process.env.UFARAY_OWNER_PASSWORD || "");
-    const ufarayOwnerFullName = String(process.env.UFARAY_OWNER_FULL_NAME || "").trim();
+    const ufarayOwnerUsername = String(
+      process.env.UFARAY_OWNER_USERNAME || process.env.UFARAY_FEEDS_USERNAME || ""
+    ).trim();
+    const ufarayOwnerPassword = String(
+      process.env.UFARAY_OWNER_PASSWORD || process.env.UFARAY_FEEDS_PASSWORD || ""
+    );
+    const ufarayOwnerFullName = String(
+      process.env.UFARAY_OWNER_FULL_NAME || process.env.UFARAY_FEEDS_FULL_NAME || ""
+    ).trim();
     const ufarayEmployeeUsername = String(process.env.UFARAY_EMPLOYEE_USERNAME || "").trim();
     const ufarayEmployeePassword = String(process.env.UFARAY_EMPLOYEE_PASSWORD || "");
     const ufarayEmployeeFullName = String(process.env.UFARAY_EMPLOYEE_FULL_NAME || "").trim();
@@ -4250,6 +4260,7 @@ let httpServer = null;
 async function startServer(port = PORT) {
   if (httpServer) return httpServer;
   await ensureTenantInitialized("amana");
+  await ensureTenantInitialized("ufaray");
 
   await new Promise((resolve, reject) => {
     httpServer = app
