@@ -823,6 +823,7 @@ function chickenStaffPaymentIsCleared(row) {
 function chickenSaleLineProfit(row) {
   const cr = String(row.creator_role || "").toLowerCase();
   if (cr === "owner") return 0;
+  if (String(row.through_party || "").trim() !== "") return 0;
   const q = Number(row.quantity_birds) || 0;
   if (row.margin_snap == null || row.margin_snap === "") return 0;
   const m = Number(row.margin_snap);
@@ -1476,21 +1477,35 @@ function renderOwnerUfarayChickenSales() {
   if (state.user.role !== "owner" || state.currentPage !== "chicken-inventory") return;
   const rows = (state.chickenSales || []).filter((r) => String(r.through_party || "").trim() !== "");
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">No Ufaray chicken sales yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No Ufaray chicken sales yet.</td></tr>';
     return;
   }
-  tbody.innerHTML = joinRowsWithDateSeparators(rows, 4, (row) => {
+  tbody.innerHTML = joinRowsWithDateSeparators(rows, 7, (row) => {
     const qty = Number(row.quantity_birds) || 0;
     const unit = Number(row.unit_price) || 0;
     const margin = Number(row.margin_snap) || 0;
     const buyingPerChick = Math.max(0, unit - margin);
     const totalAmount = qty * buyingPerChick;
+    const statusRaw = String(row.payment_status || "pending").toLowerCase();
+    const status = statusRaw === "delivered" || statusRaw === "cleared" ? "solved" : "pending";
     return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${qty}</td>
         <td>${currency(buyingPerChick)}</td>
         <td>${currency(totalAmount)}</td>
+        <td>
+          <select data-kind="ufaray-chicken-status" data-id="${row.id}">
+            <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
+            <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+          </select>
+        </td>
+        <td>${row.created_by}</td>
+        <td><div class="row-actions">
+          <button type="button" data-kind="ufaray-chicken-status-save" data-id="${row.id}">Save</button>
+          <button type="button" data-kind="ufaray-chicken-sale" data-action="edit" data-id="${row.id}">Edit</button>
+          <button type="button" class="danger" data-kind="ufaray-chicken-sale" data-action="delete" data-id="${row.id}">Delete</button>
+        </div></td>
       </tr>`;
   });
 }
@@ -3559,6 +3574,52 @@ wireOwnerUfarayExtraTable(
   "/api/gas/sales",
   "/api/gas/sales"
 );
+
+document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = Number(target.dataset.id);
+  if (!Number.isFinite(id) || id < 1) return;
+  if (target.dataset.kind === "ufaray-chicken-status-save") {
+    const tr = target.closest("tr");
+    if (!(tr instanceof HTMLTableRowElement)) return;
+    const sel = tr.querySelector("select[data-kind='ufaray-chicken-status']");
+    if (!(sel instanceof HTMLSelectElement)) return;
+    const payment_status = sel.value === "solved" ? "delivered" : "pending";
+    target.setAttribute("disabled", "disabled");
+    try {
+      await api(`/api/chicken-sales/${id}/payment-status`, {
+        method: "PUT",
+        body: JSON.stringify({ payment_status }),
+      });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      target.removeAttribute("disabled");
+    }
+    return;
+  }
+  if (target.dataset.kind !== "ufaray-chicken-sale") return;
+  const row = state.chickenSales.find((r) => Number(r.id) === id);
+  if (!row) return;
+  if (target.dataset.action === "delete") {
+    if (!window.confirm("Delete this chicken sale?")) return;
+    try {
+      await api(`/api/chicken-sales/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+  if (target.dataset.action === "edit") {
+    const mainEditBtn = document.querySelector(
+      `button[data-kind="chicken"][data-action="edit"][data-id="${id}"]`
+    );
+    if (mainEditBtn instanceof HTMLButtonElement) mainEditBtn.click();
+  }
+});
 
 salesKgBody.addEventListener("click", async (event) => {
   const target = event.target;

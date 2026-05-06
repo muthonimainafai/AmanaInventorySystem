@@ -715,6 +715,10 @@ async function initDb() {
   await run("DELETE FROM vehicle_users WHERE role = 'staff'");
   await zeroOwnerChickenSaleMarginSnaps();
   await migrateChickenBreedAccumulatedProfitClearedOnlyV1();
+  await migrateChickenBreedAccumulatedProfitExcludeThroughV2();
+  await migrateFeedersDrinkersAccumulatedProfitPassThroughAwareV1();
+  await migrateMedicamentsAccumulatedProfitPassThroughAwareV1();
+  await migrateGasAccumulatedProfitPassThroughAwareV1();
 }
 
 /** One-time: align per-breed accumulated_profit with delivered/cleared staff sales only (pending no longer counts). */
@@ -743,6 +747,137 @@ async function migrateChickenBreedAccumulatedProfitClearedOnlyV1() {
     ]);
   }
   await run("INSERT INTO app_migrations (id) VALUES (?)", ["chicken_profit_cleared_only_v1"]);
+}
+
+/** One-time: exclude pass-through (e.g. By Ufaray) chicken sales from accumulated breed profit. */
+async function migrateChickenBreedAccumulatedProfitExcludeThroughV2() {
+  await run(`CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)`).catch(() => {});
+  const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["chicken_profit_exclude_through_v2"]);
+  if (done) return;
+  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared')`;
+  const nonThroughCond = `(cs.through_party IS NULL OR TRIM(COALESCE(cs.through_party, '')) = '')`;
+  const breeds = await all("SELECT breed FROM chicken_breeds");
+  const nowIso = new Date().toISOString();
+  for (const { breed } of breeds) {
+    const sumRow = await get(
+      `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS s
+       FROM chicken_sales cs
+       INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'
+       WHERE cs.breed = ? AND ${clearedCond} AND ${nonThroughCond}`,
+      [breed]
+    );
+    const sum = Number(sumRow?.s) || 0;
+    await run(`UPDATE chicken_breeds SET accumulated_profit = ?, updated_at = ? WHERE breed = ?`, [
+      sum,
+      nowIso,
+      breed,
+    ]);
+  }
+  await run("INSERT INTO app_migrations (id) VALUES (?)", ["chicken_profit_exclude_through_v2"]);
+}
+
+/** One-time: ensure feeders/drinkers accumulated profit excludes pass-through (Ufaray/agent) sales. */
+async function migrateFeedersDrinkersAccumulatedProfitPassThroughAwareV1() {
+  await run(`CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)`).catch(() => {});
+  const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["fd_pass_through_profit_fix_v1"]);
+  if (done) return;
+
+  await run("UPDATE feeders_drinkers_inventory SET accumulated_profit = 0");
+  const items = await all("SELECT DISTINCT item_name FROM feeders_drinkers_inventory");
+  const nowIso = new Date().toISOString();
+  for (const { item_name } of items) {
+    const latest = await get(
+      "SELECT id, profit_margin FROM feeders_drinkers_inventory WHERE item_name = ? ORDER BY id DESC LIMIT 1",
+      [item_name]
+    );
+    if (!latest) continue;
+    const nonThroughQty = await get(
+      `SELECT COALESCE(SUM(quantity_sold), 0) AS q
+       FROM feeders_drinkers_sales
+       WHERE item_name = ? AND (through_party IS NULL OR TRIM(COALESCE(through_party, '')) = '')`,
+      [item_name]
+    );
+    const qty = Number(nonThroughQty?.q) || 0;
+    const margin = Number(latest.profit_margin) || 0;
+    const profit = qty * margin;
+    await run("UPDATE feeders_drinkers_inventory SET accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      profit,
+      nowIso,
+      latest.id,
+    ]);
+  }
+
+  await run("INSERT INTO app_migrations (id) VALUES (?)", ["fd_pass_through_profit_fix_v1"]);
+}
+
+/** One-time: ensure medicaments accumulated profit excludes pass-through (Ufaray/agent) sales. */
+async function migrateMedicamentsAccumulatedProfitPassThroughAwareV1() {
+  await run(`CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)`).catch(() => {});
+  const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["med_pass_through_profit_fix_v1"]);
+  if (done) return;
+
+  await run("UPDATE medicaments_inventory SET accumulated_profit = 0");
+  const items = await all("SELECT DISTINCT item_name FROM medicaments_inventory");
+  const nowIso = new Date().toISOString();
+  for (const { item_name } of items) {
+    const latest = await get(
+      "SELECT id, profit_margin FROM medicaments_inventory WHERE item_name = ? ORDER BY id DESC LIMIT 1",
+      [item_name]
+    );
+    if (!latest) continue;
+    const nonThroughQty = await get(
+      `SELECT COALESCE(SUM(quantity_sold), 0) AS q
+       FROM medicaments_sales
+       WHERE item_name = ? AND (through_party IS NULL OR TRIM(COALESCE(through_party, '')) = '')`,
+      [item_name]
+    );
+    const qty = Number(nonThroughQty?.q) || 0;
+    const margin = Number(latest.profit_margin) || 0;
+    const profit = qty * margin;
+    await run("UPDATE medicaments_inventory SET accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      profit,
+      nowIso,
+      latest.id,
+    ]);
+  }
+
+  await run("INSERT INTO app_migrations (id) VALUES (?)", ["med_pass_through_profit_fix_v1"]);
+}
+
+/** One-time: ensure gas accumulated profit excludes pass-through (Ufaray/agent) sales. */
+async function migrateGasAccumulatedProfitPassThroughAwareV1() {
+  await run(`CREATE TABLE IF NOT EXISTS app_migrations (id TEXT PRIMARY KEY)`).catch(() => {});
+  const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["gas_pass_through_profit_fix_v1"]);
+  if (done) return;
+
+  await run("UPDATE gas_inventory SET accumulated_profit = 0");
+  const sizes = await all("SELECT DISTINCT size_kg FROM gas_inventory");
+  const nowIso = new Date().toISOString();
+  for (const { size_kg } of sizes) {
+    const size = Number(size_kg);
+    if (!Number.isFinite(size) || size <= 0) continue;
+    const latest = await get(
+      "SELECT id, profit_margin FROM gas_inventory WHERE size_kg = ? ORDER BY id DESC LIMIT 1",
+      [size]
+    );
+    if (!latest) continue;
+    const nonThroughQty = await get(
+      `SELECT COALESCE(SUM(quantity_sold), 0) AS q
+       FROM gas_sales
+       WHERE size_kg = ? AND (through_party IS NULL OR TRIM(COALESCE(through_party, '')) = '')`,
+      [size]
+    );
+    const qty = Number(nonThroughQty?.q) || 0;
+    const margin = Number(latest.profit_margin) || 0;
+    const profit = qty * margin;
+    await run("UPDATE gas_inventory SET accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      profit,
+      nowIso,
+      latest.id,
+    ]);
+  }
+
+  await run("INSERT INTO app_migrations (id) VALUES (?)", ["gas_pass_through_profit_fix_v1"]);
 }
 
 const CREATED_BY_TABLES = [
@@ -1474,6 +1609,7 @@ async function reverseChickenSaleProfitEffect(row) {
   if (!row || !row.breed) return;
   const u = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
   if (u?.role !== "employee") return;
+  if (normalizeThroughParty(row.through_party) != null) return;
   if (!chickenStaffSalePaymentIsCleared(row)) return;
   if (row.margin_snap == null) return;
   const m = Number(row.margin_snap);
@@ -1489,10 +1625,11 @@ async function reverseChickenSaleProfitEffect(row) {
 async function computeChickenProfitSummary(employeeUsernameOnly) {
   const today = todayDMY();
   const clearedCond = `(LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared'))`;
+  const nonThroughCond = `(cs.through_party IS NULL OR TRIM(COALESCE(cs.through_party, '')) = '')`;
   const baseJoin = `FROM chicken_sales cs
      INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'`;
   const paramsToday = [today];
-  let whereToday = `WHERE cs.date = ? AND ${clearedCond}`;
+  let whereToday = `WHERE cs.date = ? AND ${clearedCond} AND ${nonThroughCond}`;
   if (employeeUsernameOnly) {
     whereToday += " AND cs.created_by = ?";
     paramsToday.push(employeeUsernameOnly);
@@ -1502,7 +1639,7 @@ async function computeChickenProfitSummary(employeeUsernameOnly) {
     paramsToday
   );
   const paramsCum = [];
-  let whereCum = `WHERE ${clearedCond}`;
+  let whereCum = `WHERE ${clearedCond} AND ${nonThroughCond}`;
   if (employeeUsernameOnly) {
     whereCum += " AND cs.created_by = ?";
     paramsCum.push(employeeUsernameOnly);
@@ -3734,6 +3871,7 @@ app.post("/api/chicken-sales/clear-all", auth, allowRoles("owner"), async (_req,
 app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
   const breed = normalizeChickenBreed(p.breed);
   if (!breed) return res.status(400).json({ error: "Select a valid breed." });
   const qty = Number(p.quantity_birds);
@@ -3754,7 +3892,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
-  if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
+  if (recordsProfit && !isThrough && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   const nowIso = new Date().toISOString();
@@ -3787,6 +3925,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
 app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
+  const isThrough = throughParty != null;
   const breed = normalizeChickenBreed(p.breed);
   if (!breed) return res.status(400).json({ error: "Select a valid breed." });
   const qty = Number(p.quantity_birds);
@@ -3811,7 +3950,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
-  if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
+  if (recordsProfit && !isThrough && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   await run(
