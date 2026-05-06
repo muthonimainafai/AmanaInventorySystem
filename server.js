@@ -2958,18 +2958,19 @@ app.delete("/api/gas/:id", auth, allowRoles("owner"), async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/expenditure", auth, allowRoles("employee"), async (req, res) => {
-  const rows = await all("SELECT * FROM employee_expenditure WHERE created_by = ? ORDER BY id DESC", [
-    req.user.username,
-  ]);
+app.get("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM employee_expenditure ORDER BY id DESC")
+      : await all("SELECT * FROM employee_expenditure WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
   res.json(rows);
 });
 
-app.post("/api/expenditure", auth, allowRoles("employee"), async (req, res) => {
+app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  if (req.user.role === "employee" && !employeeSaleDateAllowed(req, res, p.date)) return;
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
   const moneyOut = Number(p.money_out);
@@ -2989,12 +2990,12 @@ app.post("/api/expenditure", auth, allowRoles("employee"), async (req, res) => {
   res.json({ ok: true });
 });
 
-app.put("/api/expenditure/:id", auth, allowRoles("employee"), async (req, res) => {
+app.put("/api/expenditure/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const existing = await get("SELECT * FROM employee_expenditure WHERE id = ? AND created_by = ?", [
-    id,
-    req.user.username,
-  ]);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM employee_expenditure WHERE id = ?", [id])
+      : await get("SELECT * FROM employee_expenditure WHERE id = ? AND created_by = ?", [id, req.user.username]);
   if (!existing) return res.status(404).json({ error: "Record not found." });
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
@@ -3017,11 +3018,14 @@ app.put("/api/expenditure/:id", auth, allowRoles("employee"), async (req, res) =
   res.json({ ok: true });
 });
 
-app.delete("/api/expenditure/:id", auth, allowRoles("employee"), async (req, res) => {
-  const result = await run("DELETE FROM employee_expenditure WHERE id = ? AND created_by = ?", [
-    Number(req.params.id),
-    req.user.username,
-  ]);
+app.delete("/api/expenditure/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM employee_expenditure WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM employee_expenditure WHERE id = ? AND created_by = ?", [
+          Number(req.params.id),
+          req.user.username,
+        ]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });

@@ -112,6 +112,7 @@
           </button>
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="balance">Balance</button>
         </nav>
 
         <div class="top-bar card top-bar-flush">
@@ -1256,6 +1257,24 @@
                 </thead>
                 <tbody id="exp-body"><tr><td colspan="5" class="empty">No records.</td></tr></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-balance" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Balance</h3>
+            <div class="profit-highlight-above-table" aria-live="polite">
+              <div class="profit-highlight-inner">
+                <div class="profit-highlight-text">
+                  <p class="profit-highlight-title">Remaining balance after daily operational costs</p>
+                  <p class="profit-highlight-sub">
+                    Combined accumulated profits minus Ksh 540 per day from the opening date (inclusive) to today.
+                  </p>
+                </div>
+                <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>
+              </div>
+              <p class="profit-highlight-example js-balance-remaining-meta"></p>
             </div>
           </div>
         </div>

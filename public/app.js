@@ -66,6 +66,7 @@ const PAGE_HEADINGS = {
   gas: "Gas Inventory",
   calculator: "Calculator",
   expenditure: "Expenditure",
+  balance: "Balance",
 };
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
@@ -78,9 +79,14 @@ const OWNER_ALLOWED_PAGES = new Set([
   "medicaments",
   "gas",
   "calculator",
+  "expenditure",
+  "balance",
 ]);
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
+
+const DAILY_OPERATIONAL_COST = 540;
+const BUSINESS_OPENED_DMY = "04/05/2026";
 
 /** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
 const DEFAULT_CHICKEN_BREED_NAMES = [
@@ -506,12 +512,42 @@ function updateOwnerCombinedProfitDockVisibility() {
 /** Owner: Feed bag cumulative + retail kg cumulative + staff chicken margin cumulative. */
 function updateOwnerCombinedProfitDisplay() {
   if (state.user?.role !== "owner") return;
+  const sum = getOwnerCombinedProfitTotal();
+  document.querySelectorAll(".js-owner-combined-profit-total").forEach((el) => {
+    el.textContent = currency(sum);
+  });
+}
+
+function getOwnerCombinedProfitTotal() {
   const feed = Number(state.cumulativeFeedBagProfit) || 0;
   const retail = Number(state.cumulativeRetailKgProfit) || 0;
   const chicken = Number(state.chickenProfitSummary?.cumulativeProfit) || 0;
-  const sum = feed + retail + chicken;
-  document.querySelectorAll(".js-owner-combined-profit-total").forEach((el) => {
-    el.textContent = currency(sum);
+  return feed + retail + chicken;
+}
+
+function inclusiveBusinessDaysFromOpen(openedDmy, todayDmy) {
+  const from = parseDMYParts(openedDmy);
+  const to = parseDMYParts(todayDmy);
+  if (!from || !to) return 0;
+  const utcFrom = Date.UTC(from.y, from.m - 1, from.d);
+  const utcTo = Date.UTC(to.y, to.m - 1, to.d);
+  const diff = Math.floor((utcTo - utcFrom) / 86400000);
+  return diff >= 0 ? diff + 1 : 0;
+}
+
+function updateBalanceBanner() {
+  if (state.user?.role !== "owner") return;
+  const combined = getOwnerCombinedProfitTotal();
+  const today = state.shopToday || clientShopTodayDMY();
+  const days = inclusiveBusinessDaysFromOpen(BUSINESS_OPENED_DMY, today);
+  const operational = days * DAILY_OPERATIONAL_COST;
+  const remaining = combined - operational;
+  document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
+    el.textContent = currency(remaining);
+  });
+  const meta = `${currency(combined)} - (${currency(DAILY_OPERATIONAL_COST)} × ${days} day${days === 1 ? "" : "s"}) = ${currency(remaining)} · Opened ${BUSINESS_OPENED_DMY}`;
+  document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
+    el.textContent = meta;
   });
 }
 
@@ -2075,7 +2111,6 @@ function resetGasForm() {
 
 function renderExpenditureTable() {
   if (!expBody) return;
-  if (state.user?.role !== "employee") return;
   const rows = state.expenditureEntries || [];
   const colSpan = 5;
   if (!rows.length) {
@@ -2337,7 +2372,7 @@ function showPage(page) {
   if (page === "calculator" && state.user?.role !== "owner") {
     return showPage("sales-bags");
   }
-  if (page === "expenditure" && state.user?.role !== "employee") {
+  if (page === "balance" && state.user?.role !== "owner") {
     return showPage("sales-bags");
   }
   state.currentPage = page;
@@ -2390,6 +2425,7 @@ function showPage(page) {
   if (page === "gas") renderGasTable();
   if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
+  if (page === "balance") updateBalanceBanner();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -2583,6 +2619,7 @@ async function loadAllData() {
   updateMedicamentsProfitDisplay();
   updateGasProfitDisplay();
   updateOwnerCombinedProfitDisplay();
+  updateBalanceBanner();
   populateChickenBreedSelect();
   populateFeedersDrinkersItems();
   populateMedicamentsItems();
@@ -3207,7 +3244,6 @@ gasForm?.addEventListener("submit", async (event) => {
 
 expenditureForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (state.user?.role !== "employee") return;
   const dateValue = expDateDisplay.value.trim();
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
   const payload = {
@@ -4125,7 +4161,7 @@ expBody?.addEventListener("click", async (event) => {
   const action = target.dataset.action;
   const kind = target.dataset.kind;
   if (!id || !action || kind !== "exp") return;
-  if (state.user?.role !== "employee") return;
+  if (!state.user || !["owner", "employee"].includes(state.user.role)) return;
   const row = state.expenditureEntries.find((r) => String(r.id) === String(id));
   if (!row) return;
   if (action === "edit") {
