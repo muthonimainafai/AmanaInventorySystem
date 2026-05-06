@@ -213,6 +213,10 @@ function applyAppTheme() {
   const isUfaray = state.appInstance === "ufaray";
   document.body.classList.toggle("ufaray-theme", isUfaray);
   document.title = isUfaray ? "Ufaray Feeds - Desktop Inventory" : "Amana Kuku Feeds - Desktop Inventory";
+  const portalSiteTitle = document.getElementById("portalSiteTitle");
+  if (portalSiteTitle) {
+    portalSiteTitle.textContent = isUfaray ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
+  }
   const loginTitle = document.getElementById("loginCardTitle");
   if (loginTitle) {
     loginTitle.textContent = isUfaray ? "Ufaray Feeds Login" : "Amana Kuku Feeds Login";
@@ -2046,8 +2050,8 @@ function chickenSalesTableRowsHtml() {
       canEdit = true;
       canDelete = true;
     } else if (state.user.role === "owner") {
-      canEdit = isOwnerInventoryRow;
-      canDelete = isOwnerInventoryRow;
+      canEdit = true;
+      canDelete = true;
     }
     const breedCell = row.breed ? row.breed : "—";
     const notesCell = row.description ? row.description : "—";
@@ -3384,7 +3388,26 @@ function wireChickenTableClicks(tbody) {
         clearOwnerCustomerViewPanel();
         highlightChickenRowForOwner(null);
         if (!isChickenRowOwnerInventory(row)) {
-          alert("Only your own inventory rows can be edited here.");
+          const currentStatus =
+            String(row.payment_status || "pending").toLowerCase() === "delivered" ? "delivered" : "pending";
+          const answer = window
+            .prompt("Set payment status for this staff sale: pending or delivered", currentStatus)
+            ?.trim()
+            .toLowerCase();
+          if (!answer) return;
+          if (answer !== "pending" && answer !== "delivered") {
+            alert("Payment status must be either pending or delivered.");
+            return;
+          }
+          try {
+            await api(`/api/chicken-sales/${id}/payment-status`, {
+              method: "PUT",
+              body: JSON.stringify({ payment_status: answer }),
+            });
+            await loadAllData();
+          } catch (error) {
+            alert(error.message);
+          }
           return;
         }
       }
@@ -3445,8 +3468,11 @@ function wireChickenTableClicks(tbody) {
         }
         return;
       }
-      if (state.user.role !== "owner" || !isChickenRowOwnerInventory(row)) return;
-      if (!window.confirm("Delete this inventory record?")) return;
+      if (state.user.role !== "owner") return;
+      const deleteMsg = isChickenRowOwnerInventory(row)
+        ? "Delete this inventory record?"
+        : "Delete this staff chicken sale?";
+      if (!window.confirm(deleteMsg)) return;
       try {
         await api(`/api/chicken-sales/${id}`, { method: "DELETE" });
         await loadAllData();

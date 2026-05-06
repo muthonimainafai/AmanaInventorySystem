@@ -3675,19 +3675,45 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   res.json({ ok: true });
 });
 
+app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), async (req, res) => {
+  const idNum = Number(req.params.id);
+  if (!Number.isFinite(idNum) || idNum < 1) {
+    return res.status(400).json({ error: "Invalid sale id." });
+  }
+  const paymentStatusRaw = String(req.body?.payment_status || "pending").trim().toLowerCase();
+  const paymentStatus = paymentStatusRaw === "delivered" ? "delivered" : "pending";
+  const row = await get(
+    `SELECT cs.*, u.role AS creator_role
+     FROM chicken_sales cs
+     LEFT JOIN users u ON u.username = cs.created_by
+     WHERE cs.id = ?`,
+    [idNum]
+  );
+  if (!row) return res.status(404).json({ error: "Sale not found." });
+  if (String(row.creator_role || "").toLowerCase() !== "employee") {
+    return res.status(400).json({ error: "Only staff chicken sales support payment status updates here." });
+  }
+  const wasCleared = chickenStaffSalePaymentIsCleared(row);
+  const willBeCleared = paymentStatus === "delivered";
+  if (!wasCleared && willBeCleared) {
+    await adjustChickenBreedAccumulatedProfit(row.breed, (Number(row.quantity_birds) || 0) * (Number(row.margin_snap) || 0));
+  } else if (wasCleared && !willBeCleared) {
+    await adjustChickenBreedAccumulatedProfit(row.breed, -1 * (Number(row.quantity_birds) || 0) * (Number(row.margin_snap) || 0));
+  }
+  await run("UPDATE chicken_sales SET payment_status = ?, updated_at = ? WHERE id = ?", [
+    paymentStatus,
+    new Date().toISOString(),
+    idNum,
+  ]);
+  res.json({ ok: true });
+});
+
 app.delete("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const idNum = Number(req.params.id);
   const row = await get("SELECT * FROM chicken_sales WHERE id = ?", [idNum]);
   if (!row) return res.status(404).json({ error: "Record not found." });
   if (req.user.role === "owner") {
-    const ownerRow = await get(
-      `SELECT cs.* FROM chicken_sales cs
-       INNER JOIN users u ON u.username = cs.created_by AND u.role = 'owner'
-       WHERE cs.id = ?`,
-      [idNum]
-    );
-    if (!ownerRow) return res.status(404).json({ error: "Inventory record not found." });
-    await reverseChickenSaleProfitEffect(ownerRow);
+    await reverseChickenSaleProfitEffect(row);
     await run("DELETE FROM chicken_sales WHERE id = ?", [idNum]);
     return res.json({ ok: true });
   }
