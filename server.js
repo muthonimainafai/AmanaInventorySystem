@@ -840,6 +840,26 @@ function normalizeFeedType(name) {
   return String(name || "").toLowerCase().replace(/\s+bags?$/, "").trim();
 }
 
+function extractKgFromFeedType(name) {
+  const m = String(name || "")
+    .toLowerCase()
+    .match(/(\d+(?:\.\d+)?)\s*kg\b/);
+  return m ? Number(m[1]) : null;
+}
+
+function isLayersFeedType(name) {
+  return /\blayers?\b/.test(String(name || "").toLowerCase());
+}
+
+/** Treat legacy labels like "Layers", "Layers bag", and "Layers 10kg" as equivalent when kg matches. */
+function feedTypeEquivalent(a, b, aBagSizeHint, bBagSizeHint) {
+  if (normalizeFeedType(a) === normalizeFeedType(b)) return true;
+  if (!isLayersFeedType(a) || !isLayersFeedType(b)) return false;
+  const kgA = extractKgFromFeedType(a) || Number(aBagSizeHint) || null;
+  const kgB = extractKgFromFeedType(b) || Number(bBagSizeHint) || null;
+  return kgA != null && kgB != null && kgA === kgB;
+}
+
 function resolveBrandKey(brand) {
   const target = normalizeBrand(brand);
   return Object.keys(feedCatalog).find((b) => normalizeBrand(b) === target) || brand;
@@ -1239,7 +1259,7 @@ async function getInventoryRowsForProduct(brand, feedType, bagSize) {
   return rows.filter(
     (r) =>
       normalizeBrand(r.brand) === normalizeBrand(brand) &&
-      normalizeFeedType(r.feed_type) === normalizeFeedType(feedType)
+      feedTypeEquivalent(r.feed_type, feedType, r.bag_size, bagSize)
   );
 }
 
@@ -1250,12 +1270,12 @@ async function getInventoryItem(brand, feedType, bagSize) {
 }
 
 /** Newest inventory row for same brand + feed type, regardless of bag size (fallback for legacy/mismatched saved bag sizes). */
-async function getInventoryItemAnyBagSize(brand, feedType) {
+async function getInventoryItemAnyBagSize(brand, feedType, bagSizeHint) {
   const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
   const matched = rows.filter(
     (r) =>
       normalizeBrand(r.brand) === normalizeBrand(brand) &&
-      normalizeFeedType(r.feed_type) === normalizeFeedType(feedType)
+      feedTypeEquivalent(r.feed_type, feedType, r.bag_size, bagSizeHint)
   );
   return matched.length ? matched[matched.length - 1] : null;
 }
@@ -1337,7 +1357,7 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
     mode === "bags"
       ? await getInventoryItem(brandKey, p.feed_type, Number(p.bag_size))
       : await getInventoryItem(brandKey, p.feed_type, defaultBagSize);
-  let itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, p.feed_type));
+  let itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, p.feed_type, defaultBagSize));
   if (!itemResolved && mode === "kg") {
     itemResolved =
       (await getInventoryItemByBrandAndBagSize(brandKey, defaultBagSize)) ||
