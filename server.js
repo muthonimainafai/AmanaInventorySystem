@@ -1249,6 +1249,17 @@ async function getInventoryItem(brand, feedType, bagSize) {
   return rows.length ? rows[rows.length - 1] : null;
 }
 
+/** Newest inventory row for same brand + feed type, regardless of bag size (fallback for legacy/mismatched saved bag sizes). */
+async function getInventoryItemAnyBagSize(brand, feedType) {
+  const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
+  const matched = rows.filter(
+    (r) =>
+      normalizeBrand(r.brand) === normalizeBrand(brand) &&
+      normalizeFeedType(r.feed_type) === normalizeFeedType(feedType)
+  );
+  return matched.length ? matched[matched.length - 1] : null;
+}
+
 /** Inventory lines saved on this same calendar date with matching brand, feed type, and bag size (for owner merge on new save). Dates are compared in canonical form. */
 async function findInventoryRowsSameDayProduct(dateStr, brand, feedType, bagSize) {
   const targetDay = normalizeInventoryDate(dateStr);
@@ -1309,14 +1320,15 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
     mode === "bags"
       ? await getInventoryItem(brandKey, p.feed_type, Number(p.bag_size))
       : await getInventoryItem(brandKey, p.feed_type, defaultBagSize);
-  if (!item) {
+  const itemResolved = item || (await getInventoryItemAnyBagSize(brandKey, p.feed_type));
+  if (!itemResolved) {
     res.status(400).json({
       error: "No inventory record for this product. The owner must add it under Feed Inventory first.",
     });
     return false;
   }
-  const selling = Number(item.selling_price);
-  const bagKg = Number(item.bag_size) || Number(defaultBagSize);
+  const selling = Number(itemResolved.selling_price);
+  const bagKg = Number(itemResolved.bag_size) || Number(defaultBagSize);
   if (mode === "bags") {
     if (!salePriceMatchesInventory(selling, p.price_per_bag)) {
       res.status(400).json({
