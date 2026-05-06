@@ -2013,7 +2013,7 @@ app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("employee"), async (
   const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  // Allow editing historical records without blocking by current shop day.
   const item = resolveFeederDrinkerItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
   const qty = Math.floor(Number(p.quantity_sold));
@@ -2300,7 +2300,7 @@ app.put("/api/medicaments/sales/:id", auth, allowRoles("employee"), async (req, 
   const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  // Allow editing historical records without blocking by current shop day.
   const item = resolveMedicamentItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid medicament item." });
   const qty = Math.floor(Number(p.quantity_sold));
@@ -2587,7 +2587,7 @@ app.put("/api/gas/sales/:id", auth, allowRoles("employee"), async (req, res) => 
   const throughParty = normalizeThroughParty(p.through_party);
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  // Allow editing historical records without blocking by current shop day.
   const sizeKg = normalizeGasSizeKg(p.size_kg);
   if (sizeKg == null) return res.status(400).json({ error: "Cylinder size (kg) must be a positive number." });
   const qty = Math.floor(Number(p.quantity_sold));
@@ -2800,7 +2800,7 @@ app.put("/api/expenditure/:id", auth, allowRoles("employee"), async (req, res) =
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  // Allow editing historical records without blocking by current shop day.
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
   const moneyOut = Number(p.money_out);
@@ -2919,7 +2919,7 @@ app.put("/api/sales/bags/:id", auth, allowRoles("owner", "employee"), async (req
     return res.status(403).json({ error: "You can only edit your own bag sales." });
   }
   if (!assertEmployeeSaleEditAllowed(req, res, current, EMPLOYEE_BAG_SALE_EDIT_WINDOW_MS)) return;
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  // Allow editing historical records without blocking by current shop day.
   const brandKeyNew = resolveBrandKey(p.brand);
   const itemNew = await getInventoryItem(brandKeyNew, p.feed_type, bagSize);
   if (!itemNew) {
@@ -3362,7 +3362,7 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   const current = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(req.params.id)]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   if (!assertEmployeeSaleEditAllowed(req, res, current)) return;
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  // Allow editing historical records without blocking by current shop day.
   if (!(await assertEmployeeFeedSalePrices(req, res, "kg", p))) return;
   const defaultBagSize = catalogBagSizeForFeed(brandKey, p.feed_type);
   const currentBrandKey = resolveBrandKey(current.brand);
@@ -3672,8 +3672,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   const currentCh = await get("SELECT * FROM chicken_sales WHERE id = ?", [Number(req.params.id)]);
   if (!currentCh) return res.status(404).json({ error: "Sale not found." });
   if (!(await assertChickenSaleRowMatchesActor(req, res, currentCh))) return;
-  /** Chicken sales: employees may edit at any time (no 1-hour window; feed bag/kg sales still use `assertEmployeeSaleEditAllowed`). */
-  if (!employeeSaleDateAllowed(req, res, p.date)) return;
+  /** Chicken sales: employees may edit at any time (no 1-hour window). */
   await reverseChickenSaleProfitEffect(currentCh);
   if (!(await assertEmployeeChickenSalePrice(req, res, breed, unitPrice))) return;
   const marginSnap = await resolveChickenSaleMarginSnap(req, res, breed, unitPrice, p);
