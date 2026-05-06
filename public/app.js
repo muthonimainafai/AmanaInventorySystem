@@ -1432,6 +1432,45 @@ function resetForm() {
 }
 
 function renderOwnerPassThroughBagSales() {
+  const tbody = document.getElementById("ufaray-bag-sales-body");
+  if (!tbody) return;
+  if (state.user.role !== "owner" || state.currentPage !== "inventory") return;
+  const rows = (state.salesBags || []).filter((r) => String(r.through_party || "").trim() !== "");
+  if (!rows.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags → By Ufaray.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = joinRowsWithDateSeparators(rows, 11, (row) => {
+    const viaRaw = String(row.through_party || "").trim();
+    const viaCell = viaRaw ? `By ${viaRaw}` : "—";
+    const stRaw = String(row.pass_through_status || "pending").toLowerCase();
+    const status = stRaw === "solved" ? "solved" : "pending";
+    return `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${displayBrand(row.brand)}</td>
+        <td>${displayFeedType(row.feed_type)}</td>
+        <td>${row.bag_size} kg</td>
+        <td>${row.bags_sold}</td>
+        <td>${currency(row.price_per_bag)}</td>
+        <td>${currency(saleLineTotalBags(row))}</td>
+        <td>${viaCell}</td>
+        <td>
+          <select data-kind="ufaray-status" data-id="${row.id}">
+            <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
+            <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+          </select>
+        </td>
+        <td>${row.created_by}</td>
+        <td>
+          <button type="button" data-kind="ufaray-status-save" data-id="${row.id}">Save</button>
+        </td>
+      </tr>`;
+  });
+}
+
+function renderOwnerUfarayChickenSales() {
   const tbody = document.getElementById("ufaray-chicken-sales-body");
   if (!tbody) return;
   if (state.user.role !== "owner" || state.currentPage !== "chicken-inventory") return;
@@ -2322,6 +2361,9 @@ function showPage(page) {
   if (page === "inventory") {
     renderOwnerPassThroughBagSales();
   }
+  if (page === "chicken-inventory") {
+    renderOwnerUfarayChickenSales();
+  }
   if (page === "feeders-drinkers" || page === "medicaments" || page === "gas") {
     renderOwnerUfarayNewPageSales();
   }
@@ -2535,6 +2577,7 @@ async function loadAllData() {
   refreshEmployeeNewPageSellingPrices();
   renderTable();
   renderOwnerPassThroughBagSales();
+  renderOwnerUfarayChickenSales();
   renderOwnerUfarayNewPageSales();
   renderSalesBagsTable();
   renderSalesKgTable();
@@ -3386,6 +3429,33 @@ salesBagsBody.addEventListener("click", async (event) => {
     } catch (error) {
       alert(error.message);
     }
+  }
+});
+
+document.getElementById("ufaray-bag-sales-body")?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (target.dataset.kind !== "ufaray-status-save") return;
+  const id = Number(target.dataset.id);
+  if (!Number.isFinite(id) || id < 1) return;
+  const row = state.salesBags.find((r) => Number(r.id) === id);
+  if (!row) return;
+  const tr = target.closest("tr");
+  if (!(tr instanceof HTMLTableRowElement)) return;
+  const sel = tr.querySelector("select[data-kind='ufaray-status']");
+  if (!(sel instanceof HTMLSelectElement)) return;
+  const status = sel.value === "solved" ? "solved" : "pending";
+  target.setAttribute("disabled", "disabled");
+  try {
+    await api(`/api/sales/bags/${id}/pass-through-status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    });
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    target.removeAttribute("disabled");
   }
 });
 
