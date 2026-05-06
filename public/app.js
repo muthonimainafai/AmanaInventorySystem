@@ -3281,25 +3281,33 @@ salesKgForm.addEventListener("submit", async (event) => {
   };
   const saveBtn = document.getElementById("skSaveBtn");
   saveBtn.disabled = true;
+  let result = null;
+  const wasEdit = Boolean(state.editSalesKgId);
   try {
-    if (state.editSalesKgId) {
+    if (wasEdit) {
       await api(`/api/sales/kg/${state.editSalesKgId}`, { method: "PUT", body: JSON.stringify(payload) });
-      resetSalesKgForm();
-      await loadAllData();
     } else {
-      const result = await api("/api/sales/kg", { method: "POST", body: JSON.stringify(payload) });
+      result = await api("/api/sales/kg", { method: "POST", body: JSON.stringify(payload) });
+    }
+    // Save already succeeded; from this point forward show refresh-specific errors only.
+    try {
       await loadAllData();
-      if (state.user.role === "employee" && result.merged) {
-        skDateDisplay.value = dateValue;
-        skDate.value = toIsoDate(dateValue);
-        document.getElementById("skKgSold").value = "";
-        applyDefaultSkBagOpened();
-        applyEmployeeFeedSalePricingUi();
-        state.editSalesKgId = null;
-        document.getElementById("skSaveBtn").textContent = "Save sale";
-      } else {
-        resetSalesKgForm();
-      }
+    } catch (_error) {
+      alert("Sale saved, but refreshing the page data failed. Please click Refresh.");
+    }
+
+    if (wasEdit) {
+      resetSalesKgForm();
+    } else if (state.user.role === "employee" && result?.merged) {
+      skDateDisplay.value = dateValue;
+      skDate.value = toIsoDate(dateValue);
+      document.getElementById("skKgSold").value = "";
+      applyDefaultSkBagOpened();
+      applyEmployeeFeedSalePricingUi();
+      state.editSalesKgId = null;
+      document.getElementById("skSaveBtn").textContent = "Save sale";
+    } else {
+      resetSalesKgForm();
     }
   } catch (error) {
     alert(error.message);
