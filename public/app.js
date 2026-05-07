@@ -3050,26 +3050,53 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
 });
 
 function downloadCalculatorPdf() {
-  const card = document.querySelector("#page-calculator .card");
-  if (!(card instanceof HTMLElement)) return;
-  const copy = card.cloneNode(true);
-  if (!(copy instanceof HTMLElement)) return;
-
-  // Show entered values as plain text in the print/PDF output.
-  copy.querySelectorAll("input").forEach((input) => {
-    if (!(input instanceof HTMLInputElement)) return;
-    const span = document.createElement("span");
-    span.textContent = String(input.value || "").trim() || "—";
-    input.replaceWith(span);
+  if (!calcBody) return;
+  const filledRows = [];
+  calcBody.querySelectorAll("tr").forEach((tr) => {
+    if (!(tr instanceof HTMLTableRowElement)) return;
+    const cells = tr.querySelectorAll("td");
+    if (cells.length < 6) return;
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+    const totalCell = tr.querySelector(".js-calc-row-total");
+    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
+    const bagsRaw = String(bagsEl.value || "").trim();
+    const bagsNum = Number(bagsRaw);
+    if (!bagsRaw || !Number.isFinite(bagsNum) || bagsNum <= 0) return;
+    filledRows.push({
+      brand: cells[0]?.textContent?.trim() || "—",
+      feedType: cells[1]?.textContent?.trim() || "—",
+      bagSize: cells[2]?.textContent?.trim() || "—",
+      bags: bagsRaw,
+      buying: String(buyEl.value || "").trim() || "—",
+      total: totalCell.textContent?.trim() || "—",
+    });
   });
-  copy.querySelectorAll(".actions").forEach((el) => el.remove());
+  if (!filledRows.length) {
+    alert("Enter at least one calculator row with number of bags before downloading.");
+    return;
+  }
 
   const win = window.open("", "_blank", "noopener,noreferrer");
   if (!win) {
     alert("Pop-up blocked. Allow pop-ups and try again.");
     return;
   }
-  const today = new Date().toLocaleDateString("en-GB");
+  const today = state.shopToday || clientShopTodayDMY();
+  const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
+  const rowsHtml = filledRows
+    .map(
+      (r) => `
+      <tr>
+        <td>${escapeHtmlCell(r.brand)}</td>
+        <td>${escapeHtmlCell(r.feedType)}</td>
+        <td>${escapeHtmlCell(r.bagSize)}</td>
+        <td>${escapeHtmlCell(r.bags)}</td>
+        <td>${escapeHtmlCell(r.buying)}</td>
+        <td>${escapeHtmlCell(r.total)}</td>
+      </tr>`
+    )
+    .join("");
   win.document.open();
   win.document.write(`<!doctype html>
 <html>
@@ -3087,9 +3114,23 @@ function downloadCalculatorPdf() {
     </style>
   </head>
   <body>
-    <h3>Calculator</h3>
+    <h3>Amana kuku feeds</h3>
+    <h4>Calculator</h4>
     <p>Date: ${today}</p>
-    ${copy.innerHTML}
+    <table>
+      <thead>
+        <tr>
+          <th>Brand</th>
+          <th>Feed Type</th>
+          <th>Bag Size (kg)</th>
+          <th>Number of bags</th>
+          <th>Buying price (per bag)</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <p><strong>Grand total:</strong> ${currency(grand)}</p>
     <script>
       window.onload = () => {
         window.print();
