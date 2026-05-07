@@ -775,11 +775,13 @@ async function initDb() {
       money_in REAL NOT NULL,
       money_out REAL NOT NULL,
       mortality REAL NOT NULL,
+      sale_via TEXT NOT NULL DEFAULT 'Shop',
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
+  await run("ALTER TABLE rose_inventory_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
 
   const accBagsMigrated = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_bags_v1"]);
   if (!accBagsMigrated || accBagsMigrated.value !== "1") {
@@ -993,9 +995,25 @@ function allowRoles(...roles) {
 }
 
 function validateFeed(brand, feedType, bagSize) {
-  const items = feedCatalog[resolveBrandKey(brand)];
+  const items = catalogForActiveTenant()[resolveBrandKey(brand)];
   if (!items) return false;
   return items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(feedType) && i.bagSize === Number(bagSize));
+}
+
+function isTerryCessOrShopTenant() {
+  const t = activeTenant();
+  return t === "terry" || t === "cess" || t === "shop";
+}
+
+function catalogForActiveTenant() {
+  if (!isTerryCessOrShopTenant()) return feedCatalog;
+  const sigmaKey = Object.keys(feedCatalog).find((b) => normalizeBrand(b) === normalizeBrand("Sigma"));
+  if (!sigmaKey) return {};
+  const sigmaItems = (feedCatalog[sigmaKey] || []).filter((i) => {
+    const ft = normalizeFeedType(i.type);
+    return ft === normalizeFeedType("Starter") || ft === normalizeFeedType("Finisher");
+  });
+  return { [sigmaKey]: sigmaItems };
 }
 
 function normalizeBrand(name) {
@@ -1940,7 +1958,7 @@ app.delete("/api/vehicle/kax/:id", vehicleAuth, async (req, res) => {
 
 /** Public product list (brands / feed types / bag sizes) — no auth so the UI can always populate dropdowns. */
 app.get("/api/catalog", (_req, res) => {
-  res.json(feedCatalog);
+  res.json(catalogForActiveTenant());
 });
 
 /** Cumulative profit from all Sales Per Bags (per-line: all-time bags sold × current margin). `today` is shop day for UI only. */
@@ -1965,7 +1983,15 @@ app.get("/api/inventory", auth, allowRoles("owner"), async (_req, res) => {
     cumulative_bag_profit: lineProfits.get(keyOf(r)) || 0,
     bags_sold_pass_through: passThroughBags.get(keyOf(r)) || 0,
   }));
-  res.json(enriched);
+  const filtered = isTerryCessOrShopTenant()
+    ? enriched.filter((r) => {
+        const bOk = normalizeBrand(r.brand) === normalizeBrand("Sigma");
+        const f = normalizeFeedType(r.feed_type);
+        const fOk = f === normalizeFeedType("Starter") || f === normalizeFeedType("Finisher");
+        return bOk && fOk;
+      })
+    : enriched;
+  res.json(filtered);
 });
 
 /** Selling prices per inventory line (for employees to record sales at the owner’s prices). Ordered by id DESC to match stock lookup. */
@@ -1993,7 +2019,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
     const margin = Number(payload.profit_margin_per_bag);
     const brandCanon = resolveBrandKey(payload.brand);
     const feedCanon =
-      (feedCatalog[brandCanon] || []).find(
+      (catalogForActiveTenant()[brandCanon] || []).find(
         (i) => normalizeFeedType(i.type) === normalizeFeedType(payload.feed_type)
       )?.type || payload.feed_type;
 
@@ -2130,7 +2156,7 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
     const brandCanon = resolveBrandKey(payload.brand);
     const feedCanon =
-      (feedCatalog[brandCanon] || []).find(
+      (catalogForActiveTenant()[brandCanon] || []).find(
         (i) => normalizeFeedType(i.type) === normalizeFeedType(payload.feed_type)
       )?.type || payload.feed_type;
 
@@ -3243,6 +3269,14 @@ function parseRoseNonNegativeField(raw, label) {
   return n;
 }
 
+function normalizeRoseSaleVia(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (s === "terry") return "Terry";
+  if (s === "cess") return "Cess";
+  if (s === "shop") return "Shop";
+  return null;
+}
+
 app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
@@ -3253,6 +3287,8 @@ app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (re
   let moneyIn = 0;
   let moneyOut = 0;
   let mortality = 0;
+  const saleVia = normalizeRoseSaleVia(p.sale_via);
+  if (!saleVia) return res.status(400).json({ error: "Sale via must be Terry, Cess, or Shop." });
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
     unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
@@ -3264,9 +3300,9 @@ app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (re
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO rose_inventory_entries (date, description, quantity, unit_price, money_in, money_out, mortality, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, req.user.username, nowIso, nowIso]
+    `INSERT INTO rose_inventory_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -3287,6 +3323,8 @@ app.put("/api/rose/inventory/:id", auth, allowRoles("owner", "employee"), async 
   let moneyIn = 0;
   let moneyOut = 0;
   let mortality = 0;
+  const saleVia = normalizeRoseSaleVia(p.sale_via);
+  if (!saleVia) return res.status(400).json({ error: "Sale via must be Terry, Cess, or Shop." });
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
     unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
@@ -3298,9 +3336,9 @@ app.put("/api/rose/inventory/:id", auth, allowRoles("owner", "employee"), async 
   }
   await run(
     `UPDATE rose_inventory_entries
-     SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, mortality = ?, updated_at = ?
+     SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, mortality = ?, sale_via = ?, updated_at = ?
      WHERE id = ?`,
-    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, new Date().toISOString(), id]
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, new Date().toISOString(), id]
   );
   res.json({ ok: true });
 });

@@ -140,7 +140,7 @@
             <span class="owner-only-tab">Gas Inventory</span>
             <span class="employee-only-action hidden">Gas Sales</span>
           </button>
-          <button type="button" class="nav-tab" data-page="rose-inventory">Rose Inventory</button>
+          <button type="button" class="nav-tab" data-page="rose-inventory" id="roseInventoryTabLabel">Rose Inventory</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="balance">Balance</button>
@@ -1227,7 +1227,7 @@
 
         <div id="page-rose-inventory" class="app-page hidden">
           <div class="card">
-            <h3 class="card-title">Rose Inventory</h3>
+            <h3 class="card-title" id="roseInventoryPageTitle">Rose Inventory</h3>
             <p class="field-hint">Track daily rose inventory records with money in, money out, and mortality.</p>
             <form id="rose-form">
               <div class="grid">
@@ -1263,6 +1263,14 @@
                   Mortality
                   <input type="number" id="roseMortality" min="0" step="1" />
                 </label>
+                <label>
+                  Sale via
+                  <select id="roseSaleVia">
+                    <option value="Shop">Shop</option>
+                    <option value="Terry">Terry</option>
+                    <option value="Cess">Cess</option>
+                  </select>
+                </label>
               </div>
               <div class="actions">
                 <button type="submit" id="roseSaveBtn">Save entry</button>
@@ -1283,16 +1291,18 @@
                     <th>Money in</th>
                     <th>Money out</th>
                     <th>Mortality</th>
+                    <th>Sale via</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="rose-body"><tr><td colspan="9" class="empty">No records.</td></tr></tbody>
+                <tbody id="rose-body"><tr><td colspan="10" class="empty">No records.</td></tr></tbody>
                 <tfoot>
                   <tr>
                     <th colspan="5">Total</th>
                     <th id="roseTotalMoneyIn">0</th>
                     <th id="roseTotalMoneyOut">0</th>
                     <th id="roseTotalMortality">0</th>
+                    <th>—</th>
                     <th>—</th>
                   </tr>
                 </tfoot>

@@ -75,6 +75,14 @@ const PAGE_HEADINGS = {
   balance: "Balance",
 };
 
+function isRecordsTenant() {
+  return state.appInstance === "rose";
+}
+
+function isTerryCessOrShopTenant() {
+  return state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "shop";
+}
+
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
 const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance"]);
 const OWNER_ALLOWED_PAGES = new Set([
@@ -271,6 +279,10 @@ function applyAppTheme() {
         ? "Rose Inventory Login"
         : "Amana Kuku Feeds Login";
   }
+  const roseTab = document.getElementById("roseInventoryTabLabel");
+  if (roseTab) roseTab.textContent = state.appInstance === "rose" ? "Rose Inventory" : "Rose Inventory";
+  const rosePageTitle = document.getElementById("roseInventoryPageTitle");
+  if (rosePageTitle) rosePageTitle.textContent = state.appInstance === "rose" ? "Rose Inventory" : "Rose Inventory";
 }
 
 async function api(path, options = {}) {
@@ -1060,8 +1072,11 @@ function showLoggedIn() {
   });
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
-    const isRose = state.appInstance === "rose";
-    const shouldShow = isRose
+    const recordsTenant = isRecordsTenant();
+    const terryCessShopTenant = isTerryCessOrShopTenant();
+    const shouldShow = terryCessShopTenant
+      ? page === "inventory" || page === "rose-inventory"
+      : recordsTenant
       ? page === "rose-inventory"
       : page === "rose-inventory"
         ? false
@@ -2317,6 +2332,8 @@ function resetRoseForm() {
   state.editRoseId = null;
   if (roseDate) roseDate.value = "";
   if (roseDateDisplay) roseDateDisplay.value = "";
+  const via = document.getElementById("roseSaleVia");
+  if (via) via.value = "Shop";
   const saveBtn = document.getElementById("roseSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
   applyEmployeeSalesDateRules();
@@ -2326,7 +2343,7 @@ function renderRoseTable() {
   if (!roseBody) return;
   const rows = state.roseEntries || [];
   if (!rows.length) {
-    roseBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
+    roseBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
     const inEl = document.getElementById("roseTotalMoneyIn");
     const outEl = document.getElementById("roseTotalMoneyOut");
     const mortEl = document.getElementById("roseTotalMortality");
@@ -2353,6 +2370,7 @@ function renderRoseTable() {
         <td>${Number(row.money_in || 0)}</td>
         <td>${Number(row.money_out || 0)}</td>
         <td>${Number(row.mortality || 0)}</td>
+        <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
         <td>
           <div class="row-actions">
             <button type="button" data-kind="rose" data-action="edit" data-id="${row.id}">Edit</button>
@@ -2530,6 +2548,9 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
+  if (isTerryCessOrShopTenant() && page !== "inventory" && page !== "rose-inventory") {
+    return showPage("inventory");
+  }
   if (page === "calculator" && state.user?.role !== "owner") {
     return showPage("sales-bags");
   }
@@ -2635,12 +2656,24 @@ function formPayload() {
 }
 
 async function loadCatalogFromServer() {
+  const restrictForTerryCess = (catalog) => {
+    if (!(state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "shop")) return catalog;
+    const sigmaKey = Object.keys(catalog || {}).find((b) => normalizeBrandName(b) === normalizeBrandName("Sigma"));
+    if (!sigmaKey) return {};
+    const items = (catalog[sigmaKey] || []).filter((i) => {
+      const ft = normalizeFeedTypeForMatch(i?.type || "");
+      return ft === normalizeFeedTypeForMatch("Starter") || ft === normalizeFeedTypeForMatch("Finisher");
+    });
+    return { [sigmaKey]: items };
+  };
   try {
-    return await api("/api/catalog");
+    const c = await api("/api/catalog");
+    return restrictForTerryCess(c);
   } catch {
     const res = await fetch("/feedCatalog.json", { cache: "no-store" });
     if (!res.ok) throw new Error("Could not load feed catalog. Check that the server is running.");
-    return res.json();
+    const c = await res.json();
+    return restrictForTerryCess(c);
   }
 }
 
@@ -2907,7 +2940,15 @@ loginForm.addEventListener("submit", async (event) => {
     state.user = result.user;
     persistAuth();
     showLoggedIn();
-    showPage(state.appInstance === "rose" ? "rose-inventory" : state.user.role === "owner" ? "inventory" : "sales-bags");
+    showPage(
+      isTerryCessOrShopTenant()
+        ? "inventory"
+        : isRecordsTenant()
+          ? "rose-inventory"
+          : state.user.role === "owner"
+            ? "inventory"
+            : "sales-bags"
+    );
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -3126,7 +3167,15 @@ async function boot() {
   }
   try {
     showLoggedIn();
-    showPage(state.appInstance === "rose" ? "rose-inventory" : state.user.role === "owner" ? "inventory" : "sales-bags");
+    showPage(
+      isTerryCessOrShopTenant()
+        ? "inventory"
+        : isRecordsTenant()
+          ? "rose-inventory"
+          : state.user.role === "owner"
+            ? "inventory"
+            : "sales-bags"
+    );
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -3493,6 +3542,7 @@ roseForm?.addEventListener("submit", async (event) => {
     money_in: Number(document.getElementById("roseMoneyIn")?.value || 0),
     money_out: Number(document.getElementById("roseMoneyOut")?.value || 0),
     mortality: Number(document.getElementById("roseMortality")?.value || 0),
+    sale_via: String(document.getElementById("roseSaleVia")?.value || "Shop").trim(),
   };
   try {
     if (state.editRoseId) {
@@ -4457,12 +4507,14 @@ roseBody?.addEventListener("click", async (event) => {
     const min = document.getElementById("roseMoneyIn");
     const mout = document.getElementById("roseMoneyOut");
     const mort = document.getElementById("roseMortality");
+    const via = document.getElementById("roseSaleVia");
     if (desc) desc.value = row.description || "";
     if (qty) qty.value = row.quantity ?? 0;
     if (unit) unit.value = row.unit_price ?? 0;
     if (min) min.value = row.money_in ?? 0;
     if (mout) mout.value = row.money_out ?? 0;
     if (mort) mort.value = row.mortality ?? 0;
+    if (via) via.value = row.sale_via || "Shop";
     const saveBtn = document.getElementById("roseSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
     return;
