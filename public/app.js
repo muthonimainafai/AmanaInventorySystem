@@ -17,7 +17,7 @@ const state = {
   chickenBreeds: [],
   /** Owner: cumulative + today’s chick margin (from API). */
   chickenProfitSummary: { todayProfit: 0, cumulativeProfit: 0, today: "" },
-  /** Owner: aggregated kg / bag opened / bags-from-kg for Retail Feed Inventory. */
+  /** Owner: Retail Feed “Sales activity (by day)” — remaining kg, accumulated employee kg (sum of staff running totals), bags from kg. */
   retailFeedSummary: [],
   /** Owner: retail price/margin/weight; employees: price per kg + optional weight_kg (for Sales Per Kg). */
   retailFeedPricing: [],
@@ -1744,7 +1744,7 @@ function renderSalesKgTable() {
         <td title="1 once at least one bag is opened for this product on this date.">${bagOpenedCell}</td>
         <td title="Kg left after this sale: running pool across calendar days (bag opens add kg per bag; kg sold subtracts per row).">${rem}</td>
         <td title="Full bags represented by total kg sold this day for this product (bag size from catalog).">${bagsFromKg}</td>
-        <td>${row.kg_sold}</td>
+        <td title="Kg on this row for this day (after merges): ${Number(row.kg_sold ?? 0)}. Running total through this date for you and this product: ${Number(row.accumulated_kg_sold ?? row.kg_sold ?? 0)}.">${row.accumulated_kg_sold != null ? row.accumulated_kg_sold : row.kg_sold}</td>
         <td>${currency(row.price_per_kg)}</td>
         <td>${currency(saleLineTotalKg(row))}</td>
         <td>${viaCell}</td>

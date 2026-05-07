@@ -391,8 +391,8 @@
                     <th>Feed Type</th>
                     <th>Bag size</th>
                     <th>Bags opened</th>
-                    <th title="Remaining kg left after Sales Per Kg entries for that day and product.">Kg sold</th>
-                    <th title="Kg sold on lines recorded by staff (not the owner account).">Kg sold (employee)</th>
+                    <th title="Kg remaining from opened bags after Sales Per Kg entries for this day and product (same quantity as Total Kgs on staff Sales Per Kg for each line that day).">Bag (kg) remaining</th>
+                    <th title="For each employee line on this date, the running total of kg sold for that staff member for this product through this date; summed across employees (same logic as Accumulated kg sold on Sales Per Kg).">Accumulated kg sold (employee)</th>
                     <th title="Floor of total kg ÷ bag size — e.g. 50 kg → 1 when bag is 50 kg.">Bags sold (from kg)</th>
                   </tr>
                 </thead>
@@ -748,7 +748,7 @@
                 <strong>Total Kgs</strong> is the kg left from opened bags for that product that day (starts at the owner’s weight per bag when set under Retail
                 Feed Inventory, otherwise the catalog bag size, e.g. 50 kg, and goes down as you record sales). Each time you save,
                 <strong>Kg sold (this sale)</strong> is added onto the same row for that product/day (no duplicate rows). <strong>Bags sold</strong> counts
-                full bags represented by total kg sold (same product/day).
+                full bags represented by total kg sold that day for that product/day. The table column <strong>Accumulated kg sold</strong> is your running total of daily kg sold for that product across all dates.
               </p>
               <div class="actions">
                 <button type="submit" id="skSaveBtn">Save sale</button>
@@ -767,7 +767,7 @@
                     <th title="Shows 1 once any bag is opened for this product that day.">Bag opened</th>
                     <th title="Kg remaining from opened bags after this line (catalog bag size × bags opened − kg sold so far).">Total Kgs</th>
                     <th title="Full bags equivalent of total kg sold today for this product (from catalog bag size).">Bags sold</th>
-                    <th title="Total kg on this line (adds up when you record more sales for the same product/day).">Kg sold (total)</th>
+                    <th title="Running total of kg sold for this product by this staff member: sum of each day’s line total from the first sale through this date.">Accumulated kg sold</th>
                     <th>Price/kg</th>
                     <th title="Cumulative line total: total kg on this line × price per kg.">Total</th>
                     <th>Via</th>

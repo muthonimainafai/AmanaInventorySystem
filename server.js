@@ -1045,6 +1045,35 @@ async function sumBagOpenedTodayForProduct(brandKey, rawFeedType, dateCanonNorm,
 
 function enrichSalesKgRowsWithCumulative(rows, weightMap) {
   const wm = weightMap || new Map();
+
+  /** Per staff + product: running sum of each row's `kg_sold` (daily line total), ordered by calendar date then id. */
+  const idToAccumulatedKgSold = new Map();
+  const byCreatorProduct = new Map();
+  for (const r of rows) {
+    const bk = resolveBrandKey(r.brand);
+    const creator = String(r.created_by ?? "").trim();
+    const key = `${bk}|${normalizeFeedType(r.feed_type)}|${creator}`;
+    if (!byCreatorProduct.has(key)) byCreatorProduct.set(key, []);
+    byCreatorProduct.get(key).push(r);
+  }
+  for (const [, groupRows] of byCreatorProduct) {
+    const sorted = [...groupRows].sort((a, b) => {
+      const da = parseSaleDateDMY(String(a.date || "").trim());
+      const db = parseSaleDateDMY(String(b.date || "").trim());
+      if (da && db) {
+        const c = compareCalendarDates(da, db);
+        if (c !== 0) return c;
+      } else if (da && !db) return -1;
+      else if (!da && db) return 1;
+      return Number(a.id) - Number(b.id);
+    });
+    let accKg = 0;
+    for (const r of sorted) {
+      accKg += Number(r.kg_sold || 0);
+      idToAccumulatedKgSold.set(Number(r.id), accKg);
+    }
+  }
+
   const byProduct = new Map();
   for (const r of rows) {
     const bk = resolveBrandKey(r.brand);
@@ -1108,7 +1137,9 @@ function enrichSalesKgRowsWithCumulative(rows, weightMap) {
       bag_opened_display: 0,
       total_kgs_remaining: 0,
     };
-    return { ...r, ...extra };
+    const accumulatedKg =
+      idToAccumulatedKgSold.get(Number(r.id)) ?? Number(r.kg_sold || 0);
+    return { ...r, ...extra, accumulated_kg_sold: accumulatedKg };
   });
 }
 
@@ -3230,16 +3261,29 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
     const rows = await all(
       `SELECT sk.date AS date, sk.brand AS brand, sk.feed_type AS feed_type,
         SUM(sk.kg_sold) AS total_kg_sold,
-        SUM(CASE WHEN u.role = 'employee' THEN sk.kg_sold ELSE 0 END) AS employee_kg_sold,
         SUM(COALESCE(sk.bag_opened, 0)) AS bags_opened
        FROM sales_kg sk
-       LEFT JOIN users u ON u.username = sk.created_by
        GROUP BY sk.date, sk.brand, sk.feed_type
        ORDER BY sk.date DESC, sk.brand ASC, sk.feed_type ASC`
     );
     const weightMap = await getRetailWeightKgByKeyMap();
-    const detailRows = await all("SELECT id, date, brand, feed_type, kg_sold, bag_opened FROM sales_kg ORDER BY id DESC");
+    const detailRows = await all(
+      `SELECT sk.id AS id, sk.date AS date, sk.brand AS brand, sk.feed_type AS feed_type,
+        sk.kg_sold AS kg_sold, sk.bag_opened AS bag_opened, sk.created_by AS created_by,
+        COALESCE(u.role, '') AS user_role
+       FROM sales_kg sk
+       LEFT JOIN users u ON u.username = sk.created_by
+       ORDER BY sk.id DESC`
+    );
     const detailEnriched = enrichSalesKgRowsWithCumulative(detailRows, weightMap);
+    /** Per calendar day × product: sum of each employee row's accumulated kg sold (matches Sales Per Kg “Accumulated kg sold”). */
+    const employeeAccumSumByDayProduct = new Map();
+    for (const dRow of detailEnriched) {
+      if (String(dRow.user_role || "").trim().toLowerCase() !== "employee") continue;
+      const ek = keyForDayProduct(dRow.date, dRow.brand, dRow.feed_type);
+      const add = Number(dRow.accumulated_kg_sold) || 0;
+      employeeAccumSumByDayProduct.set(ek, (employeeAccumSumByDayProduct.get(ek) || 0) + add);
+    }
     const remainingByDayProduct = new Map();
     for (const dRow of detailEnriched) {
       const key = keyForDayProduct(dRow.date, dRow.brand, dRow.feed_type);
@@ -3266,7 +3310,7 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
         bag_size: bagSize,
         total_kg_sold: totalKg,
         remaining_kg: remaining,
-        employee_kg_sold: Number(r.employee_kg_sold) || 0,
+        employee_kg_sold: Number(employeeAccumSumByDayProduct.get(key)) || 0,
         // Display as a simple flag: once any bag is open for that day/product, show 1.
         bags_opened: hadOpenedBag ? 1 : 0,
         bags_sold_from_kg: bagsFromTotalKg(totalKg, bagSize),
