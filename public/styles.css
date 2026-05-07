@@ -304,6 +304,11 @@ h1 {
   box-shadow: 0 6px 14px rgba(139, 90, 60, 0.28);
 }
 
+#landingCard #openNahahBtn {
+  background: linear-gradient(135deg, #e83e8c, #ff6fb3);
+  box-shadow: 0 6px 14px rgba(232, 62, 140, 0.28);
+}
+
 #landingCard #openVehicleBtn {
   background: linear-gradient(135deg, #0d6efd, #0b5ed7);
   box-shadow: 0 6px 14px rgba(13, 110, 253, 0.22);
@@ -349,6 +354,27 @@ body.rose-theme .profit-highlight-above-table {
   border-color: #a67c52;
   background: linear-gradient(160deg, #f1e2d2 0%, #f8efe4 45%, #fff 100%);
   box-shadow: 0 2px 8px rgba(122, 75, 47, 0.16);
+}
+
+body.nahah-theme {
+  background: #fff0f7;
+  color: #4a2340;
+}
+
+body.nahah-theme .page-title,
+body.nahah-theme .chicken-inventory-main-title {
+  color: #c21874;
+}
+
+body.nahah-theme .nav-tab.active {
+  background: #c21874;
+  color: #fff;
+}
+
+body.nahah-theme .profit-highlight-above-table {
+  border-color: #e83e8c;
+  background: linear-gradient(160deg, #ffd9ec 0%, #fff0f7 45%, #fff 100%);
+  box-shadow: 0 2px 8px rgba(194, 24, 116, 0.16);
 }
 
 #landingCard button:hover {

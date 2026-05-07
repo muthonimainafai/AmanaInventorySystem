@@ -1,7 +1,7 @@
 const state = {
   appInstance: (() => {
     const saved = (localStorage.getItem("amanaAppInstance") || "amana").trim().toLowerCase();
-    return ["amana", "ufaray", "rose"].includes(saved) ? saved : "amana";
+    return ["amana", "ufaray", "rose", "nahah", "terry", "cess", "shop"].includes(saved) ? saved : "amana";
   })(),
   token: (localStorage.getItem("amanaToken") || "").trim(),
   user: JSON.parse(localStorage.getItem("amanaUser") || "null"),
@@ -123,6 +123,7 @@ function getChickenBreedsRows() {
 
 const loginCard = document.getElementById("loginCard");
 const landingCard = document.getElementById("landingCard");
+const nahahDashboardCard = document.getElementById("nahahDashboardCard");
 const appCard = document.getElementById("appCard");
 const vehicleLoginCard = document.getElementById("vehicleLoginCard");
 const vehicleAppCard = document.getElementById("vehicleAppCard");
@@ -223,35 +224,61 @@ let refreshTimer = null;
 let catalogInitialized = false;
 
 function persistAppInstance() {
-  const normalized = ["amana", "ufaray", "rose"].includes(state.appInstance) ? state.appInstance : "amana";
+  const normalized = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "shop"].includes(state.appInstance)
+    ? state.appInstance
+    : "amana";
   localStorage.setItem("amanaAppInstance", normalized);
 }
 
 function applyAppTheme() {
-  const tenant = ["amana", "ufaray", "rose"].includes(state.appInstance) ? state.appInstance : "amana";
+  const tenant = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "shop"].includes(state.appInstance)
+    ? state.appInstance
+    : "amana";
   const isUfaray = tenant === "ufaray";
   const isRose = tenant === "rose";
+  const isNahah = tenant === "nahah" || tenant === "terry" || tenant === "cess" || tenant === "shop";
   document.body.classList.toggle("ufaray-theme", isUfaray);
   document.body.classList.toggle("rose-theme", isRose);
+  document.body.classList.toggle("nahah-theme", isNahah);
   document.title = isUfaray
     ? "Ufaray Feeds - Desktop Inventory"
     : isRose
       ? "Rose Inventory - Desktop Inventory"
+      : isNahah
+        ? "Nahah Feeds Inventory System - Desktop Inventory"
       : "Amana Kuku Feeds - Desktop Inventory";
   const portalSiteTitle = document.getElementById("portalSiteTitle");
   if (portalSiteTitle) {
-    portalSiteTitle.textContent = isUfaray ? "UFARAY FEEDS" : isRose ? "ROSE INVENTORY" : "AMANA KUKU FEEDS";
+    portalSiteTitle.textContent = isUfaray
+      ? "UFARAY FEEDS"
+      : isRose
+        ? "ROSE INVENTORY"
+        : isNahah
+          ? "NAHAH FEEDS INVENTORY SYSTEM"
+          : "AMANA KUKU FEEDS";
   }
   const loginTitle = document.getElementById("loginCardTitle");
   if (loginTitle) {
-    loginTitle.textContent = isUfaray ? "Ufaray Feeds Login" : isRose ? "Rose Inventory Login" : "Amana Kuku Feeds Login";
+    loginTitle.textContent = tenant === "terry"
+      ? "Terry Inventory Login"
+      : tenant === "cess"
+        ? "Cess Inventory Login"
+        : tenant === "shop"
+          ? "Shop Inventory Login"
+        : isUfaray
+      ? "Ufaray Feeds Login"
+      : isRose
+        ? "Rose Inventory Login"
+        : "Amana Kuku Feeds Login";
   }
 }
 
 async function api(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
-    "X-App-Instance": ["amana", "ufaray", "rose"].includes(state.appInstance) ? state.appInstance : "amana",
+    "X-App-Instance": ["amana", "ufaray", "rose", "terry", "cess", "shop"].includes(state.appInstance)
+      ? state.appInstance
+      : "amana",
     ...(options.headers || {}),
   };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
@@ -976,6 +1003,7 @@ function employeeBagSaleEditAllowed(row) {
 function showLoggedOut() {
   applyAppTheme();
   landingCard?.classList.remove("hidden");
+  nahahDashboardCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   vehicleLoginCard?.classList.add("hidden");
   appCard.classList.add("hidden");
@@ -985,7 +1013,18 @@ function showLoggedOut() {
 function showLoginCard() {
   applyAppTheme();
   landingCard?.classList.add("hidden");
+  nahahDashboardCard?.classList.add("hidden");
   loginCard.classList.remove("hidden");
+  vehicleLoginCard?.classList.add("hidden");
+  appCard.classList.add("hidden");
+  vehicleAppCard?.classList.add("hidden");
+}
+
+function showNahahDashboardCard() {
+  applyAppTheme();
+  landingCard?.classList.add("hidden");
+  nahahDashboardCard?.classList.remove("hidden");
+  loginCard.classList.add("hidden");
   vehicleLoginCard?.classList.add("hidden");
   appCard.classList.add("hidden");
   vehicleAppCard?.classList.add("hidden");
@@ -993,6 +1032,7 @@ function showLoginCard() {
 
 function showVehicleLoginCard() {
   landingCard?.classList.add("hidden");
+  nahahDashboardCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   vehicleLoginCard?.classList.remove("hidden");
   appCard.classList.add("hidden");
@@ -1002,6 +1042,7 @@ function showVehicleLoginCard() {
 function showLoggedIn() {
   applyAppTheme();
   landingCard?.classList.add("hidden");
+  nahahDashboardCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   appCard.classList.remove("hidden");
   vehicleLoginCard?.classList.add("hidden");
@@ -1089,6 +1130,7 @@ function showLoggedIn() {
 
 function showVehicleLoggedIn() {
   landingCard?.classList.add("hidden");
+  nahahDashboardCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
   vehicleLoginCard?.classList.add("hidden");
   appCard.classList.add("hidden");
@@ -2813,6 +2855,30 @@ document.getElementById("openRoseBtn")?.addEventListener("click", () => {
   state.appInstance = "rose";
   persistAppInstance();
   showLoginCard();
+});
+
+document.getElementById("openNahahBtn")?.addEventListener("click", () => {
+  state.appInstance = "nahah";
+  persistAppInstance();
+  showNahahDashboardCard();
+});
+document.getElementById("openTerryBtn")?.addEventListener("click", () => {
+  state.appInstance = "terry";
+  persistAppInstance();
+  showLoginCard();
+});
+document.getElementById("openCessBtn")?.addEventListener("click", () => {
+  state.appInstance = "cess";
+  persistAppInstance();
+  showLoginCard();
+});
+document.getElementById("openShopBtn")?.addEventListener("click", () => {
+  state.appInstance = "shop";
+  persistAppInstance();
+  showLoginCard();
+});
+document.getElementById("backToDashboardFromNahahBtn")?.addEventListener("click", () => {
+  showLoggedOut();
 });
 
 document.getElementById("openVehicleBtn")?.addEventListener("click", () => {

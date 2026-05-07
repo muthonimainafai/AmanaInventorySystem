@@ -25,8 +25,12 @@ function loadEnvFile() {
     if (!key) continue;
     const fromFile =
       key.startsWith("AMANA_") ||
+      key.startsWith("NAHAH_") ||
+      key.startsWith("TERRY_") ||
+      key.startsWith("CESS_") ||
       key.startsWith("ROSE_") ||
       key.startsWith("UFARAY_") ||
+      key.startsWith("SHOP_") ||
       key.startsWith("VEHICLE_") ||
       key === "JWT_SECRET";
     if (fromFile || process.env[key] === undefined) process.env[key] = val;
@@ -51,6 +55,106 @@ const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "V
 
 function tenantLoginEnv(tenant) {
   const t = normalizeAppTenant(tenant);
+  if (t === "terry") {
+    const terryOwnerUsername = String(process.env.TERRY_OWNER_USERNAME || "").trim();
+    const terryOwnerPassword = String(process.env.TERRY_OWNER_PASSWORD || "");
+    const terryOwnerFullName = String(process.env.TERRY_OWNER_FULL_NAME || "").trim();
+    const terryEmployeeUsername = String(process.env.TERRY_EMPLOYEE_USERNAME || "").trim();
+    const terryEmployeePassword = String(process.env.TERRY_EMPLOYEE_PASSWORD || "");
+    const terryEmployeeFullName = String(process.env.TERRY_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "terry",
+      owner: {
+        username: terryOwnerUsername || AMANA_OWNER_USERNAME,
+        password: terryOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: terryOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: terryEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: terryEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: terryEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        terryOwnerUsername || terryEmployeeUsername || terryOwnerPassword || terryEmployeePassword
+          ? "TERRY_*"
+          : "AMANA_* (fallback)",
+    };
+  }
+  if (t === "cess") {
+    const cessOwnerUsername = String(process.env.CESS_OWNER_USERNAME || "").trim();
+    const cessOwnerPassword = String(process.env.CESS_OWNER_PASSWORD || "");
+    const cessOwnerFullName = String(process.env.CESS_OWNER_FULL_NAME || "").trim();
+    const cessEmployeeUsername = String(process.env.CESS_EMPLOYEE_USERNAME || "").trim();
+    const cessEmployeePassword = String(process.env.CESS_EMPLOYEE_PASSWORD || "");
+    const cessEmployeeFullName = String(process.env.CESS_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "cess",
+      owner: {
+        username: cessOwnerUsername || AMANA_OWNER_USERNAME,
+        password: cessOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: cessOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: cessEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: cessEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: cessEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        cessOwnerUsername || cessEmployeeUsername || cessOwnerPassword || cessEmployeePassword
+          ? "CESS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
+  if (t === "shop") {
+    const shopOwnerUsername = String(process.env.SHOP_OWNER_USERNAME || "").trim();
+    const shopOwnerPassword = String(process.env.SHOP_OWNER_PASSWORD || "");
+    const shopOwnerFullName = String(process.env.SHOP_OWNER_FULL_NAME || "").trim();
+    const shopEmployeeUsername = String(process.env.SHOP_EMPLOYEE_USERNAME || "").trim();
+    const shopEmployeePassword = String(process.env.SHOP_EMPLOYEE_PASSWORD || "");
+    const shopEmployeeFullName = String(process.env.SHOP_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "shop",
+      owner: {
+        username: shopOwnerUsername || AMANA_OWNER_USERNAME,
+        password: shopOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: shopOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: shopEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: shopEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: shopEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        shopOwnerUsername || shopEmployeeUsername || shopOwnerPassword || shopEmployeePassword
+          ? "SHOP_*"
+          : "AMANA_* (fallback)",
+    };
+  }
+  if (t === "nahah") {
+    const nahahOwnerUsername = String(process.env.NAHAH_OWNER_USERNAME || "").trim();
+    const nahahOwnerPassword = String(process.env.NAHAH_OWNER_PASSWORD || "");
+    const nahahOwnerFullName = String(process.env.NAHAH_OWNER_FULL_NAME || "").trim();
+    const nahahEmployeeUsername = String(process.env.NAHAH_EMPLOYEE_USERNAME || "").trim();
+    const nahahEmployeePassword = String(process.env.NAHAH_EMPLOYEE_PASSWORD || "");
+    const nahahEmployeeFullName = String(process.env.NAHAH_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "nahah",
+      owner: {
+        username: nahahOwnerUsername || AMANA_OWNER_USERNAME,
+        password: nahahOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: nahahOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: nahahEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: nahahEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: nahahEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        nahahOwnerUsername || nahahEmployeeUsername || nahahOwnerPassword || nahahEmployeePassword
+          ? "NAHAH_*"
+          : "AMANA_* (fallback)",
+    };
+  }
   if (t === "rose") {
     const roseOwnerUsername = String(process.env.ROSE_OWNER_USERNAME || "").trim();
     const roseOwnerPassword = String(process.env.ROSE_OWNER_PASSWORD || "");
@@ -121,6 +225,10 @@ function normalizeAppTenant(value) {
   const t = String(value || "amana").trim().toLowerCase();
   if (t === "ufaray") return "ufaray";
   if (t === "rose") return "rose";
+  if (t === "terry") return "terry";
+  if (t === "cess") return "cess";
+  if (t === "shop") return "shop";
+  if (t === "nahah") return "nahah";
   return "amana";
 }
 
@@ -130,6 +238,10 @@ function activeTenant() {
 
 function dbFileNameForTenant(tenant) {
   const t = normalizeAppTenant(tenant);
+  if (t === "terry") return "inventory-terry.db";
+  if (t === "cess") return "inventory-cess.db";
+  if (t === "shop") return "inventory-shop.db";
+  if (t === "nahah") return "inventory-nahah.db";
   if (t === "rose") return "inventory-rose.db";
   return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
 }
@@ -4562,6 +4674,10 @@ let httpServer = null;
 async function startServer(port = PORT) {
   if (httpServer) return httpServer;
   await ensureTenantInitialized("amana");
+  await ensureTenantInitialized("terry");
+  await ensureTenantInitialized("cess");
+  await ensureTenantInitialized("shop");
+  await ensureTenantInitialized("nahah");
   await ensureTenantInitialized("rose");
   await ensureTenantInitialized("ufaray");
 

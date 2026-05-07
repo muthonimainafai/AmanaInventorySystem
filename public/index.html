@@ -26,6 +26,10 @@
             <span class="portal-option-title">Amana Kuku Feeds</span>
             <span class="portal-option-sub">Existing live system and current records</span>
           </button>
+          <button type="button" id="openNahahBtn" class="portal-option">
+            <span class="portal-option-title">Nahah Feeds Inventory System</span>
+            <span class="portal-option-sub">Nahah inventory workspace with separate data and login</span>
+          </button>
           <button type="button" id="openRoseBtn" class="portal-option">
             <span class="portal-option-title">Rose Inventory</span>
             <span class="portal-option-sub">Rose inventory workspace with separate data and login</span>
@@ -66,9 +70,31 @@
         </form>
         <p class="hint">
           Use the <strong>owner</strong> and <strong>staff</strong> accounts defined in your server
-          <code>.env</code> file (<code>AMANA_*</code>, <code>ROSE_*</code>, <code>UFARAY_*</code>). See
+          <code>.env</code> file (<code>AMANA_*</code>, <code>NAHAH_*</code>, <code>ROSE_*</code>, <code>UFARAY_*</code>). See
           <code>env.example</code> in the project folder.
         </p>
+      </section>
+
+      <section id="nahahDashboardCard" class="card auth-card hidden">
+        <h2>Nahah Feeds Inventory System</h2>
+        <p class="hint">Choose the inventory workspace to continue.</p>
+        <div class="portal-grid">
+          <button type="button" id="openTerryBtn" class="portal-option">
+            <span class="portal-option-title">Terry</span>
+            <span class="portal-option-sub">Open Terry login</span>
+          </button>
+          <button type="button" id="openCessBtn" class="portal-option">
+            <span class="portal-option-title">Cess</span>
+            <span class="portal-option-sub">Open Cess login</span>
+          </button>
+          <button type="button" id="openShopBtn" class="portal-option">
+            <span class="portal-option-title">Shop</span>
+            <span class="portal-option-sub">Open Shop login</span>
+          </button>
+        </div>
+        <div class="actions">
+          <button type="button" class="secondary" id="backToDashboardFromNahahBtn">Back to dashboard</button>
+        </div>
       </section>
 
       <section id="vehicleLoginCard" class="card auth-card hidden vehicle-theme-card">
