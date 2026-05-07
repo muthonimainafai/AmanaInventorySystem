@@ -1041,7 +1041,11 @@
                 </label>
                 <label class="owner-only-highlight hidden">
                   Cylinder size (kg)
-                  <input type="number" id="gasSizeKg" min="0.001" step="0.001" />
+                  <select id="gasSizeKg">
+                    <option value="">Select size</option>
+                    <option value="6">6 kg</option>
+                    <option value="12">12 kg</option>
+                  </select>
                 </label>
                 <label class="employee-only-action hidden">
                   Cylinder size (kg)
@@ -1107,7 +1111,6 @@
                     <th>Date</th>
                     <th>Size (kg)</th>
                     <th>Quantity</th>
-                    <th>Total Cost</th>
                     <th class="owner-only-highlight hidden">Buying Price</th>
                     <th class="owner-only-highlight hidden">Selling Price</th>
                     <th class="owner-only-highlight hidden">Current Stock</th>

@@ -2027,7 +2027,7 @@ function renderGasTable() {
   if (!gasBody) return;
   const isOwner = state.user.role === "owner";
   const rows = isOwner ? state.gasInventory : state.gasSales;
-  const colSpan = isOwner ? 14 : 8;
+  const colSpan = isOwner ? 13 : 7;
   if (!rows.length) {
     gasBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
     return;
@@ -2038,7 +2038,6 @@ function renderGasTable() {
         <td>${formatDateDMY(row.date)}</td>
         <td>${row.size_kg}</td>
         <td>${row.quantity_sold}</td>
-        <td>${currency(row.total_amount)}</td>
         <td><span class="status-ok">SOLD</span></td>
         <td>${String(row.through_party || "").trim() ? `By ${String(row.through_party || "").trim()}` : "—"}</td>
         <td>${row.created_by}</td>
@@ -2056,7 +2055,6 @@ function renderGasTable() {
         <td>${formatDateDMY(row.date)}</td>
         <td>${row.size_kg}</td>
         <td>${row.quantity_in_stock}</td>
-        <td>${currency((Number(row.accumulated_stock ?? row.quantity_in_stock) || 0) * (Number(row.buying_price) || 0))}</td>
         <td>${currency(row.buying_price)}</td>
         <td>${currency(row.selling_price)}</td>
         <td>${row.quantity_in_stock}</td>
@@ -2102,7 +2100,7 @@ function resetGasForm() {
   gasForm.reset();
   state.editGasId = null;
   if (gasSaleType) gasSaleType.value = "";
-  if (gasSizeKg) gasSizeKg.readOnly = false;
+  if (gasSizeKg) gasSizeKg.disabled = false;
   if (gasDateDisplay) gasDateDisplay.value = "";
   if (document.getElementById("gasSaveBtn")) {
     document.getElementById("gasSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
@@ -3219,7 +3217,7 @@ gasForm?.addEventListener("submit", async (event) => {
     return;
   }
   const sizeKg = Number(gasSizeKg?.value || 0);
-  if (!Number.isFinite(sizeKg) || sizeKg <= 0) return alert("Cylinder size (kg) must be a positive number.");
+  if (!Number.isFinite(sizeKg) || sizeKg <= 0) return alert("Select cylinder size: 6 kg or 12 kg.");
   const payload = {
     date: dateValue,
     size_kg: sizeKg,
@@ -4132,8 +4130,15 @@ gasBody?.addEventListener("click", async (event) => {
     gasDate.value = toIsoDate(row.date);
     gasDateDisplay.value = formatDateDMY(row.date);
     if (gasSizeKg) {
-      gasSizeKg.value = row.size_kg;
-      gasSizeKg.readOnly = true;
+      const sk = String(row.size_kg);
+      if (![...gasSizeKg.options].some((o) => o.value === sk)) {
+        const opt = document.createElement("option");
+        opt.value = sk;
+        opt.textContent = `${row.size_kg} kg (legacy size)`;
+        gasSizeKg.appendChild(opt);
+      }
+      gasSizeKg.value = sk;
+      gasSizeKg.disabled = true;
     }
     document.getElementById("gasQuantity").value = row.quantity_in_stock;
     document.getElementById("gasBuyingPrice").value = row.buying_price;
