@@ -434,6 +434,22 @@ function calculatorRowsFromCatalog() {
   return rows;
 }
 
+/** Latest owner buying price from Feed Inventory for this exact line (records are id DESC). */
+function findInventoryBuyingPriceForCalculator(brand, feedType, bagSize) {
+  const bs = Number(bagSize);
+  if (!Number.isFinite(bs) || bs <= 0) return null;
+  const bKey = normalizeBrandName(brand);
+  const fKey = normalizeFeedTypeForMatch(feedType);
+  for (const row of state.records || []) {
+    if (Number(row.bag_size) !== bs) continue;
+    if (normalizeBrandName(row.brand) !== bKey) continue;
+    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
+    const bp = Number(row.buying_price);
+    return Number.isFinite(bp) ? bp : null;
+  }
+  return null;
+}
+
 function calculatorRowKey(brand, feedType, bagSize) {
   return `${resolveBrandKey(brand)}|${String(feedType || "").trim()}|${Number(bagSize) || 0}`;
 }
@@ -2170,15 +2186,26 @@ function renderCalculatorTable() {
   }
   calcBody.innerHTML = rows
     .map(
-      (row) => `
+      (row) => {
+        const rowKey = calculatorRowKey(row.brand, row.feedType, row.bagSize);
+        const remembered = state.calculatorValues[rowKey];
+        const defaultBuying = findInventoryBuyingPriceForCalculator(row.brand, row.feedType, row.bagSize);
+        const buyingValue =
+          remembered?.buying != null && String(remembered.buying).trim() !== ""
+            ? remembered.buying
+            : defaultBuying != null
+              ? String(defaultBuying)
+              : "";
+        return `
       <tr data-calc-brand="${escapeHtmlCell(row.brand)}" data-calc-feed-type="${escapeHtmlCell(row.feedType)}" data-calc-bag-size="${row.bagSize}">
         <td>${displayBrand(row.brand)}</td>
         <td>${displayFeedType(row.feedType)}</td>
         <td>${row.bagSize}</td>
-        <td><input type="text" data-kind="calc-bags" inputmode="numeric" placeholder="Bags" value="${escapeHtmlCell(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.bags || "")}" /></td>
-        <td><input type="text" data-kind="calc-buying" inputmode="decimal" placeholder="Buying price" value="${escapeHtmlCell(state.calculatorValues[calculatorRowKey(row.brand, row.feedType, row.bagSize)]?.buying || "")}" /></td>
+        <td><input type="text" data-kind="calc-bags" inputmode="numeric" placeholder="Bags" value="${escapeHtmlCell(remembered?.bags || "")}" /></td>
+        <td><input type="text" data-kind="calc-buying" inputmode="decimal" placeholder="Buying price" value="${escapeHtmlCell(buyingValue)}" /></td>
         <td class="js-calc-row-total">${currency(0)}</td>
-      </tr>`
+      </tr>`;
+      }
     )
     .join("");
   updateCalculatorGrandTotalDisplay();
