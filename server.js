@@ -3009,7 +3009,6 @@ app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, 
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  if (req.user.role === "employee" && !employeeSaleDateAllowed(req, res, p.date)) return;
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
   const moneyOut = Number(p.money_out);

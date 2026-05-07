@@ -70,7 +70,7 @@ const PAGE_HEADINGS = {
 };
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
-const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator"]);
+const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance"]);
 const OWNER_ALLOWED_PAGES = new Set([
   "inventory",
   "retail-inventory",
@@ -541,11 +541,17 @@ function updateBalanceBanner() {
   const today = state.shopToday || clientShopTodayDMY();
   const days = inclusiveBusinessDaysFromOpen(BUSINESS_OPENED_DMY, today);
   const operational = days * DAILY_OPERATIONAL_COST;
-  const remaining = combined - operational;
+  const expRows = state.expenditureEntries || [];
+  const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const remaining = combined - operational - totalExpenditure;
   document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
     el.textContent = currency(remaining);
   });
-  const meta = `${currency(combined)} - (${currency(DAILY_OPERATIONAL_COST)} × ${days} day${days === 1 ? "" : "s"}) = ${currency(remaining)} · Opened ${BUSINESS_OPENED_DMY}`;
+  const meta = `${currency(combined)} - (${currency(
+    DAILY_OPERATIONAL_COST
+  )} × ${days} day${days === 1 ? "" : "s"}) - ${currency(totalExpenditure)} (expenditure) = ${currency(
+    remaining
+  )} · Opened ${BUSINESS_OPENED_DMY}`;
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
     el.textContent = meta;
   });
