@@ -1117,7 +1117,7 @@ function normalizeThroughParty(val) {
 
 function normalizePassThroughStatus(val) {
   const s = String(val || "").trim().toLowerCase();
-  return s === "solved" ? "solved" : "pending";
+  return s === "cleared" || s === "solved" ? "cleared" : "pending";
 }
 
 function isThroughPartyBagSaleRow(row) {

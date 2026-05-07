@@ -1127,7 +1127,11 @@ function showLoggedIn() {
   appCard.classList.remove("hidden");
   vehicleLoginCard?.classList.add("hidden");
   vehicleAppCard?.classList.add("hidden");
-  userInfo.textContent = `${state.user.fullName} (${state.user.role})`;
+  if (state.appInstance === "shop" && state.user.role === "owner") {
+    userInfo.textContent = "CessTerry(owner)";
+  } else {
+    userInfo.textContent = `${state.user.fullName} (${state.user.role})`;
+  }
   const isOwner = state.user.role === "owner";
   document.querySelectorAll(".owner-only-tab").forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
@@ -1661,7 +1665,7 @@ function renderOwnerPassThroughBagSales() {
     const viaRaw = normalizeSaleVia(row.through_party);
     const viaCell = viaRaw ? `By ${viaRaw}` : "—";
     const stRaw = String(row.pass_through_status || "pending").toLowerCase();
-    const status = stRaw === "solved" ? "solved" : "pending";
+    const status = stRaw === "cleared" || stRaw === "solved" ? "cleared" : "pending";
     return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
@@ -1675,20 +1679,14 @@ function renderOwnerPassThroughBagSales() {
         <td>
           <select data-kind="ufaray-status" data-id="${row.id}">
             <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
-            <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+            <option value="cleared" ${status === "cleared" ? "selected" : ""}>Cleared</option>
           </select>
         </td>
         <td>${row.created_by}</td>
         <td>
-          <select data-kind="ufaray-via" data-id="${row.id}">
-            <option value="Terry" ${viaRaw === "Terry" ? "selected" : ""}>By Terry</option>
-            <option value="Cess" ${viaRaw === "Cess" ? "selected" : ""}>By Cess</option>
-            <option value="Rose" ${viaRaw === "Rose" ? "selected" : ""}>By Rose</option>
-            <option value="Ufaray" ${viaRaw === "Ufaray" ? "selected" : ""}>By Ufaray</option>
-            <option value="Shop" ${viaRaw === "Shop" ? "selected" : ""}>Shop</option>
-          </select>
-          <button type="button" data-kind="ufaray-via-save" data-id="${row.id}">Save via</button>
-          <button type="button" data-kind="ufaray-status-save" data-id="${row.id}">Save status</button>
+          <button type="button" data-kind="ufaray-edit" data-id="${row.id}">Edit</button>
+          <button type="button" data-kind="ufaray-delete" data-id="${row.id}">Delete</button>
+          <button type="button" data-kind="ufaray-status-save" data-id="${row.id}">Save</button>
         </td>
       </tr>`;
   });
@@ -1709,7 +1707,11 @@ function renderOwnerUfarayChickenSales() {
     const margin = Number(row.margin_snap) || 0;
     const buyingPerChick = Math.max(0, unit - margin);
     const totalAmount = qty * buyingPerChick;
-    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const status =
+      String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
+      String(row.pass_through_status || "pending").toLowerCase() === "solved"
+        ? "cleared"
+        : "pending";
     return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
@@ -1719,7 +1721,7 @@ function renderOwnerUfarayChickenSales() {
         <td>
           <select data-kind="ufaray-ch-status" data-id="${row.id}">
             <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
-            <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+            <option value="cleared" ${status === "cleared" ? "selected" : ""}>Cleared</option>
           </select>
         </td>
         <td>${row.created_by}</td>
@@ -1746,7 +1748,11 @@ function renderOwnerUfarayNewPageSales() {
 
   const fdRows = (state.feedersDrinkersSales || []).filter((r) => String(r.through_party || "").trim() !== "");
   render("ufaray-fd-sales-body", fdRows, (row) => {
-    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const status =
+      String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
+      String(row.pass_through_status || "pending").toLowerCase() === "solved"
+        ? "cleared"
+        : "pending";
     const via = String(row.through_party || "").trim();
     return `<tr>
       <td>${formatDateDMY(row.date)}</td>
@@ -1758,7 +1764,7 @@ function renderOwnerUfarayNewPageSales() {
       <td>
         <select data-kind="ufaray-fd-status" data-id="${row.id}">
           <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
-          <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+          <option value="cleared" ${status === "cleared" ? "selected" : ""}>Cleared</option>
         </select>
       </td>
       <td>${row.created_by}</td>
@@ -1772,7 +1778,11 @@ function renderOwnerUfarayNewPageSales() {
 
   const medRows = (state.medicamentsSales || []).filter((r) => String(r.through_party || "").trim() !== "");
   render("ufaray-med-sales-body", medRows, (row) => {
-    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const status =
+      String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
+      String(row.pass_through_status || "pending").toLowerCase() === "solved"
+        ? "cleared"
+        : "pending";
     const via = String(row.through_party || "").trim();
     return `<tr>
       <td>${formatDateDMY(row.date)}</td>
@@ -1784,7 +1794,7 @@ function renderOwnerUfarayNewPageSales() {
       <td>
         <select data-kind="ufaray-med-status" data-id="${row.id}">
           <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
-          <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+          <option value="cleared" ${status === "cleared" ? "selected" : ""}>Cleared</option>
         </select>
       </td>
       <td>${row.created_by}</td>
@@ -1798,7 +1808,11 @@ function renderOwnerUfarayNewPageSales() {
 
   const gasRows = (state.gasSales || []).filter((r) => String(r.through_party || "").trim() !== "");
   render("ufaray-gas-sales-body", gasRows, (row) => {
-    const status = String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending";
+    const status =
+      String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
+      String(row.pass_through_status || "pending").toLowerCase() === "solved"
+        ? "cleared"
+        : "pending";
     const via = String(row.through_party || "").trim();
     return `<tr>
       <td>${formatDateDMY(row.date)}</td>
@@ -1810,7 +1824,7 @@ function renderOwnerUfarayNewPageSales() {
       <td>
         <select data-kind="ufaray-gas-status" data-id="${row.id}">
           <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
-          <option value="solved" ${status === "solved" ? "selected" : ""}>Solved</option>
+          <option value="cleared" ${status === "cleared" ? "selected" : ""}>Cleared</option>
         </select>
       </td>
       <td>${row.created_by}</td>
@@ -3865,19 +3879,37 @@ salesBagsBody.addEventListener("click", async (event) => {
 document.getElementById("ufaray-bag-sales-body")?.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
-  if (target.dataset.kind === "ufaray-via-save") {
+  if (target.dataset.kind === "ufaray-edit") {
     const id = Number(target.dataset.id);
     if (!Number.isFinite(id) || id < 1) return;
-    const tr = target.closest("tr");
-    if (!(tr instanceof HTMLTableRowElement)) return;
-    const viaSel = tr.querySelector("select[data-kind='ufaray-via']");
-    if (!(viaSel instanceof HTMLSelectElement)) return;
+    const row = state.salesBags.find((r) => Number(r.id) === id);
+    if (!row) return;
+    state.editSalesBagId = row.id;
+    sbDate.value = toIsoDate(row.date);
+    sbDateDisplay.value = formatDateDMY(row.date);
+    sbBrand.value = row.brand;
+    populateSbFeedTypes(row.brand);
+    sbFeedType.value = row.feed_type;
+    sbBagSize.value = row.bag_size;
+    document.getElementById("sbBagsSold").value = row.bags_sold;
+    const st = document.getElementById("sbSaleType");
+    const tp = normalizeSaleVia(row.through_party);
+    if (st) {
+      fillBagSaleViaSelect(st, tp || (state.appInstance === "shop" ? "Shop" : ""));
+    }
+    applyEmployeeFeedSalePricingUi();
+    document.getElementById("sbPricePerBag").value = row.price_per_bag;
+    document.getElementById("sbSaveBtn").textContent = "Update sale";
+    showPage("sales-bags");
+    return;
+  }
+  if (target.dataset.kind === "ufaray-delete") {
+    const id = Number(target.dataset.id);
+    if (!Number.isFinite(id) || id < 1) return;
+    if (!window.confirm("Delete this sale?")) return;
     target.setAttribute("disabled", "disabled");
     try {
-      await api(`/api/sales/bags/${id}/through-party`, {
-        method: "PUT",
-        body: JSON.stringify({ through_party: normalizeSaleVia(viaSel.value) }),
-      });
+      await api(`/api/sales/bags/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
@@ -3895,7 +3927,7 @@ document.getElementById("ufaray-bag-sales-body")?.addEventListener("click", asyn
   if (!(tr instanceof HTMLTableRowElement)) return;
   const sel = tr.querySelector("select[data-kind='ufaray-status']");
   if (!(sel instanceof HTMLSelectElement)) return;
-  const status = sel.value === "solved" ? "solved" : "pending";
+  const status = sel.value === "cleared" ? "cleared" : "pending";
   target.setAttribute("disabled", "disabled");
   try {
     await api(`/api/sales/bags/${id}/pass-through-status`, {
@@ -3921,7 +3953,7 @@ function wireOwnerUfarayExtraTable(tableId, statusKind, statusSaveKind, saleKind
       if (!(tr instanceof HTMLTableRowElement)) return;
       const sel = tr.querySelector(`select[data-kind='${statusKind}']`);
       if (!(sel instanceof HTMLSelectElement)) return;
-      const status = sel.value === "solved" ? "solved" : "pending";
+      const status = sel.value === "cleared" ? "cleared" : "pending";
       target.setAttribute("disabled", "disabled");
       try {
         await api(`${statusEndpointBase}/${id}/pass-through-status`, {
@@ -4021,7 +4053,7 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
     if (!(tr instanceof HTMLTableRowElement)) return;
     const sel = tr.querySelector("select[data-kind='ufaray-ch-status']");
     if (!(sel instanceof HTMLSelectElement)) return;
-    const status = sel.value === "solved" ? "solved" : "pending";
+    const status = sel.value === "cleared" ? "cleared" : "pending";
     target.setAttribute("disabled", "disabled");
     try {
       await api(`/api/chicken-sales/${id}/pass-through-status`, {
@@ -4071,7 +4103,11 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
       money_paid: Number(row.money_paid) || 0,
       payment_status:
         String(row.payment_status || "").toLowerCase() === "delivered" ? "delivered" : "pending",
-      pass_through_status: String(row.pass_through_status || "pending").toLowerCase() === "solved" ? "solved" : "pending",
+      pass_through_status:
+        String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
+        String(row.pass_through_status || "pending").toLowerCase() === "solved"
+          ? "cleared"
+          : "pending",
     };
     try {
       await api(`/api/chicken-sales/${id}`, { method: "PUT", body: JSON.stringify(payload) });
