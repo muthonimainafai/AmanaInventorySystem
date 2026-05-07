@@ -83,6 +83,10 @@ function isTerryCessOrShopTenant() {
   return state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "shop";
 }
 
+function isTerryOrCessTenant() {
+  return state.appInstance === "terry" || state.appInstance === "cess";
+}
+
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
 const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance"]);
 const OWNER_ALLOWED_PAGES = new Set([
@@ -280,9 +284,15 @@ function applyAppTheme() {
         : "Amana Kuku Feeds Login";
   }
   const roseTab = document.getElementById("roseInventoryTabLabel");
-  if (roseTab) roseTab.textContent = state.appInstance === "rose" ? "Rose Inventory" : "Rose Inventory";
+  if (roseTab) {
+    roseTab.textContent =
+      state.appInstance === "rose" ? "Rose Inventory" : state.appInstance === "terry" || state.appInstance === "cess" ? "Records" : "Rose Inventory";
+  }
   const rosePageTitle = document.getElementById("roseInventoryPageTitle");
-  if (rosePageTitle) rosePageTitle.textContent = state.appInstance === "rose" ? "Rose Inventory" : "Rose Inventory";
+  if (rosePageTitle) {
+    rosePageTitle.textContent =
+      state.appInstance === "rose" ? "Rose Inventory" : state.appInstance === "terry" || state.appInstance === "cess" ? "Records" : "Rose Inventory";
+  }
 }
 
 async function api(path, options = {}) {
@@ -1074,8 +1084,10 @@ function showLoggedIn() {
     const page = btn.dataset.page;
     const recordsTenant = isRecordsTenant();
     const terryCessShopTenant = isTerryCessOrShopTenant();
-    const shouldShow = terryCessShopTenant
-      ? page === "inventory" || page === "rose-inventory"
+    const shouldShow = isTerryOrCessTenant()
+      ? page === "rose-inventory"
+      : terryCessShopTenant
+      ? page === "inventory"
       : recordsTenant
       ? page === "rose-inventory"
       : page === "rose-inventory"
@@ -2548,7 +2560,10 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
-  if (isTerryCessOrShopTenant() && page !== "inventory" && page !== "rose-inventory") {
+  if (isTerryOrCessTenant() && page !== "rose-inventory") {
+    return showPage("rose-inventory");
+  }
+  if (state.appInstance === "shop" && page !== "inventory") {
     return showPage("inventory");
   }
   if (page === "calculator" && state.user?.role !== "owner") {
@@ -2567,6 +2582,9 @@ function showPage(page) {
   const pageEl = document.getElementById(`page-${page}`);
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
+  if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess")) {
+    pageHeading.textContent = "Records";
+  }
   if (page === "chicken-inventory" && state.user?.role === "employee") {
     pageHeading.textContent = "Chicken Sales";
   }
@@ -2941,8 +2959,10 @@ loginForm.addEventListener("submit", async (event) => {
     persistAuth();
     showLoggedIn();
     showPage(
-      isTerryCessOrShopTenant()
-        ? "inventory"
+      isTerryOrCessTenant()
+        ? "rose-inventory"
+        : state.appInstance === "shop"
+          ? "inventory"
         : isRecordsTenant()
           ? "rose-inventory"
           : state.user.role === "owner"
@@ -3168,8 +3188,10 @@ async function boot() {
   try {
     showLoggedIn();
     showPage(
-      isTerryCessOrShopTenant()
-        ? "inventory"
+      isTerryOrCessTenant()
+        ? "rose-inventory"
+        : state.appInstance === "shop"
+          ? "inventory"
         : isRecordsTenant()
           ? "rose-inventory"
           : state.user.role === "owner"
