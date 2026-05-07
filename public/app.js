@@ -92,6 +92,8 @@ const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calcula
 const OWNER_ALLOWED_PAGES = new Set([
   "inventory",
   "retail-inventory",
+  "sales-bags",
+  "sales-kg",
   "chicken-inventory",
   "feeders-drinkers",
   "medicaments",
