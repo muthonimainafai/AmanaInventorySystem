@@ -545,7 +545,9 @@ function updateBalanceBanner() {
   const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.total) || 0), 0);
   const remaining = combined - operational - totalExpenditure;
   document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
-    el.textContent = currency(remaining);
+    const formatted = currency(Math.abs(remaining));
+    const isNegative = remaining < 0;
+    el.textContent = isNegative ? `- ${formatted}` : formatted;
   });
   const meta = `${currency(combined)} - (${currency(
     DAILY_OPERATIONAL_COST
