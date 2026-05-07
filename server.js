@@ -3122,22 +3122,34 @@ app.get("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req
   res.json(rows);
 });
 
+function parseRoseNonNegativeField(raw, label) {
+  if (raw == null || String(raw).trim() === "") return 0;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`${label} must be zero or greater.`);
+  }
+  return n;
+}
+
 app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
-  if (!description) return res.status(400).json({ error: "Description is required." });
-  const quantity = Number(p.quantity);
-  const unitPrice = Number(p.unit_price);
-  const moneyIn = Number(p.money_in);
-  const moneyOut = Number(p.money_out);
-  const mortality = Number(p.mortality);
-  if (!Number.isFinite(quantity) || quantity < 0) return res.status(400).json({ error: "Quantity must be zero or greater." });
-  if (!Number.isFinite(unitPrice) || unitPrice < 0) return res.status(400).json({ error: "Unit price must be zero or greater." });
-  if (!Number.isFinite(moneyIn) || moneyIn < 0) return res.status(400).json({ error: "Money in must be zero or greater." });
-  if (!Number.isFinite(moneyOut) || moneyOut < 0) return res.status(400).json({ error: "Money out must be zero or greater." });
-  if (!Number.isFinite(mortality) || mortality < 0) return res.status(400).json({ error: "Mortality must be zero or greater." });
+  let quantity = 0;
+  let unitPrice = 0;
+  let moneyIn = 0;
+  let moneyOut = 0;
+  let mortality = 0;
+  try {
+    quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
+    unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+    mortality = parseRoseNonNegativeField(p.mortality, "Mortality");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO rose_inventory_entries (date, description, quantity, unit_price, money_in, money_out, mortality, created_by, created_at, updated_at)
@@ -3158,17 +3170,20 @@ app.put("/api/rose/inventory/:id", auth, allowRoles("owner", "employee"), async 
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
-  if (!description) return res.status(400).json({ error: "Description is required." });
-  const quantity = Number(p.quantity);
-  const unitPrice = Number(p.unit_price);
-  const moneyIn = Number(p.money_in);
-  const moneyOut = Number(p.money_out);
-  const mortality = Number(p.mortality);
-  if (!Number.isFinite(quantity) || quantity < 0) return res.status(400).json({ error: "Quantity must be zero or greater." });
-  if (!Number.isFinite(unitPrice) || unitPrice < 0) return res.status(400).json({ error: "Unit price must be zero or greater." });
-  if (!Number.isFinite(moneyIn) || moneyIn < 0) return res.status(400).json({ error: "Money in must be zero or greater." });
-  if (!Number.isFinite(moneyOut) || moneyOut < 0) return res.status(400).json({ error: "Money out must be zero or greater." });
-  if (!Number.isFinite(mortality) || mortality < 0) return res.status(400).json({ error: "Mortality must be zero or greater." });
+  let quantity = 0;
+  let unitPrice = 0;
+  let moneyIn = 0;
+  let moneyOut = 0;
+  let mortality = 0;
+  try {
+    quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
+    unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+    mortality = parseRoseNonNegativeField(p.mortality, "Mortality");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   await run(
     `UPDATE rose_inventory_entries
      SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, mortality = ?, updated_at = ?
