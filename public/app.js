@@ -3076,12 +3076,6 @@ function downloadCalculatorPdf() {
     alert("Enter at least one calculator row with number of bags before downloading.");
     return;
   }
-
-  const win = window.open("", "_blank", "noopener,noreferrer");
-  if (!win) {
-    alert("Pop-up blocked. Allow pop-ups and try again.");
-    return;
-  }
   const today = state.shopToday || clientShopTodayDMY();
   const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
   const rowsHtml = filledRows
@@ -3097,8 +3091,8 @@ function downloadCalculatorPdf() {
       </tr>`
     )
     .join("");
-  win.document.open();
-  win.document.write(`<!doctype html>
+
+  const printableHtml = `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -3134,12 +3128,30 @@ function downloadCalculatorPdf() {
     <script>
       window.onload = () => {
         window.print();
-        setTimeout(() => window.close(), 600);
+        setTimeout(() => window.close(), 800);
       };
     </script>
   </body>
-</html>`);
-  win.document.close();
+</html>`;
+
+  const win = window.open("", "_blank");
+  if (!win) {
+    alert("Pop-up blocked. Allow pop-ups and try again.");
+    return;
+  }
+  try {
+    win.document.open();
+    win.document.write(printableHtml);
+    win.document.close();
+    win.focus();
+  } catch (_err) {
+    alert("Could not open PDF preview window. Please allow pop-ups and try again.");
+    try {
+      win.close();
+    } catch (_e) {
+      // ignore
+    }
+  }
 }
 
 document.getElementById("calcDownloadBtn")?.addEventListener("click", downloadCalculatorPdf);
