@@ -3051,6 +3051,12 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
 
 function downloadCalculatorPdf() {
   if (!calcBody) return;
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return;
+  }
   const filledRows = [];
   calcBody.querySelectorAll("tr").forEach((tr) => {
     if (!(tr instanceof HTMLTableRowElement)) return;
@@ -3078,80 +3084,40 @@ function downloadCalculatorPdf() {
   }
   const today = state.shopToday || clientShopTodayDMY();
   const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
-  const rowsHtml = filledRows
-    .map(
-      (r) => `
-      <tr>
-        <td>${escapeHtmlCell(r.brand)}</td>
-        <td>${escapeHtmlCell(r.feedType)}</td>
-        <td>${escapeHtmlCell(r.bagSize)}</td>
-        <td>${escapeHtmlCell(r.bags)}</td>
-        <td>${escapeHtmlCell(r.buying)}</td>
-        <td>${escapeHtmlCell(r.total)}</td>
-      </tr>`
-    )
-    .join("");
 
-  const printableHtml = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Calculator - ${today}</title>
-    <style>
-      body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
-      h3, h4 { margin: 0 0 8px; }
-      p { margin: 6px 0 10px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-      th, td { border: 1px solid #bbb; padding: 8px; text-align: left; font-size: 13px; }
-      .profit-highlight-above-table { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
-      .profit-highlight-amount { font-weight: 700; }
-    </style>
-  </head>
-  <body>
-    <h3>Amana kuku feeds</h3>
-    <h4>Calculator</h4>
-    <p>Date: ${today}</p>
-    <table>
-      <thead>
-        <tr>
-          <th>Brand</th>
-          <th>Feed Type</th>
-          <th>Bag Size (kg)</th>
-          <th>Number of bags</th>
-          <th>Buying price (per bag)</th>
-          <th>Total</th>
-        </tr>
-      </thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-    <p><strong>Grand total:</strong> ${currency(grand)}</p>
-    <script>
-      window.onload = () => {
-        window.print();
-        setTimeout(() => window.close(), 800);
-      };
-    </script>
-  </body>
-</html>`;
+  const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("Amana kuku feeds", 40, 42);
+  doc.setFontSize(13);
+  doc.text("Calculator", 40, 64);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`Date: ${today}`, 40, 84);
 
-  const win = window.open("", "_blank");
-  if (!win) {
-    alert("Pop-up blocked. Allow pop-ups and try again.");
+  const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Total"]];
+  const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.total]);
+
+  const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
+  if (typeof autoTableFn !== "function") {
+    alert("PDF table helper is not loaded. Refresh and try again.");
     return;
   }
-  try {
-    win.document.open();
-    win.document.write(printableHtml);
-    win.document.close();
-    win.focus();
-  } catch (_err) {
-    alert("Could not open PDF preview window. Please allow pop-ups and try again.");
-    try {
-      win.close();
-    } catch (_e) {
-      // ignore
-    }
-  }
+  autoTableFn.call(doc, {
+    head,
+    body,
+    startY: 98,
+    styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
+    headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
+  });
+
+  const finalY = doc.lastAutoTable?.finalY || 98;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text(`Grand total: ${currency(grand)}`, 40, finalY + 24);
+
+  const fileDate = today.replace(/\//g, "-");
+  doc.save(`amana-kuku-feeds-calculator-${fileDate}.pdf`);
 }
 
 document.getElementById("calcDownloadBtn")?.addEventListener("click", downloadCalculatorPdf);
