@@ -4379,7 +4379,19 @@ app.post("/api/admin/wipe-all-sales-data", auth, allowRoles("owner"), async (_re
   }
 });
 
-app.use(express.static(PUBLIC_DIR, { dotfiles: "allow" }));
+app.use(
+  express.static(PUBLIC_DIR, {
+    dotfiles: "allow",
+    setHeaders(res, filePath) {
+      const lower = String(filePath || "").toLowerCase();
+      if (lower.endsWith(".html") || lower.endsWith("app.js")) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      }
+    },
+  })
+);
 
 /** SPA fallback: only for GET/HEAD. Unknown /api/* or other methods return JSON (no broken sendFile). */
 app.use((req, res) => {
@@ -4392,6 +4404,9 @@ app.use((req, res) => {
   if (!fs.existsSync(INDEX_HTML)) {
     return res.status(500).type("text").send("Server error: index.html is missing from the public folder.");
   }
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.sendFile(INDEX_HTML, { dotfiles: "allow" }, (err) => {
     if (err) {
       // eslint-disable-next-line no-console
