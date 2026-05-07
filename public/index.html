@@ -121,12 +121,12 @@
       <section id="appCard" class="hidden">
         <nav class="app-nav" aria-label="Main">
           <button type="button" class="nav-tab active owner-only-tab" data-page="inventory">Feed Inventory</button>
+          <button type="button" class="nav-tab" data-page="sales-bags">Sales Per Bags</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="retail-inventory">Retail Feed Inventory</button>
           <button type="button" class="nav-tab" data-page="chicken-inventory">
             <span class="owner-only-tab">Chicken Sales Inventory</span>
             <span class="employee-only-action hidden">Chicken Sales</span>
           </button>
-          <button type="button" class="nav-tab" data-page="sales-bags">Sales Per Bags</button>
           <button type="button" class="nav-tab" data-page="sales-kg">Sales Per Kg</button>
           <button type="button" class="nav-tab" data-page="feeders-drinkers">
             <span class="owner-only-tab">Feeders and Drinkers inventory</span>
@@ -695,8 +695,12 @@
                   <select id="sbSaleType" title="Pass-through sales do not count toward feed profit; total uses buying cost × bags.">
                     <option value="">Shop sale (normal)</option>
                     <option value="Ufaray">By Ufaray</option>
+                    <option value="Terry">By Terry</option>
+                    <option value="Cess">By Cess</option>
+                    <option value="Rose">By Rose</option>
+                    <option value="Shop">Shop</option>
                   </select>
-                  <span class="field-hint">Ufaray: enter the customer’s price per bag; stock still drops; total column shows buying price × bags; profit totals ignore this sale.</span>
+                  <span class="field-hint">For Terry/Cess/Rose/Ufaray, stock still drops and total uses buying price × bags (profit ignored). Use Shop for normal profit sales.</span>
                 </label>
                 <label>
                   Price per bag

@@ -1105,7 +1105,14 @@ function inventoryProfitKey(brand, feedType, bagSize) {
 /** Pass-through / agent bag sales (e.g. By Ufaray): stock reduces, total at cost, no margin in inventory profit. */
 function normalizeThroughParty(val) {
   const s = String(val ?? "").trim();
-  return s === "" ? null : s;
+  if (s === "") return null;
+  const lower = s.toLowerCase();
+  if (lower === "shop") return null;
+  if (lower === "terry") return "Terry";
+  if (lower === "cess") return "Cess";
+  if (lower === "rose") return "Rose";
+  if (lower === "ufaray") return "Ufaray";
+  return s;
 }
 
 function normalizePassThroughStatus(val) {
@@ -3515,6 +3522,57 @@ app.put("/api/sales/bags/:id/pass-through-status", auth, allowRoles("owner"), as
     new Date().toISOString(),
     idNum,
   ]);
+  res.json({ ok: true });
+});
+
+app.put("/api/sales/bags/:id/through-party", auth, allowRoles("owner"), async (req, res) => {
+  const idNum = Number(req.params.id);
+  if (!Number.isFinite(idNum) || idNum < 1) return res.status(400).json({ error: "Invalid sale id." });
+  const current = await get("SELECT * FROM sales_bags WHERE id = ?", [idNum]);
+  if (!current) return res.status(404).json({ error: "Sale not found." });
+  const throughParty = normalizeThroughParty(req.body?.through_party);
+  const isThrough = throughParty != null;
+  const wasThrough = isThroughPartyBagSaleRow(current);
+  const item = await getInventoryItem(current.brand, current.feed_type, current.bag_size);
+  if (!item) {
+    return res.status(400).json({
+      error: "No inventory record for this product. The owner must add it under Feed Inventory first.",
+    });
+  }
+  const buying = Number(item.buying_price) || 0;
+  const margin = Number(item.profit_margin_per_bag) || 0;
+  const bagsSold = Number(current.bags_sold) || 0;
+  const pricePerBag = Number(current.price_per_bag) || 0;
+  const totalAmount = isThrough ? buying * bagsSold : bagsSold * pricePerBag;
+  const passThroughStatus = isThrough
+    ? normalizePassThroughStatus(current.pass_through_status)
+    : null;
+  try {
+    await run("BEGIN TRANSACTION");
+    if (wasThrough !== isThrough) {
+      const profitDelta = isThrough ? -(bagsSold * margin) : bagsSold * margin;
+      if (profitDelta !== 0) {
+        await run(
+          `UPDATE inventory
+           SET accumulated_profit = accumulated_profit + ?, updated_at = ?
+           WHERE id = ?`,
+          [profitDelta, new Date().toISOString(), item.id]
+        );
+      }
+    }
+    await run(
+      "UPDATE sales_bags SET through_party = ?, pass_through_status = ?, total_amount = ?, updated_at = ? WHERE id = ?",
+      [throughParty, passThroughStatus, totalAmount, new Date().toISOString(), idNum]
+    );
+    await run("COMMIT");
+  } catch (error) {
+    try {
+      await run("ROLLBACK");
+    } catch (_rollbackErr) {
+      // ignore
+    }
+    return res.status(400).json({ error: error.message || "Could not update sale via." });
+  }
   res.json({ ok: true });
 });
 

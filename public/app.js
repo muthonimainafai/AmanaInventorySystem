@@ -808,6 +808,62 @@ function saleLineTotalBags(row) {
   return Number(row.bags_sold || 0) * Number(row.price_per_bag || 0);
 }
 
+function normalizeSaleVia(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (lower === "shop") return "Shop";
+  if (lower === "terry") return "Terry";
+  if (lower === "cess") return "Cess";
+  if (lower === "rose") return "Rose";
+  if (lower === "ufaray") return "Ufaray";
+  return raw;
+}
+
+function isNonProfitSaleVia(value) {
+  const normalized = normalizeSaleVia(value);
+  return normalized !== "" && normalized !== "Shop";
+}
+
+function bagSaleViaOptions() {
+  if (state.appInstance === "shop") {
+    return ["Shop", "Terry", "Cess", "Rose"];
+  }
+  return ["", "Ufaray"];
+}
+
+function labelForBagSaleVia(value) {
+  const normalized = normalizeSaleVia(value);
+  if (!normalized) return "Shop sale (normal)";
+  return normalized === "Shop" ? "Shop" : `By ${normalized}`;
+}
+
+function fillBagSaleViaSelect(selectEl, selectedValue = "") {
+  if (!(selectEl instanceof HTMLSelectElement)) return;
+  const normalizedSelected = normalizeSaleVia(selectedValue);
+  const options = bagSaleViaOptions();
+  const frag = document.createDocumentFragment();
+  for (const value of options) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = labelForBagSaleVia(value);
+    frag.appendChild(opt);
+  }
+  if (normalizedSelected && !options.includes(normalizedSelected)) {
+    const opt = document.createElement("option");
+    opt.value = normalizedSelected;
+    opt.textContent = labelForBagSaleVia(normalizedSelected);
+    frag.appendChild(opt);
+  }
+  selectEl.innerHTML = "";
+  selectEl.appendChild(frag);
+  if (normalizedSelected && Array.from(selectEl.options).some((o) => o.value === normalizedSelected)) {
+    selectEl.value = normalizedSelected;
+  } else {
+    selectEl.value = options[0] || "";
+  }
+}
+
 function saleLineTotalKg(row) {
   const t = Number(row.total_amount);
   if (Number.isFinite(t)) return t;
@@ -1086,6 +1142,8 @@ function showLoggedIn() {
     const terryCessShopTenant = isTerryCessOrShopTenant();
     const shouldShow = isTerryOrCessTenant()
       ? page === "rose-inventory"
+      : state.appInstance === "shop"
+      ? page === "inventory" || page === "sales-bags"
       : terryCessShopTenant
       ? page === "inventory"
       : recordsTenant
@@ -1538,7 +1596,7 @@ function applyEmployeeFeedSalePricingUi() {
   const sk = document.getElementById("skPricePerKg");
   const ch = document.getElementById("chUnitPrice");
   const saleTypeEl = document.getElementById("sbSaleType");
-  const isPassThrough = !!(saleTypeEl && String(saleTypeEl.value || "").trim() !== "");
+  const isPassThrough = !!(saleTypeEl && isNonProfitSaleVia(saleTypeEl.value));
   if (sb) {
     const lockBagPrice = !!isEmployee && !isPassThrough;
     sb.readOnly = lockBagPrice;
@@ -1594,11 +1652,11 @@ function renderOwnerPassThroughBagSales() {
   const rows = (state.salesBags || []).filter((r) => String(r.through_party || "").trim() !== "");
   if (!rows.length) {
     tbody.innerHTML =
-      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags → By Ufaray.</td></tr>';
+      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Terry/Cess/Rose/Ufaray).</td></tr>';
     return;
   }
   tbody.innerHTML = joinRowsWithDateSeparators(rows, 11, (row) => {
-    const viaRaw = String(row.through_party || "").trim();
+    const viaRaw = normalizeSaleVia(row.through_party);
     const viaCell = viaRaw ? `By ${viaRaw}` : "—";
     const stRaw = String(row.pass_through_status || "pending").toLowerCase();
     const status = stRaw === "solved" ? "solved" : "pending";
@@ -1620,7 +1678,15 @@ function renderOwnerPassThroughBagSales() {
         </td>
         <td>${row.created_by}</td>
         <td>
-          <button type="button" data-kind="ufaray-status-save" data-id="${row.id}">Save</button>
+          <select data-kind="ufaray-via" data-id="${row.id}">
+            <option value="Terry" ${viaRaw === "Terry" ? "selected" : ""}>By Terry</option>
+            <option value="Cess" ${viaRaw === "Cess" ? "selected" : ""}>By Cess</option>
+            <option value="Rose" ${viaRaw === "Rose" ? "selected" : ""}>By Rose</option>
+            <option value="Ufaray" ${viaRaw === "Ufaray" ? "selected" : ""}>By Ufaray</option>
+            <option value="Shop" ${viaRaw === "Shop" ? "selected" : ""}>Shop</option>
+          </select>
+          <button type="button" data-kind="ufaray-via-save" data-id="${row.id}">Save via</button>
+          <button type="button" data-kind="ufaray-status-save" data-id="${row.id}">Save status</button>
         </td>
       </tr>`;
   });
@@ -2515,10 +2581,7 @@ function resetSalesBagForm() {
   sbFeedType.disabled = true;
   sbBagSize.value = "";
   const st = document.getElementById("sbSaleType");
-  if (st) {
-    st.innerHTML =
-      '<option value="">Shop sale (normal)</option><option value="Ufaray">By Ufaray</option>';
-  }
+  fillBagSaleViaSelect(st, state.appInstance === "shop" ? "Shop" : "");
   document.getElementById("sbSaveBtn").textContent = "Save sale";
   applyEmployeeSalesDateRules();
   applyEmployeeFeedSalePricingUi();
@@ -2563,7 +2626,7 @@ function showPage(page) {
   if (isTerryOrCessTenant() && page !== "rose-inventory") {
     return showPage("rose-inventory");
   }
-  if (state.appInstance === "shop" && page !== "inventory") {
+  if (state.appInstance === "shop" && page !== "inventory" && page !== "sales-bags") {
     return showPage("inventory");
   }
   if (page === "calculator" && state.user?.role !== "owner") {
@@ -3586,7 +3649,7 @@ salesBagsForm.addEventListener("submit", async (event) => {
     alert("Date must be in DD/MM/YYYY format.");
     return;
   }
-  const saleTypeVal = String(document.getElementById("sbSaleType")?.value || "").trim();
+  const saleTypeVal = normalizeSaleVia(document.getElementById("sbSaleType")?.value || "");
   const payload = {
     date: dateValue,
     brand: sbBrand.value,
@@ -3777,15 +3840,9 @@ salesBagsBody.addEventListener("click", async (event) => {
     sbBagSize.value = row.bag_size;
     document.getElementById("sbBagsSold").value = row.bags_sold;
     const st = document.getElementById("sbSaleType");
-    const tp = String(row.through_party || "").trim();
+    const tp = normalizeSaleVia(row.through_party);
     if (st) {
-      if (tp && !Array.from(st.options).some((o) => o.value === tp)) {
-        const o = document.createElement("option");
-        o.value = tp;
-        o.textContent = `By ${tp}`;
-        st.appendChild(o);
-      }
-      st.value = tp || "";
+      fillBagSaleViaSelect(st, tp || (state.appInstance === "shop" ? "Shop" : ""));
     }
     applyEmployeeFeedSalePricingUi();
     document.getElementById("sbPricePerBag").value = row.price_per_bag;
@@ -3806,6 +3863,27 @@ salesBagsBody.addEventListener("click", async (event) => {
 document.getElementById("ufaray-bag-sales-body")?.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+  if (target.dataset.kind === "ufaray-via-save") {
+    const id = Number(target.dataset.id);
+    if (!Number.isFinite(id) || id < 1) return;
+    const tr = target.closest("tr");
+    if (!(tr instanceof HTMLTableRowElement)) return;
+    const viaSel = tr.querySelector("select[data-kind='ufaray-via']");
+    if (!(viaSel instanceof HTMLSelectElement)) return;
+    target.setAttribute("disabled", "disabled");
+    try {
+      await api(`/api/sales/bags/${id}/through-party`, {
+        method: "PUT",
+        body: JSON.stringify({ through_party: normalizeSaleVia(viaSel.value) }),
+      });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      target.removeAttribute("disabled");
+    }
+    return;
+  }
   if (target.dataset.kind !== "ufaray-status-save") return;
   const id = Number(target.dataset.id);
   if (!Number.isFinite(id) || id < 1) return;
