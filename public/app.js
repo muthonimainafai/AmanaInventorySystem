@@ -214,9 +214,7 @@ const expDate = document.getElementById("expDate");
 const expOpenCalendarBtn = document.getElementById("expOpenCalendarBtn");
 const roseForm = document.getElementById("rose-form");
 const roseBody = document.getElementById("rose-body");
-const roseDateDisplay = document.getElementById("roseDateDisplay");
 const roseDate = document.getElementById("roseDate");
-const roseOpenCalendarBtn = document.getElementById("roseOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 
 let refreshTimer = null;
@@ -603,7 +601,6 @@ function applyEmployeeSalesDateRules() {
     ["skDateDisplay", "skDate", "skOpenCalendarBtn"],
     ["chDateDisplay", "chDate", "chOpenCalendarBtn"],
     ["expDateDisplay", "expDate", "expOpenCalendarBtn"],
-    ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -2273,7 +2270,7 @@ function resetRoseForm() {
   if (!roseForm) return;
   roseForm.reset();
   state.editRoseId = null;
-  if (roseDateDisplay) roseDateDisplay.value = "";
+  if (roseDate) roseDate.value = "";
   const saveBtn = document.getElementById("roseSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
   applyEmployeeSalesDateRules();
@@ -3116,7 +3113,6 @@ if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, 
 if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
 if (expDateDisplay && expDate && expOpenCalendarBtn) wireDatePicker(expDateDisplay, expDate, expOpenCalendarBtn);
-if (roseDateDisplay && roseDate && roseOpenCalendarBtn) wireDatePicker(roseDateDisplay, roseDate, roseOpenCalendarBtn);
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
@@ -3416,7 +3412,7 @@ expenditureForm?.addEventListener("submit", async (event) => {
 
 roseForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const dateValue = roseDateDisplay?.value?.trim() || "";
+  const dateValue = roseDate?.value ? formatDateDMY(roseDate.value) : "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
   const payload = {
     date: dateValue,
@@ -4383,7 +4379,6 @@ roseBody?.addEventListener("click", async (event) => {
   if (action === "edit") {
     state.editRoseId = row.id;
     if (roseDate) roseDate.value = toIsoDate(row.date);
-    if (roseDateDisplay) roseDateDisplay.value = formatDateDMY(row.date);
     const desc = document.getElementById("roseDescription");
     const qty = document.getElementById("roseQuantity");
     const unit = document.getElementById("roseUnitPrice");
