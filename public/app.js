@@ -1,5 +1,8 @@
 const state = {
-  appInstance: (localStorage.getItem("amanaAppInstance") || "amana").trim().toLowerCase() === "ufaray" ? "ufaray" : "amana",
+  appInstance: (() => {
+    const saved = (localStorage.getItem("amanaAppInstance") || "amana").trim().toLowerCase();
+    return ["amana", "ufaray", "rose"].includes(saved) ? saved : "amana";
+  })(),
   token: (localStorage.getItem("amanaToken") || "").trim(),
   user: JSON.parse(localStorage.getItem("amanaUser") || "null"),
   vehicleToken: (localStorage.getItem("vehicleToken") || "").trim(),
@@ -52,6 +55,8 @@ const state = {
   editGasId: null,
   expenditureEntries: [],
   editExpenditureId: null,
+  roseEntries: [],
+  editRoseId: null,
   calculatorValues: {},
 };
 
@@ -64,6 +69,7 @@ const PAGE_HEADINGS = {
   "feeders-drinkers": "Feeders and Drinkers inventory",
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
+  "rose-inventory": "Rose Inventory",
   calculator: "Calculator",
   expenditure: "Expenditure",
   balance: "Balance",
@@ -206,33 +212,46 @@ const expBody = document.getElementById("exp-body");
 const expDateDisplay = document.getElementById("expDateDisplay");
 const expDate = document.getElementById("expDate");
 const expOpenCalendarBtn = document.getElementById("expOpenCalendarBtn");
+const roseForm = document.getElementById("rose-form");
+const roseBody = document.getElementById("rose-body");
+const roseDateDisplay = document.getElementById("roseDateDisplay");
+const roseDate = document.getElementById("roseDate");
+const roseOpenCalendarBtn = document.getElementById("roseOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 
 let refreshTimer = null;
 let catalogInitialized = false;
 
 function persistAppInstance() {
-  localStorage.setItem("amanaAppInstance", state.appInstance === "ufaray" ? "ufaray" : "amana");
+  const normalized = ["amana", "ufaray", "rose"].includes(state.appInstance) ? state.appInstance : "amana";
+  localStorage.setItem("amanaAppInstance", normalized);
 }
 
 function applyAppTheme() {
-  const isUfaray = state.appInstance === "ufaray";
+  const tenant = ["amana", "ufaray", "rose"].includes(state.appInstance) ? state.appInstance : "amana";
+  const isUfaray = tenant === "ufaray";
+  const isRose = tenant === "rose";
   document.body.classList.toggle("ufaray-theme", isUfaray);
-  document.title = isUfaray ? "Ufaray Feeds - Desktop Inventory" : "Amana Kuku Feeds - Desktop Inventory";
+  document.body.classList.toggle("rose-theme", isRose);
+  document.title = isUfaray
+    ? "Ufaray Feeds - Desktop Inventory"
+    : isRose
+      ? "Rose Inventory - Desktop Inventory"
+      : "Amana Kuku Feeds - Desktop Inventory";
   const portalSiteTitle = document.getElementById("portalSiteTitle");
   if (portalSiteTitle) {
-    portalSiteTitle.textContent = isUfaray ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
+    portalSiteTitle.textContent = isUfaray ? "UFARAY FEEDS" : isRose ? "ROSE INVENTORY" : "AMANA KUKU FEEDS";
   }
   const loginTitle = document.getElementById("loginCardTitle");
   if (loginTitle) {
-    loginTitle.textContent = isUfaray ? "Ufaray Feeds Login" : "Amana Kuku Feeds Login";
+    loginTitle.textContent = isUfaray ? "Ufaray Feeds Login" : isRose ? "Rose Inventory Login" : "Amana Kuku Feeds Login";
   }
 }
 
 async function api(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
-    "X-App-Instance": state.appInstance === "ufaray" ? "ufaray" : "amana",
+    "X-App-Instance": ["amana", "ufaray", "rose"].includes(state.appInstance) ? state.appInstance : "amana",
     ...(options.headers || {}),
   };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
@@ -584,6 +603,7 @@ function applyEmployeeSalesDateRules() {
     ["skDateDisplay", "skDate", "skOpenCalendarBtn"],
     ["chDateDisplay", "chDate", "chOpenCalendarBtn"],
     ["expDateDisplay", "expDate", "expOpenCalendarBtn"],
+    ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -999,7 +1019,14 @@ function showLoggedIn() {
   });
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
-    const shouldShow = isOwner ? OWNER_ALLOWED_PAGES.has(page) : !OWNER_INVENTORY_PAGES.has(page);
+    const isRose = state.appInstance === "rose";
+    const shouldShow = isRose
+      ? page === "rose-inventory"
+      : page === "rose-inventory"
+        ? false
+        : isOwner
+          ? OWNER_ALLOWED_PAGES.has(page)
+          : !OWNER_INVENTORY_PAGES.has(page);
     btn.classList.toggle("hidden", !shouldShow);
   });
   [fdForm, medForm, gasForm].forEach((frm) => {
@@ -2242,6 +2269,64 @@ function resetExpenditureForm() {
   applyEmployeeSalesDateRules();
 }
 
+function resetRoseForm() {
+  if (!roseForm) return;
+  roseForm.reset();
+  state.editRoseId = null;
+  if (roseDateDisplay) roseDateDisplay.value = "";
+  const saveBtn = document.getElementById("roseSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function renderRoseTable() {
+  if (!roseBody) return;
+  const rows = state.roseEntries || [];
+  if (!rows.length) {
+    roseBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
+    const inEl = document.getElementById("roseTotalMoneyIn");
+    const outEl = document.getElementById("roseTotalMoneyOut");
+    const mortEl = document.getElementById("roseTotalMortality");
+    if (inEl) inEl.textContent = "0";
+    if (outEl) outEl.textContent = "0";
+    if (mortEl) mortEl.textContent = "0";
+    return;
+  }
+  let sumIn = 0;
+  let sumOut = 0;
+  let sumMort = 0;
+  roseBody.innerHTML = rows
+    .map((row, idx) => {
+      sumIn += Number(row.money_in || 0);
+      sumOut += Number(row.money_out || 0);
+      sumMort += Number(row.mortality || 0);
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${Number(row.quantity || 0)}</td>
+        <td>${Number(row.unit_price || 0)}</td>
+        <td>${Number(row.money_in || 0)}</td>
+        <td>${Number(row.money_out || 0)}</td>
+        <td>${Number(row.mortality || 0)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="rose" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="rose" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const inEl = document.getElementById("roseTotalMoneyIn");
+  const outEl = document.getElementById("roseTotalMoneyOut");
+  const mortEl = document.getElementById("roseTotalMortality");
+  if (inEl) inEl.textContent = String(sumIn);
+  if (outEl) outEl.textContent = String(sumOut);
+  if (mortEl) mortEl.textContent = String(sumMort);
+}
+
 function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
@@ -2430,7 +2515,7 @@ function showPage(page) {
   if (page === "gas" && state.user?.role === "employee") {
     pageHeading.textContent = "Gas Sales";
   }
-  if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory" || page === "expenditure") {
+  if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory" || page === "expenditure" || page === "rose-inventory") {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
   }
@@ -2456,6 +2541,7 @@ function showPage(page) {
   if (page === "feeders-drinkers") renderFeedersDrinkersTable();
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
+  if (page === "rose-inventory") renderRoseTable();
   if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
@@ -2631,6 +2717,7 @@ async function loadAllData() {
     api("/api/gas/employee-items"),
     api("/api/gas/sales"),
     api("/api/expenditure"),
+    api("/api/rose/inventory"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -2644,6 +2731,7 @@ async function loadAllData() {
   state.gasEmployeeItems = extras[9].status === "fulfilled" ? extras[9].value : [];
   state.gasSales = extras[10].status === "fulfilled" ? extras[10].value : [];
   state.expenditureEntries = extras[11].status === "fulfilled" ? extras[11].value : [];
+  state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -2672,6 +2760,7 @@ async function loadAllData() {
   renderGasTable();
   renderCalculatorTable();
   renderExpenditureTable();
+  renderRoseTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
 }
@@ -2719,6 +2808,12 @@ document.getElementById("openUfarayBtn")?.addEventListener("click", () => {
   showLoginCard();
 });
 
+document.getElementById("openRoseBtn")?.addEventListener("click", () => {
+  state.appInstance = "rose";
+  persistAppInstance();
+  showLoginCard();
+});
+
 document.getElementById("openVehicleBtn")?.addEventListener("click", () => {
   showVehicleLoginCard();
 });
@@ -2745,7 +2840,7 @@ loginForm.addEventListener("submit", async (event) => {
     state.user = result.user;
     persistAuth();
     showLoggedIn();
-    showPage(state.user.role === "owner" ? "inventory" : "sales-bags");
+    showPage(state.appInstance === "rose" ? "rose-inventory" : state.user.role === "owner" ? "inventory" : "sales-bags");
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -2964,7 +3059,7 @@ async function boot() {
   }
   try {
     showLoggedIn();
-    showPage(state.user.role === "owner" ? "inventory" : "sales-bags");
+    showPage(state.appInstance === "rose" ? "rose-inventory" : state.user.role === "owner" ? "inventory" : "sales-bags");
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -3021,6 +3116,7 @@ if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, 
 if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
 if (expDateDisplay && expDate && expOpenCalendarBtn) wireDatePicker(expDateDisplay, expDate, expOpenCalendarBtn);
+if (roseDateDisplay && roseDate && roseOpenCalendarBtn) wireDatePicker(roseDateDisplay, roseDate, roseOpenCalendarBtn);
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
@@ -3152,6 +3248,7 @@ document.getElementById("fdClearBtn")?.addEventListener("click", resetFeedersDri
 document.getElementById("medClearBtn")?.addEventListener("click", resetMedicamentsForm);
 document.getElementById("gasClearBtn")?.addEventListener("click", resetGasForm);
 document.getElementById("expClearBtn")?.addEventListener("click", resetExpenditureForm);
+document.getElementById("roseClearBtn")?.addEventListener("click", resetRoseForm);
 
 fdForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3311,6 +3408,32 @@ expenditureForm?.addEventListener("submit", async (event) => {
       await api("/api/expenditure", { method: "POST", body: JSON.stringify(payload) });
     }
     resetExpenditureForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+roseForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = roseDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("roseDescription")?.value || "").trim(),
+    quantity: Number(document.getElementById("roseQuantity")?.value || 0),
+    unit_price: Number(document.getElementById("roseUnitPrice")?.value || 0),
+    money_in: Number(document.getElementById("roseMoneyIn")?.value || 0),
+    money_out: Number(document.getElementById("roseMoneyOut")?.value || 0),
+    mortality: Number(document.getElementById("roseMortality")?.value || 0),
+  };
+  try {
+    if (state.editRoseId) {
+      await api(`/api/rose/inventory/${state.editRoseId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/rose/inventory", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetRoseForm();
     await loadAllData();
   } catch (error) {
     alert(error.message);
@@ -4241,6 +4364,46 @@ expBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/expenditure/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+roseBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "rose") return;
+  const row = state.roseEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editRoseId = row.id;
+    if (roseDate) roseDate.value = toIsoDate(row.date);
+    if (roseDateDisplay) roseDateDisplay.value = formatDateDMY(row.date);
+    const desc = document.getElementById("roseDescription");
+    const qty = document.getElementById("roseQuantity");
+    const unit = document.getElementById("roseUnitPrice");
+    const min = document.getElementById("roseMoneyIn");
+    const mout = document.getElementById("roseMoneyOut");
+    const mort = document.getElementById("roseMortality");
+    if (desc) desc.value = row.description || "";
+    if (qty) qty.value = row.quantity ?? 0;
+    if (unit) unit.value = row.unit_price ?? 0;
+    if (min) min.value = row.money_in ?? 0;
+    if (mout) mout.value = row.money_out ?? 0;
+    if (mort) mort.value = row.mortality ?? 0;
+    const saveBtn = document.getElementById("roseSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/rose/inventory/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);

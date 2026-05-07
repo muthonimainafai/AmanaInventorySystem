@@ -25,6 +25,7 @@ function loadEnvFile() {
     if (!key) continue;
     const fromFile =
       key.startsWith("AMANA_") ||
+      key.startsWith("ROSE_") ||
       key.startsWith("UFARAY_") ||
       key.startsWith("VEHICLE_") ||
       key === "JWT_SECRET";
@@ -50,6 +51,31 @@ const VEHICLE_ADMIN_FULL_NAME = String(process.env.VEHICLE_ADMIN_FULL_NAME || "V
 
 function tenantLoginEnv(tenant) {
   const t = normalizeAppTenant(tenant);
+  if (t === "rose") {
+    const roseOwnerUsername = String(process.env.ROSE_OWNER_USERNAME || "").trim();
+    const roseOwnerPassword = String(process.env.ROSE_OWNER_PASSWORD || "");
+    const roseOwnerFullName = String(process.env.ROSE_OWNER_FULL_NAME || "").trim();
+    const roseEmployeeUsername = String(process.env.ROSE_EMPLOYEE_USERNAME || "").trim();
+    const roseEmployeePassword = String(process.env.ROSE_EMPLOYEE_PASSWORD || "");
+    const roseEmployeeFullName = String(process.env.ROSE_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "rose",
+      owner: {
+        username: roseOwnerUsername || AMANA_OWNER_USERNAME,
+        password: roseOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: roseOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: roseEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: roseEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: roseEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        roseOwnerUsername || roseEmployeeUsername || roseOwnerPassword || roseEmployeePassword
+          ? "ROSE_*"
+          : "AMANA_* (fallback)",
+    };
+  }
   if (t === "ufaray") {
     const ufarayOwnerUsername = String(
       process.env.UFARAY_OWNER_USERNAME || process.env.UFARAY_FEEDS_USERNAME || ""
@@ -92,7 +118,10 @@ const dbInitDone = new Set();
 const dbInitInFlight = new Map();
 
 function normalizeAppTenant(value) {
-  return String(value || "amana").trim().toLowerCase() === "ufaray" ? "ufaray" : "amana";
+  const t = String(value || "amana").trim().toLowerCase();
+  if (t === "ufaray") return "ufaray";
+  if (t === "rose") return "rose";
+  return "amana";
 }
 
 function activeTenant() {
@@ -101,6 +130,7 @@ function activeTenant() {
 
 function dbFileNameForTenant(tenant) {
   const t = normalizeAppTenant(tenant);
+  if (t === "rose") return "inventory-rose.db";
   return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
 }
 
@@ -617,6 +647,22 @@ async function initDb() {
       description TEXT NOT NULL,
       money_out REAL NOT NULL,
       total REAL NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS rose_inventory_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      money_in REAL NOT NULL,
+      money_out REAL NOT NULL,
+      mortality REAL NOT NULL,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -3068,6 +3114,79 @@ app.delete("/api/expenditure/:id", auth, allowRoles("owner", "employee"), async 
   res.json({ ok: true });
 });
 
+app.get("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM rose_inventory_entries ORDER BY id DESC")
+      : await all("SELECT * FROM rose_inventory_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  const quantity = Number(p.quantity);
+  const unitPrice = Number(p.unit_price);
+  const moneyIn = Number(p.money_in);
+  const moneyOut = Number(p.money_out);
+  const mortality = Number(p.mortality);
+  if (!Number.isFinite(quantity) || quantity < 0) return res.status(400).json({ error: "Quantity must be zero or greater." });
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) return res.status(400).json({ error: "Unit price must be zero or greater." });
+  if (!Number.isFinite(moneyIn) || moneyIn < 0) return res.status(400).json({ error: "Money in must be zero or greater." });
+  if (!Number.isFinite(moneyOut) || moneyOut < 0) return res.status(400).json({ error: "Money out must be zero or greater." });
+  if (!Number.isFinite(mortality) || mortality < 0) return res.status(400).json({ error: "Mortality must be zero or greater." });
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO rose_inventory_entries (date, description, quantity, unit_price, money_in, money_out, mortality, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/rose/inventory/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM rose_inventory_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM rose_inventory_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body;
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  const quantity = Number(p.quantity);
+  const unitPrice = Number(p.unit_price);
+  const moneyIn = Number(p.money_in);
+  const moneyOut = Number(p.money_out);
+  const mortality = Number(p.mortality);
+  if (!Number.isFinite(quantity) || quantity < 0) return res.status(400).json({ error: "Quantity must be zero or greater." });
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) return res.status(400).json({ error: "Unit price must be zero or greater." });
+  if (!Number.isFinite(moneyIn) || moneyIn < 0) return res.status(400).json({ error: "Money in must be zero or greater." });
+  if (!Number.isFinite(moneyOut) || moneyOut < 0) return res.status(400).json({ error: "Money out must be zero or greater." });
+  if (!Number.isFinite(mortality) || mortality < 0) return res.status(400).json({ error: "Mortality must be zero or greater." });
+  await run(
+    `UPDATE rose_inventory_entries
+     SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, mortality = ?, updated_at = ?
+     WHERE id = ?`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/rose/inventory/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM rose_inventory_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM rose_inventory_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
 app.get("/api/sales/bags", auth, async (_req, res) => {
   const rows = await all("SELECT * FROM sales_bags ORDER BY id DESC");
   res.json(rows);
@@ -4428,6 +4547,7 @@ let httpServer = null;
 async function startServer(port = PORT) {
   if (httpServer) return httpServer;
   await ensureTenantInitialized("amana");
+  await ensureTenantInitialized("rose");
   await ensureTenantInitialized("ufaray");
 
   await new Promise((resolve, reject) => {

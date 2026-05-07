@@ -299,6 +299,11 @@ h1 {
   box-shadow: 0 6px 14px rgba(91, 33, 182, 0.28);
 }
 
+#landingCard #openRoseBtn {
+  background: linear-gradient(135deg, #8b5a3c, #a67c52);
+  box-shadow: 0 6px 14px rgba(139, 90, 60, 0.28);
+}
+
 #landingCard #openVehicleBtn {
   background: linear-gradient(135deg, #0d6efd, #0b5ed7);
   box-shadow: 0 6px 14px rgba(13, 110, 253, 0.22);
@@ -323,6 +328,27 @@ body.ufaray-theme .profit-highlight-above-table {
   border-color: #5b21b6;
   background: linear-gradient(160deg, #ede3ff 0%, #f6f0ff 45%, #fff 100%);
   box-shadow: 0 2px 8px rgba(91, 33, 182, 0.16);
+}
+
+body.rose-theme {
+  background: #f6efe6;
+  color: #3f2b1d;
+}
+
+body.rose-theme .page-title,
+body.rose-theme .chicken-inventory-main-title {
+  color: #7a4b2f;
+}
+
+body.rose-theme .nav-tab.active {
+  background: #7a4b2f;
+  color: #fff;
+}
+
+body.rose-theme .profit-highlight-above-table {
+  border-color: #a67c52;
+  background: linear-gradient(160deg, #f1e2d2 0%, #f8efe4 45%, #fff 100%);
+  box-shadow: 0 2px 8px rgba(122, 75, 47, 0.16);
 }
 
 #landingCard button:hover {
