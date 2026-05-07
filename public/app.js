@@ -831,7 +831,7 @@ function bagSaleViaOptions() {
   if (state.appInstance === "shop") {
     return ["Shop", "Terry", "Cess", "Rose"];
   }
-  return ["", "Ufaray"];
+  return [""];
 }
 
 function labelForBagSaleVia(value) {
@@ -1654,7 +1654,7 @@ function renderOwnerPassThroughBagSales() {
   const rows = (state.salesBags || []).filter((r) => String(r.through_party || "").trim() !== "");
   if (!rows.length) {
     tbody.innerHTML =
-      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Terry/Cess/Rose/Ufaray).</td></tr>';
+      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Terry/Cess/Rose).</td></tr>';
     return;
   }
   tbody.innerHTML = joinRowsWithDateSeparators(rows, 11, (row) => {
