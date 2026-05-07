@@ -154,7 +154,7 @@ const feedCatalog = require("./feedCatalog.json");
 
 const FEEDERS_DRINKERS_CATALOG = [
   { name: "Drinker 10L", item_type: "drinker", capacity_liters: 10 },
-  { name: "Drinker 5L", item_type: "drinker", capacity_liters: 5 },
+  { name: "Drinker 3.5L", item_type: "drinker", capacity_liters: 3.5 },
   { name: "Drinker 3L", item_type: "drinker", capacity_liters: 3 },
   { name: "Drinker 1L", item_type: "drinker", capacity_liters: 1 },
   { name: "Drinker 0.75L", item_type: "drinker", capacity_liters: 0.75 },
@@ -527,8 +527,16 @@ async function initDb() {
   await run(
     "UPDATE feeders_drinkers_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
+  await run(
+    "UPDATE feeders_drinkers_inventory SET item_name = ? WHERE item_name = ?",
+    ["Drinker 3.5L", "Drinker 5L"]
+  ).catch(() => {});
   await run("ALTER TABLE feeders_drinkers_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run("ALTER TABLE feeders_drinkers_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
+  await run(
+    "UPDATE feeders_drinkers_sales SET item_name = ? WHERE item_name = ?",
+    ["Drinker 3.5L", "Drinker 5L"]
+  ).catch(() => {});
   await run(
     "UPDATE medicaments_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
   ).catch(() => {});
