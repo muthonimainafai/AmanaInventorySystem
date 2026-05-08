@@ -913,16 +913,16 @@ function escapeHtmlCell(text) {
 
 function chickenSalePaymentStatusLabel(row) {
   const s = String(row.payment_status || "pending").toLowerCase();
-  if (s === "delivered" || s === "cleared") return state.appInstance === "ufaray" ? "Cleared" : "Delivered";
+  if (s === "delivered" || s === "cleared") return "Cleared";
   return "Pending";
 }
 
 function chickenPaymentClearedValue() {
-  return state.appInstance === "ufaray" ? "cleared" : "delivered";
+  return "cleared";
 }
 
 function chickenPaymentClearedLabel() {
-  return state.appInstance === "ufaray" ? "Cleared" : "Delivered";
+  return "Cleared";
 }
 
 function chickenPaymentIsClearedValue(value) {
@@ -1075,7 +1075,7 @@ function chickenStaffPaymentIsCleared(row) {
   return s === "delivered" || s === "cleared";
 }
 
-/** Profit for this row: margin × chicks for staff only when Payments is Delivered; owner inventory lines stay KES 0. */
+/** Profit for this row: margin × chicks for staff only when Payments are Cleared; owner inventory lines stay KES 0. */
 function chickenSaleLineProfit(row) {
   const cr = String(row.creator_role || "").toLowerCase();
   if (cr === "owner") return 0;
@@ -2702,7 +2702,7 @@ function renderChickenSalesHistoryTable() {
     }
     staffMarginSum += chickenSaleLineProfit(r);
   }
-  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (delivered payments only; matches Profit column). Highlight above uses the same basis.`;
+  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (cleared payments only; matches Profit column). Highlight above uses the same basis.`;
 }
 
 function populateChickenBreedSelect() {
