@@ -1764,10 +1764,12 @@ function resetForm() {
   feedTypeSelect.innerHTML = '<option value="">Select feed type</option>';
   feedTypeSelect.disabled = true;
   bagSizeInput.value = "";
-  profitMarginPerBagInput.value = "";
+  buyingPriceInput.value = "0.00";
+  sellingPriceInput.value = "0.00";
+  profitMarginPerBagInput.value = "0.00";
   document.getElementById("accumulatedProfit").value = "0";
   document.getElementById("accumulatedBags").value = "";
-  setInventoryPriceEditMode(false);
+  setInventoryPriceEditMode(true);
   document.getElementById("saveBtn").textContent = "Save Record";
 }
 
@@ -1790,15 +1792,20 @@ function findLatestInventoryPriceLine(brand, feedType, bagSize) {
   const bKey = resolveBrandKey(brand);
   const fKey = normalizeFeedTypeForMatch(feedType);
   const bs = Number(bagSize || 0);
-  if (!bKey || !fKey || !Number.isFinite(bs) || bs <= 0) return null;
-  let latest = null;
+  if (!bKey || !fKey) return null;
+  let latestExactBag = null;
+  let latestAnyBag = null;
   for (const row of state.records || []) {
     if (resolveBrandKey(row.brand) !== bKey) continue;
     if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
-    if (Number(row.bag_size || 0) !== bs) continue;
-    if (!latest || Number(row.id || 0) > Number(latest.id || 0)) latest = row;
+    if (!latestAnyBag || Number(row.id || 0) > Number(latestAnyBag.id || 0)) latestAnyBag = row;
+    if (Number.isFinite(bs) && bs > 0 && Number(row.bag_size || 0) === bs) {
+      if (!latestExactBag || Number(row.id || 0) > Number(latestExactBag.id || 0)) {
+        latestExactBag = row;
+      }
+    }
   }
-  return latest;
+  return latestExactBag || latestAnyBag;
 }
 
 function applyInventoryPriceDefaults(force = false) {
@@ -1809,10 +1816,10 @@ function applyInventoryPriceDefaults(force = false) {
   const bagSize = Number(bagSizeInput.value || 0);
   if (!brand || !feedType || !Number.isFinite(bagSize) || bagSize <= 0) {
     if (state.editId == null) {
-      buyingPriceInput.value = "";
-      sellingPriceInput.value = "";
+      buyingPriceInput.value = "0.00";
+      sellingPriceInput.value = "0.00";
       syncInventoryProfitMarginFromPrices();
-      setInventoryPriceEditMode(false);
+      setInventoryPriceEditMode(true);
     }
     return;
   }
@@ -1821,11 +1828,11 @@ function applyInventoryPriceDefaults(force = false) {
     buyingPriceInput.value = Number(latest.buying_price || 0).toFixed(2);
     sellingPriceInput.value = Number(latest.selling_price || 0).toFixed(2);
   } else if (state.editId == null) {
-    buyingPriceInput.value = "";
-    sellingPriceInput.value = "";
+    buyingPriceInput.value = "0.00";
+    sellingPriceInput.value = "0.00";
   }
   syncInventoryProfitMarginFromPrices();
-  setInventoryPriceEditMode(false);
+  setInventoryPriceEditMode(true);
 }
 
 function renderOwnerPassThroughBagSales() {
@@ -2912,7 +2919,7 @@ function populateForm(row) {
   if (!Number.isFinite(Number(row.profit_margin_per_bag))) {
     profitMarginPerBagInput.value = "0.00";
   }
-  setInventoryPriceEditMode(false);
+  setInventoryPriceEditMode(true);
   document.getElementById("accumulatedProfit").value = row.cumulative_bag_profit ?? 0;
   document.getElementById("reorderLevel").value = row.reorder_level;
   document.getElementById("saveBtn").textContent = "Update Record";
@@ -3376,7 +3383,7 @@ editPricesBtn?.addEventListener("click", () => {
   setInventoryPriceEditMode(isLocked);
   if (!isLocked) syncInventoryProfitMarginFromPrices();
 });
-setInventoryPriceEditMode(false);
+setInventoryPriceEditMode(true);
 syncInventoryProfitMarginFromPrices();
 
 openCalendarBtn.addEventListener("click", () => {
