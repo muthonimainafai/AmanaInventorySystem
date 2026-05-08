@@ -477,7 +477,6 @@ function updateMedicamentsProfitDisplay() {
 }
 
 function updateExpenditureAccumulatedDisplay() {
-  if (state.user?.role !== "employee") return;
   const rows = state.expenditureEntries || [];
   const sumTotal = rows.reduce((s, r) => s + (Number(r.total) || 0), 0);
   const sumMoneyOut = rows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
