@@ -841,6 +841,7 @@ function normalizeSaleVia(value) {
   if (!raw) return "";
   const lower = raw.toLowerCase();
   if (lower === "shop") return "Shop";
+  if (lower === "amana") return "Amana";
   if (lower === "terry") return "Terry";
   if (lower === "cess") return "Cess";
   if (lower === "rose") return "Rose";
@@ -856,6 +857,9 @@ function isNonProfitSaleVia(value) {
 function bagSaleViaOptions() {
   if (state.appInstance === "shop") {
     return ["Shop", "Terry", "Cess", "Rose"];
+  }
+  if (state.appInstance === "ufaray") {
+    return ["", "Amana"];
   }
   return [""];
 }
@@ -890,6 +894,47 @@ function fillBagSaleViaSelect(selectEl, selectedValue = "") {
   } else {
     selectEl.value = options[0] || "";
   }
+}
+
+function fillSimpleSaleTypeSelect(selectEl, selectedValue = "") {
+  if (!(selectEl instanceof HTMLSelectElement)) return;
+  const normalizedSelected = normalizeSaleVia(selectedValue);
+  const options = state.appInstance === "ufaray" ? ["", "Amana"] : ["", "Ufaray"];
+  const labels =
+    state.appInstance === "ufaray"
+      ? {
+          "": "Shop sale (normal)",
+          Amana: "Via Amana",
+        }
+      : {
+          "": "Shop sale (normal)",
+          Ufaray: "By Ufaray",
+        };
+  const frag = document.createDocumentFragment();
+  for (const value of options) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = labels[value] || value;
+    frag.appendChild(opt);
+  }
+  if (normalizedSelected && !options.includes(normalizedSelected)) {
+    const opt = document.createElement("option");
+    opt.value = normalizedSelected;
+    opt.textContent = labels[normalizedSelected] || `By ${normalizedSelected}`;
+    frag.appendChild(opt);
+  }
+  selectEl.innerHTML = "";
+  selectEl.appendChild(frag);
+  selectEl.value = options.includes(normalizedSelected) ? normalizedSelected : "";
+}
+
+function applySaleRecordedForOptions() {
+  fillBagSaleViaSelect(document.getElementById("sbSaleType"), document.getElementById("sbSaleType")?.value || "");
+  fillSimpleSaleTypeSelect(skSaleType, skSaleType?.value || "");
+  fillSimpleSaleTypeSelect(chSaleType, chSaleType?.value || "");
+  fillSimpleSaleTypeSelect(fdSaleType, fdSaleType?.value || "");
+  fillSimpleSaleTypeSelect(medSaleType, medSaleType?.value || "");
+  fillSimpleSaleTypeSelect(gasSaleType, gasSaleType?.value || "");
 }
 
 function saleLineTotalKg(row) {
@@ -1190,6 +1235,7 @@ function showVehicleLoginCard() {
 
 function showLoggedIn() {
   applyAppTheme();
+  applySaleRecordedForOptions();
   landingCard?.classList.add("hidden");
   nahahDashboardCard?.classList.add("hidden");
   loginCard.classList.add("hidden");
@@ -1789,7 +1835,7 @@ function renderOwnerPassThroughBagSales() {
   const rows = (state.salesBags || []).filter((r) => String(r.through_party || "").trim() !== "");
   if (!rows.length) {
     tbody.innerHTML =
-      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Terry/Cess/Rose).</td></tr>';
+      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Via Amana).</td></tr>';
     return;
   }
   tbody.innerHTML = joinRowsWithDateSeparators(rows, 11, (row) => {
