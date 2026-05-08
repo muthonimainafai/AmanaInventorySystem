@@ -1259,11 +1259,13 @@ function showLoggedIn() {
   });
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
-    const isUfarayOwnerSalesPage =
-      state.appInstance === "ufaray" && isOwner && (page === "sales-bags" || page === "sales-kg");
+    const isOwnerSalesPageHiddenForTenant =
+      (state.appInstance === "ufaray" || state.appInstance === "amana") &&
+      isOwner &&
+      (page === "sales-bags" || page === "sales-kg");
     const recordsTenant = isRecordsTenant();
     const terryCessShopTenant = isTerryCessOrShopTenant();
-    const shouldShow = isUfarayOwnerSalesPage
+    const shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : isTerryOrCessTenant()
       ? page === "rose-inventory"
@@ -2826,7 +2828,11 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
-  if (state.appInstance === "ufaray" && state.user?.role === "owner" && (page === "sales-bags" || page === "sales-kg")) {
+  if (
+    (state.appInstance === "ufaray" || state.appInstance === "amana") &&
+    state.user?.role === "owner" &&
+    (page === "sales-bags" || page === "sales-kg")
+  ) {
     return showPage("inventory");
   }
   if (isTerryOrCessTenant() && page !== "rose-inventory") {
