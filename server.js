@@ -620,7 +620,7 @@ async function initDb() {
     "UPDATE chicken_sales SET delivery_status = 'delivered' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
   ).catch(() => {});
   await run(
-    "UPDATE chicken_sales SET payment_status = 'cleared' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
+    "UPDATE chicken_sales SET payment_status = 'delivered' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'cleared'"
   ).catch(() => {});
 
   await run("ALTER TABLE inventory ADD COLUMN profit_margin_per_bag REAL NOT NULL DEFAULT 0").catch(() => {});
@@ -910,7 +910,7 @@ async function migrateChickenBreedAccumulatedProfitClearedOnlyV1() {
   ).catch(() => {});
   const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["chicken_profit_cleared_only_v1"]);
   if (done) return;
-  const clearedCond = `(LOWER(TRIM(COALESCE(cs.delivery_status, 'pending'))) = 'delivered' OR LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'delivered')`;
+  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared')`;
   const breeds = await all("SELECT breed FROM chicken_breeds");
   const nowIso = new Date().toISOString();
   for (const { breed } of breeds) {
@@ -1671,11 +1671,8 @@ async function adjustChickenBreedAccumulatedProfit(breed, deltaProfit) {
 
 /** Staff chick sales: margin counts toward breed totals/UI only when payment is Delivered. */
 function chickenStaffSalePaymentIsCleared(row) {
-  const delivery = String(row?.delivery_status ?? "").trim().toLowerCase();
-  if (delivery === "delivered") return true;
-  // Backward compatibility for old rows before delivery_status existed.
-  const legacy = String(row?.payment_status ?? "pending").trim().toLowerCase();
-  return legacy === "delivered";
+  const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
+  return s === "delivered" || s === "cleared";
 }
 
 async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
@@ -1704,10 +1701,11 @@ function normalizeChickenCustomerPayment(p, totalAmount, role) {
   let money_paid = p.money_paid === "" || p.money_paid == null ? 0 : Number(p.money_paid);
   if (!Number.isFinite(money_paid) || money_paid < 0) money_paid = 0;
   let payment_status = String(p.payment_status || "pending").toLowerCase();
-  if (payment_status !== "cleared" && payment_status !== "pending") payment_status = "pending";
+  if (payment_status === "cleared") payment_status = "delivered";
+  if (payment_status !== "delivered" && payment_status !== "pending") payment_status = "pending";
   let delivery_status = String(p.delivery_status || "pending").toLowerCase();
   if (delivery_status !== "delivered" && delivery_status !== "pending") delivery_status = "pending";
-  if (payment_status === "cleared" && money_paid < totalAmount - 1e-9) {
+  if (payment_status === "delivered" && money_paid < totalAmount - 1e-9) {
     money_paid = totalAmount;
   }
   return { customer_name, customer_phone, money_paid, payment_status, delivery_status };
@@ -1794,12 +1792,12 @@ async function reverseChickenSaleProfitEffect(row) {
 }
 
 /**
- * Staff margin totals: only rows with Delivery status = Delivered (pending counts as 0).
+ * Staff margin totals: only rows with Payment status = Delivered (pending counts as 0).
  * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
  */
 async function computeChickenProfitSummary(employeeUsernameOnly) {
   const today = todayDMY();
-  const clearedCond = `(LOWER(TRIM(COALESCE(cs.delivery_status, 'pending'))) = 'delivered' OR LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'delivered')`;
+  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared')`;
   const baseJoin = `FROM chicken_sales cs
      INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'`;
   const paramsToday = [today];
@@ -4411,7 +4409,7 @@ app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), asyn
     return res.status(400).json({ error: "Invalid sale id." });
   }
   const paymentStatusRaw = String(req.body?.payment_status || "pending").trim().toLowerCase();
-  const paymentStatus = paymentStatusRaw === "cleared" ? "cleared" : "pending";
+  const paymentStatus = paymentStatusRaw === "delivered" || paymentStatusRaw === "cleared" ? "delivered" : "pending";
   const deliveryStatusRaw = String(req.body?.delivery_status || "pending").trim().toLowerCase();
   const deliveryStatus = deliveryStatusRaw === "delivered" ? "delivered" : "pending";
   const row = await get(
@@ -4426,7 +4424,7 @@ app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), asyn
     return res.status(400).json({ error: "Only staff chicken sales support payment status updates here." });
   }
   const wasCleared = chickenStaffSalePaymentIsCleared(row);
-  const willBeCleared = deliveryStatus === "delivered";
+  const willBeCleared = paymentStatus === "delivered";
   if (!wasCleared && willBeCleared) {
     await adjustChickenBreedAccumulatedProfit(row.breed, (Number(row.quantity_birds) || 0) * (Number(row.margin_snap) || 0));
   } else if (wasCleared && !willBeCleared) {

@@ -887,7 +887,7 @@ function escapeHtmlCell(text) {
 
 function chickenSalePaymentStatusLabel(row) {
   const s = String(row.payment_status || "pending").toLowerCase();
-  if (s === "cleared") return "Cleared";
+  if (s === "delivered" || s === "cleared") return "Delivered";
   return "Pending";
 }
 
@@ -907,13 +907,17 @@ function chickenSaleCustomerCellsHtml(row) {
   const bal = total - (Number(row.money_paid) || 0);
   const balStr = currency(bal);
   const isOwnerStaffRow = state.user?.role === "owner" && !isChickenRowOwnerInventory(row);
-  const currentPayStatus = String(row.payment_status || "pending").toLowerCase() === "cleared" ? "cleared" : "pending";
+  const currentPayStatus =
+    String(row.payment_status || "pending").toLowerCase() === "delivered" ||
+    String(row.payment_status || "pending").toLowerCase() === "cleared"
+      ? "delivered"
+      : "pending";
   const currentDeliveryStatus = chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending";
   const paymentCell = isOwnerStaffRow
     ? `<div class="row-actions">
          <select data-kind="chicken-pay-status" data-id="${row.id}">
            <option value="pending" ${currentPayStatus === "pending" ? "selected" : ""}>Pending</option>
-           <option value="cleared" ${currentPayStatus === "cleared" ? "selected" : ""}>Cleared</option>
+           <option value="delivered" ${currentPayStatus === "delivered" ? "selected" : ""}>Delivered</option>
          </select>
        </div>`
     : escapeHtmlCell(chickenSalePaymentStatusLabel(row));
@@ -945,7 +949,7 @@ function updateChickenCustomerAmounts() {
 function onChickenPaymentStatusChange() {
   if (state.user?.role !== "employee") return;
   const sel = document.getElementById("chPaymentStatus");
-  if (!sel || sel.value !== "cleared") return;
+  if (!sel || sel.value !== "delivered") return;
   const qty = Number(document.getElementById("chQuantity")?.value || 0);
   const unit = Number(document.getElementById("chUnitPrice")?.value || 0);
   const total = Number.isFinite(qty) && Number.isFinite(unit) ? qty * unit : NaN;
@@ -1018,10 +1022,8 @@ function fillOwnerCustomerViewPanel(row) {
 }
 
 function chickenStaffPaymentIsCleared(row) {
-  const ds = String(row?.delivery_status ?? "").trim().toLowerCase();
-  if (ds === "delivered") return true;
   const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
-  return s === "delivered";
+  return s === "delivered" || s === "cleared";
 }
 
 /** Profit for this row: margin × chicks for staff only when Payments is Delivered; owner inventory lines stay KES 0. */
@@ -2593,7 +2595,7 @@ function renderChickenSalesHistoryTable() {
     }
     staffMarginSum += chickenSaleLineProfit(r);
   }
-  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (delivered deliveries only; matches Profit column). Highlight above uses the same basis.`;
+  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (delivered payments only; matches Profit column). Highlight above uses the same basis.`;
 }
 
 function populateChickenBreedSelect() {
@@ -3830,10 +3832,10 @@ chickenForm.addEventListener("submit", async (event) => {
     const unitForLine = Number(payload.unit_price);
     const lineTotal = qty * unitForLine;
     const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
-    const payStatus = document.getElementById("chPaymentStatus")?.value === "cleared" ? "cleared" : "pending";
+    const payStatus = document.getElementById("chPaymentStatus")?.value === "delivered" ? "delivered" : "pending";
     const deliveryStatus = document.getElementById("chDeliveryStatus")?.value === "delivered" ? "delivered" : "pending";
-    if (payStatus === "cleared" && moneyPaid + 0.005 < lineTotal) {
-      alert("When payment status is Cleared, money paid must cover the sale total.");
+    if (payStatus === "delivered" && moneyPaid + 0.005 < lineTotal) {
+      alert("When payment status is Delivered, money paid must cover the sale total.");
       return;
     }
     payload.customer_name = document.getElementById("chCustomerName")?.value.trim() ?? "";
@@ -4131,7 +4133,10 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
       customer_phone: row.customer_phone || "",
       money_paid: Number(row.money_paid) || 0,
       payment_status:
-        String(row.payment_status || "").toLowerCase() === "cleared" ? "cleared" : "pending",
+        String(row.payment_status || "").toLowerCase() === "delivered" ||
+        String(row.payment_status || "").toLowerCase() === "cleared"
+          ? "delivered"
+          : "pending",
       delivery_status: chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending",
       pass_through_status:
         String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
@@ -4200,7 +4205,7 @@ function wireChickenTableClicks(tbody) {
       if (!(tr instanceof HTMLTableRowElement)) return;
       const sel = tr.querySelector(`select[data-kind="chicken-pay-status"][data-id="${idNum}"]`);
       if (!(sel instanceof HTMLSelectElement)) return;
-      const nextStatus = sel.value === "cleared" ? "cleared" : "pending";
+      const nextStatus = sel.value === "delivered" ? "delivered" : "pending";
       const deliverySel = tr.querySelector(`select[data-kind="chicken-delivery-status"][data-id="${idNum}"]`);
       if (!(deliverySel instanceof HTMLSelectElement)) return;
       const nextDelivery = deliverySel.value === "delivered" ? "delivered" : "pending";
@@ -4282,7 +4287,7 @@ function wireChickenTableClicks(tbody) {
         if (mp) mp.value = row.money_paid != null && row.money_paid !== "" ? String(row.money_paid) : "0";
         if (ps) {
           const st = String(row.payment_status || "pending").toLowerCase();
-          ps.value = st === "cleared" ? "cleared" : "pending";
+          ps.value = st === "delivered" || st === "cleared" ? "delivered" : "pending";
         }
         if (ds) {
           ds.value = chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending";
