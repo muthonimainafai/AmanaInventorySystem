@@ -167,6 +167,7 @@ const quantityInput = document.getElementById("quantityInStock");
 const buyingPriceInput = document.getElementById("buyingPrice");
 const sellingPriceInput = document.getElementById("sellingPrice");
 const profitMarginPerBagInput = document.getElementById("profitMarginPerBag");
+const reorderLevelInput = document.getElementById("reorderLevel");
 const editPricesBtn = document.getElementById("editPricesBtn");
 const clearBtn = document.getElementById("clearBtn");
 const tableBody = document.getElementById("inventory-body");
@@ -1769,6 +1770,7 @@ function resetForm() {
   buyingPriceInput.value = "0.00";
   sellingPriceInput.value = "0.00";
   profitMarginPerBagInput.value = "0.00";
+  if (reorderLevelInput) reorderLevelInput.value = "0";
   document.getElementById("accumulatedProfit").value = "0";
   document.getElementById("accumulatedBags").value = "";
   setInventoryPriceEditMode(true);
@@ -1820,6 +1822,7 @@ function applyInventoryPriceDefaults(force = false) {
     if (state.editId == null) {
       buyingPriceInput.value = "0.00";
       sellingPriceInput.value = "0.00";
+      if (reorderLevelInput) reorderLevelInput.value = "0";
       syncInventoryProfitMarginFromPrices();
       setInventoryPriceEditMode(true);
     }
@@ -1829,9 +1832,11 @@ function applyInventoryPriceDefaults(force = false) {
   if (latest) {
     buyingPriceInput.value = Number(latest.buying_price || 0).toFixed(2);
     sellingPriceInput.value = Number(latest.selling_price || 0).toFixed(2);
+    if (reorderLevelInput) reorderLevelInput.value = String(Number(latest.reorder_level || 0));
   } else if (state.editId == null) {
     buyingPriceInput.value = "0.00";
     sellingPriceInput.value = "0.00";
+    if (reorderLevelInput) reorderLevelInput.value = "0";
   }
   syncInventoryProfitMarginFromPrices();
   setInventoryPriceEditMode(true);
