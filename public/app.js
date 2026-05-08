@@ -304,12 +304,24 @@ function applyAppTheme() {
   const roseTab = document.getElementById("roseInventoryTabLabel");
   if (roseTab) {
     roseTab.textContent =
-      state.appInstance === "rose" ? "Rose Inventory" : state.appInstance === "terry" || state.appInstance === "cess" ? "Records" : "Rose Inventory";
+      state.appInstance === "rose"
+        ? "Rose Inventory"
+        : state.appInstance === "terry"
+          ? "Terry Records"
+          : state.appInstance === "cess"
+            ? "Records"
+            : "Rose Inventory";
   }
   const rosePageTitle = document.getElementById("roseInventoryPageTitle");
   if (rosePageTitle) {
     rosePageTitle.textContent =
-      state.appInstance === "rose" ? "Rose Inventory" : state.appInstance === "terry" || state.appInstance === "cess" ? "Records" : "Rose Inventory";
+      state.appInstance === "rose"
+        ? "Rose Inventory"
+        : state.appInstance === "terry"
+          ? "Terry Records"
+          : state.appInstance === "cess"
+            ? "Records"
+            : "Rose Inventory";
   }
 }
 
@@ -1294,10 +1306,10 @@ function showLoggedIn() {
     el.classList.toggle("hidden", state.user.role !== "employee");
   });
   if (roseInventoryTabLabel) {
-    roseInventoryTabLabel.textContent = state.appInstance === "terry" ? "Records Terry" : "Rose Inventory";
+    roseInventoryTabLabel.textContent = state.appInstance === "terry" ? "Terry Records" : "Rose Inventory";
   }
   if (nahashonAccountsTabLabel) {
-    nahashonAccountsTabLabel.textContent = state.appInstance === "terry" ? "Records Nahashon" : "Nahashon Accounts";
+    nahashonAccountsTabLabel.textContent = state.appInstance === "terry" ? "Nahashon Records" : "Nahashon Accounts";
   }
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
@@ -2985,10 +2997,10 @@ function showPage(page) {
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
   if (page === "nahashon-accounts" && state.appInstance === "terry") {
-    pageHeading.textContent = "Records Nahashon";
+    pageHeading.textContent = "Nahashon Records";
   }
   if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess")) {
-    pageHeading.textContent = state.appInstance === "terry" ? "Records Terry" : "Records";
+    pageHeading.textContent = state.appInstance === "terry" ? "Terry Records" : "Records";
   }
   if (page === "chicken-inventory" && state.user?.role === "employee") {
     pageHeading.textContent = "Chicken Sales";
