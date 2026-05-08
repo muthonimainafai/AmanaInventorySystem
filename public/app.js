@@ -781,10 +781,8 @@ function tableDateSeparatorRow(colSpan) {
   return `<tr class="table-date-separator" aria-hidden="true"><td colspan="${colSpan}"></td></tr>`;
 }
 
-/** Inserts date separators and always renders latest dates first. */
-function joinRowsWithDateSeparators(rows, colSpan, buildRowHtml) {
-  if (!rows.length) return "";
-  const sortedRows = [...rows].sort((a, b) => {
+function sortRowsLatestFirst(rows) {
+  return [...rows].sort((a, b) => {
     const ap = parseDMYParts(a?.date);
     const bp = parseDMYParts(b?.date);
     if (ap && bp) {
@@ -795,8 +793,19 @@ function joinRowsWithDateSeparators(rows, colSpan, buildRowHtml) {
     } else if (bp) {
       return 1;
     }
+    const at = new Date(a?.updated_at || a?.created_at || 0).getTime();
+    const bt = new Date(b?.updated_at || b?.created_at || 0).getTime();
+    const aTime = Number.isFinite(at) ? at : 0;
+    const bTime = Number.isFinite(bt) ? bt : 0;
+    if (aTime !== bTime) return bTime - aTime;
     return Number(b?.id || 0) - Number(a?.id || 0);
   });
+}
+
+/** Inserts date separators and always renders latest dates first. */
+function joinRowsWithDateSeparators(rows, colSpan, buildRowHtml) {
+  if (!rows.length) return "";
+  const sortedRows = sortRowsLatestFirst(rows);
   const parts = [];
   for (let i = 0; i < sortedRows.length; i++) {
     if (i > 0) {
@@ -2470,7 +2479,7 @@ function resetRoseForm() {
 
 function renderRoseTable() {
   if (!roseBody) return;
-  const rows = state.roseEntries || [];
+  const rows = sortRowsLatestFirst(state.roseEntries || []);
   if (!rows.length) {
     roseBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
     const inEl = document.getElementById("roseTotalMoneyIn");
