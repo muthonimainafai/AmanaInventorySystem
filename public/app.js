@@ -892,10 +892,13 @@ function chickenSalePaymentStatusLabel(row) {
 }
 
 function chickenSaleDeliveryStatusLabel(row) {
-  const ds = String(row.delivery_status || "").toLowerCase();
+  const rawDelivery = row.delivery_status;
+  const ds = String(rawDelivery || "").toLowerCase().trim();
   if (ds === "delivered") return "Delivered";
-  const legacy = String(row.payment_status || "").toLowerCase();
-  if (legacy === "delivered") return "Delivered";
+  if (ds === "pending") return "Pending";
+  // Legacy fallback only when delivery status is truly missing.
+  const legacy = String(row.payment_status || "").toLowerCase().trim();
+  if ((rawDelivery == null || String(rawDelivery).trim() === "") && legacy === "delivered") return "Delivered";
   return "Pending";
 }
 
