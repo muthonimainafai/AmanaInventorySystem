@@ -200,6 +200,8 @@ const retailPricingBody = document.getElementById("retail-pricing-body");
 const retailFeedForm = document.getElementById("retail-feed-form");
 const rfBrand = document.getElementById("rfBrand");
 const rfFeedType = document.getElementById("rfFeedType");
+const roseInventoryTabLabel = document.getElementById("roseInventoryTabLabel");
+const nahashonAccountsTabLabel = document.getElementById("nahashonAccountsTabLabel");
 
 const chickenForm = document.getElementById("chicken-form");
 const chickenInventoryBody = document.getElementById("chicken-inventory-body");
@@ -1283,6 +1285,12 @@ function showLoggedIn() {
   document.querySelectorAll(".employee-only-action").forEach((el) => {
     el.classList.toggle("hidden", state.user.role !== "employee");
   });
+  if (roseInventoryTabLabel) {
+    roseInventoryTabLabel.textContent = state.appInstance === "terry" ? "Records Terry" : "Rose Inventory";
+  }
+  if (nahashonAccountsTabLabel) {
+    nahashonAccountsTabLabel.textContent = state.appInstance === "terry" ? "Records Nahashon" : "Nahashon Accounts";
+  }
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
     const isOwnerSalesPageHiddenForTenant =
@@ -1294,7 +1302,7 @@ function showLoggedIn() {
     const shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : state.appInstance === "terry"
-      ? page === "nahashon-accounts" || page === "calculator"
+      ? page === "rose-inventory" || page === "nahashon-accounts" || page === "calculator"
       : state.appInstance === "cess"
       ? page === "rose-inventory" || page === "calculator"
       : state.appInstance === "shop"
@@ -2882,11 +2890,8 @@ function showPage(page) {
       return showPage("inventory");
     }
   }
-  if (state.appInstance === "terry" && page === "rose-inventory") {
-    return showPage("nahashon-accounts");
-  }
-  if (state.appInstance === "terry" && page !== "nahashon-accounts" && page !== "calculator") {
-    return showPage("nahashon-accounts");
+  if (state.appInstance === "terry" && page !== "nahashon-accounts" && page !== "rose-inventory" && page !== "calculator") {
+    return showPage("rose-inventory");
   }
   if (state.appInstance === "cess" && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
@@ -2911,10 +2916,10 @@ function showPage(page) {
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
   if (page === "nahashon-accounts" && state.appInstance === "terry") {
-    pageHeading.textContent = "Nahashon Accounts";
+    pageHeading.textContent = "Records Nahashon";
   }
   if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess")) {
-    pageHeading.textContent = "Records";
+    pageHeading.textContent = state.appInstance === "terry" ? "Records Terry" : "Records";
   }
   if (page === "chicken-inventory" && state.user?.role === "employee") {
     pageHeading.textContent = "Chicken Sales";
@@ -3302,7 +3307,7 @@ loginForm.addEventListener("submit", async (event) => {
     showLoggedIn();
     showPage(
       state.appInstance === "terry"
-        ? "nahashon-accounts"
+        ? "rose-inventory"
         : state.appInstance === "cess"
         ? "rose-inventory"
         : state.appInstance === "shop"
@@ -3546,7 +3551,7 @@ async function boot() {
     showLoggedIn();
     showPage(
       state.appInstance === "terry"
-        ? "nahashon-accounts"
+        ? "rose-inventory"
         : state.appInstance === "cess"
         ? "rose-inventory"
         : state.appInstance === "shop"
