@@ -572,6 +572,7 @@ function calculatorRememberRowFromInputs(tr) {
 function updateCalculatorGrandTotalDisplay() {
   if (!calcBody) return;
   let grand = 0;
+  let totalBags = 0;
   let linesWithValues = 0;
   calcBody.querySelectorAll("tr").forEach((tr) => {
     const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
@@ -580,17 +581,19 @@ function updateCalculatorGrandTotalDisplay() {
     if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
     const bags = Number(String(bagsEl.value || "").trim());
     const buying = Number(String(buyEl.value || "").trim());
-    const rowTotal = Math.max(0, Number.isFinite(bags) ? bags : 0) * Math.max(0, Number.isFinite(buying) ? buying : 0);
+    const safeBags = Math.max(0, Number.isFinite(bags) ? bags : 0);
+    const rowTotal = safeBags * Math.max(0, Number.isFinite(buying) ? buying : 0);
     totalCell.textContent = currency(rowTotal);
     if (rowTotal > 0) linesWithValues += 1;
+    totalBags += safeBags;
     grand += rowTotal;
   });
   document.querySelectorAll(".js-calc-grand-total-value").forEach((el) => {
     el.textContent = currency(grand);
   });
   const meta = linesWithValues
-    ? `${linesWithValues} line${linesWithValues === 1 ? "" : "s"} with values. Grand total purchase cost: ${currency(grand)}.`
-    : "Enter number of bags and buying price to calculate purchase cost.";
+    ? `${linesWithValues} line${linesWithValues === 1 ? "" : "s"} with values. Total bags: ${totalBags}. Grand total purchase cost: ${currency(grand)}.`
+    : "Enter number of bags and buying price to calculate purchase cost (and total bags).";
   document.querySelectorAll(".js-calc-grand-total-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -3650,6 +3653,7 @@ function downloadCalculatorPdf() {
     return;
   }
   const today = state.shopToday || clientShopTodayDMY();
+  const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
   const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
@@ -3681,7 +3685,8 @@ function downloadCalculatorPdf() {
   const finalY = doc.lastAutoTable?.finalY || 98;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text(`Grand total: ${currency(grand)}`, 40, finalY + 24);
+  doc.text(`Total bags: ${totalBags}`, 40, finalY + 24);
+  doc.text(`Grand total: ${currency(grand)}`, 40, finalY + 42);
 
   const fileDate = today.replace(/\//g, "-");
   doc.save(`amana-kuku-feeds-calculator-${fileDate}.pdf`);
