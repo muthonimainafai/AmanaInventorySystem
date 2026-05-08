@@ -436,7 +436,7 @@ function updateChickenProfitDisplay() {
   });
   const shop = state.chickenProfitSummary?.today || state.shopToday || "";
   const meta = shop
-    ? `Shop day ${shop}. Cumulative and today count delivered staff chick sales only (Pending shows KES 0 in the table until delivered). Your inventory lines do not add to these totals.`
+    ? `Shop day ${shop}. Cumulative and today count staff chick sales with Delivery status = Delivered only (pending delivery shows KES 0). Your inventory lines do not add to these totals.`
     : "";
   document.querySelectorAll(".js-chicken-profit-meta").forEach((el) => {
     el.textContent = meta;
@@ -887,7 +887,15 @@ function escapeHtmlCell(text) {
 
 function chickenSalePaymentStatusLabel(row) {
   const s = String(row.payment_status || "pending").toLowerCase();
-  if (s === "delivered" || s === "cleared") return "Delivered";
+  if (s === "cleared") return "Cleared";
+  return "Pending";
+}
+
+function chickenSaleDeliveryStatusLabel(row) {
+  const ds = String(row.delivery_status || "").toLowerCase();
+  if (ds === "delivered") return "Delivered";
+  const legacy = String(row.payment_status || "").toLowerCase();
+  if (legacy === "delivered") return "Delivered";
   return "Pending";
 }
 
@@ -899,18 +907,26 @@ function chickenSaleCustomerCellsHtml(row) {
   const bal = total - (Number(row.money_paid) || 0);
   const balStr = currency(bal);
   const isOwnerStaffRow = state.user?.role === "owner" && !isChickenRowOwnerInventory(row);
-  const currentStatus =
-    String(row.payment_status || "pending").toLowerCase() === "delivered" ? "delivered" : "pending";
-  const st = isOwnerStaffRow
+  const currentPayStatus = String(row.payment_status || "pending").toLowerCase() === "cleared" ? "cleared" : "pending";
+  const currentDeliveryStatus = chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending";
+  const paymentCell = isOwnerStaffRow
     ? `<div class="row-actions">
          <select data-kind="chicken-pay-status" data-id="${row.id}">
-           <option value="pending" ${currentStatus === "pending" ? "selected" : ""}>Pending</option>
-           <option value="delivered" ${currentStatus === "delivered" ? "selected" : ""}>Delivered</option>
+           <option value="pending" ${currentPayStatus === "pending" ? "selected" : ""}>Pending</option>
+           <option value="cleared" ${currentPayStatus === "cleared" ? "selected" : ""}>Cleared</option>
+         </select>
+       </div>`
+    : escapeHtmlCell(chickenSalePaymentStatusLabel(row));
+  const deliveryCell = isOwnerStaffRow
+    ? `<div class="row-actions">
+         <select data-kind="chicken-delivery-status" data-id="${row.id}">
+           <option value="pending" ${currentDeliveryStatus === "pending" ? "selected" : ""}>Pending</option>
+           <option value="delivered" ${currentDeliveryStatus === "delivered" ? "selected" : ""}>Delivered</option>
          </select>
          <button type="button" data-kind="chicken-pay-save" data-id="${row.id}">Save</button>
        </div>`
-    : escapeHtmlCell(chickenSalePaymentStatusLabel(row));
-  return `<td>${name}</td><td>${phone}</td><td>${paid}</td><td>${balStr}</td><td>${st}</td>`;
+    : escapeHtmlCell(chickenSaleDeliveryStatusLabel(row));
+  return `<td>${name}</td><td>${phone}</td><td>${paid}</td><td>${balStr}</td><td>${paymentCell}</td><td>${deliveryCell}</td>`;
 }
 
 function updateChickenCustomerAmounts() {
@@ -929,7 +945,7 @@ function updateChickenCustomerAmounts() {
 function onChickenPaymentStatusChange() {
   if (state.user?.role !== "employee") return;
   const sel = document.getElementById("chPaymentStatus");
-  if (!sel || sel.value !== "delivered") return;
+  if (!sel || sel.value !== "cleared") return;
   const qty = Number(document.getElementById("chQuantity")?.value || 0);
   const unit = Number(document.getElementById("chUnitPrice")?.value || 0);
   const total = Number.isFinite(qty) && Number.isFinite(unit) ? qty * unit : NaN;
@@ -1002,8 +1018,10 @@ function fillOwnerCustomerViewPanel(row) {
 }
 
 function chickenStaffPaymentIsCleared(row) {
+  const ds = String(row?.delivery_status ?? "").trim().toLowerCase();
+  if (ds === "delivered") return true;
   const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
-  return s === "delivered" || s === "cleared";
+  return s === "delivered";
 }
 
 /** Profit for this row: margin × chicks for staff only when Payments is Delivered; owner inventory lines stay KES 0. */
@@ -1144,9 +1162,13 @@ function showLoggedIn() {
   });
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
+    const isUfarayOwnerSalesPage =
+      state.appInstance === "ufaray" && isOwner && (page === "sales-bags" || page === "sales-kg");
     const recordsTenant = isRecordsTenant();
     const terryCessShopTenant = isTerryCessOrShopTenant();
-    const shouldShow = isTerryOrCessTenant()
+    const shouldShow = isUfarayOwnerSalesPage
+      ? false
+      : isTerryOrCessTenant()
       ? page === "rose-inventory"
       : state.appInstance === "shop"
       ? page === "inventory" || page === "sales-bags"
@@ -2486,7 +2508,7 @@ function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
   const isEmployeeViewer = state.user.role === "employee";
-  const colSpan = isEmployeeViewer ? 14 : 15;
+  const colSpan = isEmployeeViewer ? 15 : 16;
   if (!state.chickenSales.length) {
     return `<tr><td colspan="${colSpan}" class="empty">${emptyMsg}</td></tr>`;
   }
@@ -2571,7 +2593,7 @@ function renderChickenSalesHistoryTable() {
     }
     staffMarginSum += chickenSaleLineProfit(r);
   }
-  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (delivered payments only; matches Profit column). Highlight above uses the same basis.`;
+  summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (delivered deliveries only; matches Profit column). Highlight above uses the same basis.`;
 }
 
 function populateChickenBreedSelect() {
@@ -2631,14 +2653,19 @@ function resetChickenForm() {
   const cp = document.getElementById("chCustomerPhone");
   const mp = document.getElementById("chMoneyPaid");
   const ps = document.getElementById("chPaymentStatus");
+  const ds = document.getElementById("chDeliveryStatus");
   if (cn) cn.value = "";
   if (cp) cp.value = "";
   if (mp) mp.value = "0";
   if (ps) ps.value = "pending";
+  if (ds) ds.value = "pending";
   updateChickenCustomerAmounts();
 }
 
 function showPage(page) {
+  if (state.appInstance === "ufaray" && state.user?.role === "owner" && (page === "sales-bags" || page === "sales-kg")) {
+    return showPage("inventory");
+  }
   if (isTerryOrCessTenant() && page !== "rose-inventory") {
     return showPage("rose-inventory");
   }
@@ -3803,15 +3830,17 @@ chickenForm.addEventListener("submit", async (event) => {
     const unitForLine = Number(payload.unit_price);
     const lineTotal = qty * unitForLine;
     const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
-    const payStatus = document.getElementById("chPaymentStatus")?.value === "delivered" ? "delivered" : "pending";
-    if (payStatus === "delivered" && moneyPaid + 0.005 < lineTotal) {
-      alert("When Payments is Delivered, money paid must cover the sale total.");
+    const payStatus = document.getElementById("chPaymentStatus")?.value === "cleared" ? "cleared" : "pending";
+    const deliveryStatus = document.getElementById("chDeliveryStatus")?.value === "delivered" ? "delivered" : "pending";
+    if (payStatus === "cleared" && moneyPaid + 0.005 < lineTotal) {
+      alert("When payment status is Cleared, money paid must cover the sale total.");
       return;
     }
     payload.customer_name = document.getElementById("chCustomerName")?.value.trim() ?? "";
     payload.customer_phone = document.getElementById("chCustomerPhone")?.value.trim() ?? "";
     payload.money_paid = Number.isFinite(moneyPaid) && moneyPaid >= 0 ? moneyPaid : 0;
     payload.payment_status = payStatus;
+    payload.delivery_status = deliveryStatus;
   }
   const saveBtn = document.getElementById("chSaveBtn");
   saveBtn.disabled = true;
@@ -4102,7 +4131,8 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
       customer_phone: row.customer_phone || "",
       money_paid: Number(row.money_paid) || 0,
       payment_status:
-        String(row.payment_status || "").toLowerCase() === "delivered" ? "delivered" : "pending",
+        String(row.payment_status || "").toLowerCase() === "cleared" ? "cleared" : "pending",
+      delivery_status: chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending",
       pass_through_status:
         String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
         String(row.pass_through_status || "pending").toLowerCase() === "solved"
@@ -4170,12 +4200,15 @@ function wireChickenTableClicks(tbody) {
       if (!(tr instanceof HTMLTableRowElement)) return;
       const sel = tr.querySelector(`select[data-kind="chicken-pay-status"][data-id="${idNum}"]`);
       if (!(sel instanceof HTMLSelectElement)) return;
-      const nextStatus = sel.value === "delivered" ? "delivered" : "pending";
+      const nextStatus = sel.value === "cleared" ? "cleared" : "pending";
+      const deliverySel = tr.querySelector(`select[data-kind="chicken-delivery-status"][data-id="${idNum}"]`);
+      if (!(deliverySel instanceof HTMLSelectElement)) return;
+      const nextDelivery = deliverySel.value === "delivered" ? "delivered" : "pending";
       target.setAttribute("disabled", "disabled");
       try {
         await api(`/api/chicken-sales/${idNum}/payment-status`, {
           method: "PUT",
-          body: JSON.stringify({ payment_status: nextStatus }),
+          body: JSON.stringify({ payment_status: nextStatus, delivery_status: nextDelivery }),
         });
         await loadAllData();
       } catch (error) {
@@ -4243,12 +4276,16 @@ function wireChickenTableClicks(tbody) {
         const cp = document.getElementById("chCustomerPhone");
         const mp = document.getElementById("chMoneyPaid");
         const ps = document.getElementById("chPaymentStatus");
+        const ds = document.getElementById("chDeliveryStatus");
         if (cn) cn.value = row.customer_name || "";
         if (cp) cp.value = row.customer_phone || "";
         if (mp) mp.value = row.money_paid != null && row.money_paid !== "" ? String(row.money_paid) : "0";
         if (ps) {
           const st = String(row.payment_status || "pending").toLowerCase();
-          ps.value = st === "delivered" || st === "cleared" ? "delivered" : "pending";
+          ps.value = st === "cleared" ? "cleared" : "pending";
+        }
+        if (ds) {
+          ds.value = chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending";
         }
         updateChickenCustomerAmounts();
       }

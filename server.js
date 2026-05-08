@@ -613,8 +613,15 @@ async function initDb() {
   await run("ALTER TABLE chicken_sales ADD COLUMN customer_phone TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN money_paid REAL").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN payment_status TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN delivery_status TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
+  await run(
+    "UPDATE chicken_sales SET delivery_status = 'delivered' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
+  ).catch(() => {});
+  await run(
+    "UPDATE chicken_sales SET payment_status = 'cleared' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
+  ).catch(() => {});
 
   await run("ALTER TABLE inventory ADD COLUMN profit_margin_per_bag REAL NOT NULL DEFAULT 0").catch(() => {});
   await run("ALTER TABLE inventory ADD COLUMN accumulated_profit REAL NOT NULL DEFAULT 0").catch(() => {});
@@ -903,7 +910,7 @@ async function migrateChickenBreedAccumulatedProfitClearedOnlyV1() {
   ).catch(() => {});
   const done = await get("SELECT id FROM app_migrations WHERE id = ?", ["chicken_profit_cleared_only_v1"]);
   if (done) return;
-  const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared')`;
+  const clearedCond = `(LOWER(TRIM(COALESCE(cs.delivery_status, 'pending'))) = 'delivered' OR LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'delivered')`;
   const breeds = await all("SELECT breed FROM chicken_breeds");
   const nowIso = new Date().toISOString();
   for (const { breed } of breeds) {
@@ -1664,8 +1671,11 @@ async function adjustChickenBreedAccumulatedProfit(breed, deltaProfit) {
 
 /** Staff chick sales: margin counts toward breed totals/UI only when payment is Delivered. */
 function chickenStaffSalePaymentIsCleared(row) {
-  const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
-  return s === "delivered" || s === "cleared";
+  const delivery = String(row?.delivery_status ?? "").trim().toLowerCase();
+  if (delivery === "delivered") return true;
+  // Backward compatibility for old rows before delivery_status existed.
+  const legacy = String(row?.payment_status ?? "pending").trim().toLowerCase();
+  return legacy === "delivered";
 }
 
 async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
@@ -1687,19 +1697,20 @@ async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
 /** Staff chick sales: optional customer ledger fields. Owner inventory lines store empty / zero. */
 function normalizeChickenCustomerPayment(p, totalAmount, role) {
   if (role !== "employee") {
-    return { customer_name: "", customer_phone: "", money_paid: 0, payment_status: "pending" };
+    return { customer_name: "", customer_phone: "", money_paid: 0, payment_status: "pending", delivery_status: "pending" };
   }
   const customer_name = String(p.customer_name || "").trim();
   const customer_phone = String(p.customer_phone || "").trim();
   let money_paid = p.money_paid === "" || p.money_paid == null ? 0 : Number(p.money_paid);
   if (!Number.isFinite(money_paid) || money_paid < 0) money_paid = 0;
   let payment_status = String(p.payment_status || "pending").toLowerCase();
-  if (payment_status === "cleared") payment_status = "delivered";
-  if (payment_status !== "delivered" && payment_status !== "pending") payment_status = "pending";
-  if (payment_status === "delivered" && money_paid < totalAmount - 1e-9) {
+  if (payment_status !== "cleared" && payment_status !== "pending") payment_status = "pending";
+  let delivery_status = String(p.delivery_status || "pending").toLowerCase();
+  if (delivery_status !== "delivered" && delivery_status !== "pending") delivery_status = "pending";
+  if (payment_status === "cleared" && money_paid < totalAmount - 1e-9) {
     money_paid = totalAmount;
   }
-  return { customer_name, customer_phone, money_paid, payment_status };
+  return { customer_name, customer_phone, money_paid, payment_status, delivery_status };
 }
 
 /**
@@ -1783,12 +1794,12 @@ async function reverseChickenSaleProfitEffect(row) {
 }
 
 /**
- * Staff margin totals: only rows with Payments = Delivered (pending counts as 0).
+ * Staff margin totals: only rows with Delivery status = Delivered (pending counts as 0).
  * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
  */
 async function computeChickenProfitSummary(employeeUsernameOnly) {
   const today = todayDMY();
-  const clearedCond = `(LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared'))`;
+  const clearedCond = `(LOWER(TRIM(COALESCE(cs.delivery_status, 'pending'))) = 'delivered' OR LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) = 'delivered')`;
   const baseJoin = `FROM chicken_sales cs
      INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'`;
   const paramsToday = [today];
@@ -2032,6 +2043,9 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
     if (!validateFeed(payload.brand, payload.feed_type, bagSize)) {
       return res.status(400).json({ error: "Invalid brand/feed type/bag size combination." });
     }
+    if (!Number.isFinite(addQty) || addQty < 1) {
+      return res.status(400).json({ error: "Quantity in stock must be at least 1 when adding stock." });
+    }
 
     const margin = Number(payload.profit_margin_per_bag);
     const brandCanon = resolveBrandKey(payload.brand);
@@ -2039,6 +2053,64 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       (catalogForActiveTenant()[brandCanon] || []).find(
         (i) => normalizeFeedType(i.type) === normalizeFeedType(payload.feed_type)
       )?.type || payload.feed_type;
+    const now = new Date().toISOString();
+
+    // Ufaray: update existing line directly so owner stock adds always reflect immediately.
+    if (activeTenant() === "ufaray") {
+      const current = await getInventoryItem(brandCanon, feedCanon, bagSize);
+      if (current) {
+        const nextQty = Number(current.quantity_in_stock || 0) + addQty;
+        const nextAcc = Math.max(0, Number(current.accumulated_bags || 0) + addQty);
+        const totalStock = bagSize * nextQty;
+        await run(
+          `UPDATE inventory SET
+           date = ?, brand = ?, feed_type = ?, bag_size = ?,
+           quantity_in_stock = ?, cost_price = 0, buying_price = ?, selling_price = ?, total_stock = ?, reorder_level = ?,
+           profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            dateCanon,
+            brandCanon,
+            feedCanon,
+            bagSize,
+            nextQty,
+            Number(payload.buying_price),
+            Number(payload.selling_price),
+            totalStock,
+            Number(payload.reorder_level),
+            margin,
+            Number(current.accumulated_profit || 0),
+            nextAcc,
+            now,
+            current.id,
+          ]
+        );
+        return res.json({ ok: true, merged: true, consolidated: false });
+      }
+      const totalStock = bagSize * addQty;
+      await run(
+        `INSERT INTO inventory
+         (date, brand, feed_type, bag_size, quantity_in_stock, cost_price, buying_price, selling_price, total_stock, reorder_level,
+          profit_margin_per_bag, accumulated_profit, accumulated_bags, created_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        [
+          dateCanon,
+          brandCanon,
+          feedCanon,
+          bagSize,
+          addQty,
+          Number(payload.buying_price),
+          Number(payload.selling_price),
+          totalStock,
+          Number(payload.reorder_level),
+          margin,
+          addQty,
+          req.user.username,
+          now,
+        ]
+      );
+      return res.json({ ok: true, merged: false, consolidated: false });
+    }
 
     const matches = await findInventoryRowsSameDayProduct(dateCanon, brandCanon, feedCanon, bagSize);
 
@@ -2050,8 +2122,6 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       const combinedAccBags = maxAccAmong + addQty;
       const combinedProfit = matches.reduce((s, r) => s + Number(r.accumulated_profit || 0), 0);
       const totalStock = bagSize * combinedQty;
-      const now = new Date().toISOString();
-
       await run(
         `UPDATE inventory SET
          date = ?, brand = ?, feed_type = ?, bag_size = ?,
@@ -2092,8 +2162,6 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
     const newQty = carryQty + addQty;
     const newAcc = carryAcc + addQty;
     const totalStock = bagSize * newQty;
-    const now = new Date().toISOString();
-
     await run("BEGIN TRANSACTION");
     try {
       for (const r of allProduct) {
@@ -4234,8 +4302,8 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, through_party, pass_through_status, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       p.date,
       description,
@@ -4249,6 +4317,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
       cust.customer_phone,
       cust.money_paid,
       cust.payment_status,
+      cust.delivery_status,
       throughParty,
       passThroughStatus,
       req.user.username,
@@ -4295,7 +4364,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   await run(
-    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, through_party=?, pass_through_status=?, updated_at=? WHERE id=?`,
+    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, updated_at=? WHERE id=?`,
     [
       p.date,
       description,
@@ -4309,6 +4378,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
       cust.customer_phone,
       cust.money_paid,
       cust.payment_status,
+      cust.delivery_status,
       throughParty,
       passThroughStatus,
       new Date().toISOString(),
@@ -4341,7 +4411,9 @@ app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), asyn
     return res.status(400).json({ error: "Invalid sale id." });
   }
   const paymentStatusRaw = String(req.body?.payment_status || "pending").trim().toLowerCase();
-  const paymentStatus = paymentStatusRaw === "delivered" ? "delivered" : "pending";
+  const paymentStatus = paymentStatusRaw === "cleared" ? "cleared" : "pending";
+  const deliveryStatusRaw = String(req.body?.delivery_status || "pending").trim().toLowerCase();
+  const deliveryStatus = deliveryStatusRaw === "delivered" ? "delivered" : "pending";
   const row = await get(
     `SELECT cs.*, u.role AS creator_role
      FROM chicken_sales cs
@@ -4354,14 +4426,15 @@ app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), asyn
     return res.status(400).json({ error: "Only staff chicken sales support payment status updates here." });
   }
   const wasCleared = chickenStaffSalePaymentIsCleared(row);
-  const willBeCleared = paymentStatus === "delivered";
+  const willBeCleared = deliveryStatus === "delivered";
   if (!wasCleared && willBeCleared) {
     await adjustChickenBreedAccumulatedProfit(row.breed, (Number(row.quantity_birds) || 0) * (Number(row.margin_snap) || 0));
   } else if (wasCleared && !willBeCleared) {
     await adjustChickenBreedAccumulatedProfit(row.breed, -1 * (Number(row.quantity_birds) || 0) * (Number(row.margin_snap) || 0));
   }
-  await run("UPDATE chicken_sales SET payment_status = ?, updated_at = ? WHERE id = ?", [
+  await run("UPDATE chicken_sales SET payment_status = ?, delivery_status = ?, updated_at = ? WHERE id = ?", [
     paymentStatus,
+    deliveryStatus,
     new Date().toISOString(),
     idNum,
   ]);
