@@ -298,7 +298,7 @@ const FEEDERS_DRINKERS_CATALOG = [
   { name: "Drinker 10L", item_type: "drinker", capacity_liters: 10 },
   { name: "Drinker 3.5L", item_type: "drinker", capacity_liters: 3.5 },
   { name: "Drinker 3L", item_type: "drinker", capacity_liters: 3 },
-  { name: "Drinker 1L", item_type: "drinker", capacity_liters: 1 },
+  { name: "Drinker 1.5L", item_type: "drinker", capacity_liters: 1.5 },
   { name: "Drinker 0.75L", item_type: "drinker", capacity_liters: 0.75 },
   { name: "Feeder trough (Metal)", item_type: "feeder", capacity_liters: null },
   { name: "Feeder round big (Metal)", item_type: "feeder", capacity_liters: null },
@@ -680,6 +680,14 @@ async function initDb() {
   await run(
     "UPDATE feeders_drinkers_sales SET item_name = ? WHERE item_name = ?",
     ["Drinker 3.5L", "Drinker 5L"]
+  ).catch(() => {});
+  await run(
+    "UPDATE feeders_drinkers_inventory SET item_name = ?, capacity_liters = ? WHERE item_name = ?",
+    ["Drinker 1.5L", 1.5, "Drinker 1L"]
+  ).catch(() => {});
+  await run(
+    "UPDATE feeders_drinkers_sales SET item_name = ? WHERE item_name = ?",
+    ["Drinker 1.5L", "Drinker 1L"]
   ).catch(() => {});
   await run(
     "UPDATE medicaments_inventory SET accumulated_stock = quantity_in_stock WHERE COALESCE(accumulated_stock, 0) = 0"
