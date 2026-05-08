@@ -69,6 +69,7 @@ const PAGE_HEADINGS = {
   "feeders-drinkers": "Feeders and Drinkers inventory",
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
+  "nahashon-accounts": "Nahashon Accounts",
   "rose-inventory": "Rose Inventory",
   calculator: "Calculator",
   expenditure: "Expenditure",
@@ -98,6 +99,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "feeders-drinkers",
   "medicaments",
   "gas",
+  "nahashon-accounts",
   "calculator",
   "expenditure",
   "balance",
@@ -1291,7 +1293,9 @@ function showLoggedIn() {
     const terryCessShopTenant = isTerryCessOrShopTenant();
     const shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
-      : isTerryOrCessTenant()
+      : state.appInstance === "terry"
+      ? page === "nahashon-accounts" || page === "calculator"
+      : state.appInstance === "cess"
       ? page === "rose-inventory" || page === "calculator"
       : state.appInstance === "shop"
       ? page === "inventory" || page === "sales-bags" || page === "calculator"
@@ -2878,7 +2882,13 @@ function showPage(page) {
       return showPage("inventory");
     }
   }
-  if (isTerryOrCessTenant() && page !== "rose-inventory" && page !== "calculator") {
+  if (state.appInstance === "terry" && page === "rose-inventory") {
+    return showPage("nahashon-accounts");
+  }
+  if (state.appInstance === "terry" && page !== "nahashon-accounts" && page !== "calculator") {
+    return showPage("nahashon-accounts");
+  }
+  if (state.appInstance === "cess" && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
   }
   if ((isTerryOrCessTenant() || state.appInstance === "shop") && page === "calculator") {
@@ -2896,9 +2906,13 @@ function showPage(page) {
   document.querySelectorAll(".app-page").forEach((sec) => {
     sec.classList.add("hidden");
   });
-  const pageEl = document.getElementById(`page-${page}`);
+  const pageDomKey = page === "nahashon-accounts" ? "rose-inventory" : page;
+  const pageEl = document.getElementById(`page-${pageDomKey}`);
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
+  if (page === "nahashon-accounts" && state.appInstance === "terry") {
+    pageHeading.textContent = "Nahashon Accounts";
+  }
   if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess")) {
     pageHeading.textContent = "Records";
   }
@@ -2914,7 +2928,14 @@ function showPage(page) {
   if (page === "gas" && state.user?.role === "employee") {
     pageHeading.textContent = "Gas Sales";
   }
-  if (page === "sales-bags" || page === "sales-kg" || page === "chicken-inventory" || page === "expenditure" || page === "rose-inventory") {
+  if (
+    page === "sales-bags" ||
+    page === "sales-kg" ||
+    page === "chicken-inventory" ||
+    page === "expenditure" ||
+    page === "rose-inventory" ||
+    page === "nahashon-accounts"
+  ) {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
   }
@@ -3280,7 +3301,9 @@ loginForm.addEventListener("submit", async (event) => {
     persistAuth();
     showLoggedIn();
     showPage(
-      isTerryOrCessTenant()
+      state.appInstance === "terry"
+        ? "nahashon-accounts"
+        : state.appInstance === "cess"
         ? "rose-inventory"
         : state.appInstance === "shop"
           ? "inventory"
@@ -3522,7 +3545,9 @@ async function boot() {
   try {
     showLoggedIn();
     showPage(
-      isTerryOrCessTenant()
+      state.appInstance === "terry"
+        ? "nahashon-accounts"
+        : state.appInstance === "cess"
         ? "rose-inventory"
         : state.appInstance === "shop"
           ? "inventory"
