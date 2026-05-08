@@ -315,6 +315,8 @@ const MEDICAMENTS_CATALOG = [
   "Booster 100g",
   "Booster 500g",
   "Booster 1kg",
+  "Livergen 100ml",
+  "Kuku Antibiotic(Vetoxy 20)",
   "Paraffin 100ml",
   "Paraffin 250ml",
   "Jiko small",
