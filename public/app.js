@@ -1250,7 +1250,9 @@ function showLoggedIn() {
   }
   const isOwner = state.user.role === "owner";
   document.querySelectorAll(".owner-only-tab").forEach((el) => {
-    el.classList.toggle("hidden", !isOwner);
+    const isCalculatorTab = el instanceof HTMLElement && el.dataset?.page === "calculator";
+    const allowCalculatorForNahahUsers = isCalculatorTab && isTerryCessOrShopTenant();
+    el.classList.toggle("hidden", !(isOwner || allowCalculatorForNahahUsers));
   });
   document.querySelectorAll(".owner-only-highlight").forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
@@ -1269,9 +1271,9 @@ function showLoggedIn() {
     const shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : isTerryOrCessTenant()
-      ? page === "rose-inventory"
+      ? page === "rose-inventory" || page === "calculator"
       : state.appInstance === "shop"
-      ? page === "inventory" || page === "sales-bags"
+      ? page === "inventory" || page === "sales-bags" || page === "calculator"
       : terryCessShopTenant
       ? page === "inventory"
       : recordsTenant
@@ -2840,14 +2842,20 @@ function showPage(page) {
   ) {
     return showPage("inventory");
   }
-  if (isTerryOrCessTenant() && page !== "rose-inventory") {
+  if (state.appInstance === "shop" && page !== "inventory" && page !== "sales-bags") {
+    if (page === "calculator") {
+      // Calculator is allowed for all Nahah users (Terry/Cess/Shop).
+    } else {
+      return showPage("inventory");
+    }
+  }
+  if (isTerryOrCessTenant() && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
   }
-  if (state.appInstance === "shop" && page !== "inventory" && page !== "sales-bags") {
+  if ((isTerryOrCessTenant() || state.appInstance === "shop") && page === "calculator") {
+    // Allow calculator for both owner and employee in Nahah users.
+  } else if (page === "calculator" && state.user?.role !== "owner") {
     return showPage("inventory");
-  }
-  if (page === "calculator" && state.user?.role !== "owner") {
-    return showPage("sales-bags");
   }
   if (page === "balance" && state.user?.role !== "owner") {
     return showPage("sales-bags");
