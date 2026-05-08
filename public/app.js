@@ -524,6 +524,22 @@ function findInventoryBuyingPriceForCalculator(brand, feedType, bagSize) {
   return null;
 }
 
+/** Latest owner selling price from Feed Inventory for this exact line (records are id DESC). */
+function findInventorySellingPriceForCalculator(brand, feedType, bagSize) {
+  const bs = Number(bagSize);
+  if (!Number.isFinite(bs) || bs <= 0) return null;
+  const bKey = normalizeBrandName(brand);
+  const fKey = normalizeFeedTypeForMatch(feedType);
+  for (const row of state.records || []) {
+    if (Number(row.bag_size) !== bs) continue;
+    if (normalizeBrandName(row.brand) !== bKey) continue;
+    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
+    const sp = Number(row.selling_price);
+    return Number.isFinite(sp) ? sp : null;
+  }
+  return null;
+}
+
 function calculatorRowKey(brand, feedType, bagSize) {
   return `${resolveBrandKey(brand)}|${String(feedType || "").trim()}|${Number(bagSize) || 0}`;
 }
@@ -536,17 +552,20 @@ function calculatorRememberRowFromInputs(tr) {
   if (!brand || !feedType || !Number.isFinite(bagSize) || bagSize <= 0) return;
   const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
   const buyEl = tr.querySelector("input[data-kind='calc-buying']");
-  if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement)) return;
+  const sellEl = tr.querySelector("input[data-kind='calc-selling']");
+  if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement)) return;
   const key = calculatorRowKey(brand, feedType, bagSize);
   const bagsRaw = bagsEl.value;
   const buyingRaw = buyEl.value;
-  if (!bagsRaw.trim() && !buyingRaw.trim()) {
+  const sellingRaw = sellEl.value;
+  if (!bagsRaw.trim() && !buyingRaw.trim() && !sellingRaw.trim()) {
     delete state.calculatorValues[key];
     return;
   }
   state.calculatorValues[key] = {
     bags: bagsRaw,
     buying: buyingRaw,
+    selling: sellingRaw,
   };
 }
 
@@ -2550,7 +2569,7 @@ function renderCalculatorTable() {
   }
   const rows = calculatorRowsFromCatalog();
   if (!rows.length) {
-    calcBody.innerHTML = '<tr><td colspan="6" class="empty">No feed catalog loaded.</td></tr>';
+    calcBody.innerHTML = '<tr><td colspan="7" class="empty">No feed catalog loaded.</td></tr>';
     updateCalculatorGrandTotalDisplay();
     return;
   }
@@ -2560,11 +2579,18 @@ function renderCalculatorTable() {
         const rowKey = calculatorRowKey(row.brand, row.feedType, row.bagSize);
         const remembered = state.calculatorValues[rowKey];
         const defaultBuying = findInventoryBuyingPriceForCalculator(row.brand, row.feedType, row.bagSize);
+        const defaultSelling = findInventorySellingPriceForCalculator(row.brand, row.feedType, row.bagSize);
         const buyingValue =
           remembered?.buying != null && String(remembered.buying).trim() !== ""
             ? remembered.buying
             : defaultBuying != null
               ? String(defaultBuying)
+              : "";
+        const sellingValue =
+          remembered?.selling != null && String(remembered.selling).trim() !== ""
+            ? remembered.selling
+            : defaultSelling != null
+              ? String(defaultSelling)
               : "";
         return `
       <tr data-calc-brand="${escapeHtmlCell(row.brand)}" data-calc-feed-type="${escapeHtmlCell(row.feedType)}" data-calc-bag-size="${row.bagSize}">
@@ -2573,13 +2599,14 @@ function renderCalculatorTable() {
         <td>${row.bagSize}</td>
         <td><input type="text" data-kind="calc-bags" inputmode="numeric" placeholder="Bags" value="${escapeHtmlCell(remembered?.bags || "")}" /></td>
         <td><input type="text" data-kind="calc-buying" inputmode="decimal" placeholder="Buying price" value="${escapeHtmlCell(buyingValue)}" /></td>
+        <td><input type="text" data-kind="calc-selling" inputmode="decimal" placeholder="Selling price" value="${escapeHtmlCell(sellingValue)}" /></td>
         <td class="js-calc-row-total">${currency(0)}</td>
       </tr>`;
       }
     )
     .join("");
   updateCalculatorGrandTotalDisplay();
-  if (activeKey && (activeKind === "calc-bags" || activeKind === "calc-buying")) {
+  if (activeKey && (activeKind === "calc-bags" || activeKind === "calc-buying" || activeKind === "calc-selling")) {
     const tr = [...calcBody.querySelectorAll("tr")].find(
       (row) =>
         row instanceof HTMLTableRowElement &&
@@ -3574,14 +3601,14 @@ document.getElementById("expMoneyOut")?.addEventListener("input", () => {
 calcBody?.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
-  if (target.dataset.kind !== "calc-bags" && target.dataset.kind !== "calc-buying") return;
+  if (target.dataset.kind !== "calc-bags" && target.dataset.kind !== "calc-buying" && target.dataset.kind !== "calc-selling") return;
   calculatorRememberRowFromInputs(target.closest("tr"));
   updateCalculatorGrandTotalDisplay();
 });
 document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   if (!calcBody) return;
   state.calculatorValues = {};
-  calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying']").forEach((el) => {
+  calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying'], input[data-kind='calc-selling']").forEach((el) => {
     if (el instanceof HTMLInputElement) el.value = "";
   });
   updateCalculatorGrandTotalDisplay();
@@ -3599,11 +3626,12 @@ function downloadCalculatorPdf() {
   calcBody.querySelectorAll("tr").forEach((tr) => {
     if (!(tr instanceof HTMLTableRowElement)) return;
     const cells = tr.querySelectorAll("td");
-    if (cells.length < 6) return;
+    if (cells.length < 7) return;
     const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
     const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+    const sellEl = tr.querySelector("input[data-kind='calc-selling']");
     const totalCell = tr.querySelector(".js-calc-row-total");
-    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
+    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
     const bagsRaw = String(bagsEl.value || "").trim();
     const bagsNum = Number(bagsRaw);
     if (!bagsRaw || !Number.isFinite(bagsNum) || bagsNum <= 0) return;
@@ -3613,6 +3641,7 @@ function downloadCalculatorPdf() {
       bagSize: cells[2]?.textContent?.trim() || "—",
       bags: bagsRaw,
       buying: String(buyEl.value || "").trim() || "—",
+      selling: String(sellEl.value || "").trim() || "—",
       total: totalCell.textContent?.trim() || "—",
     });
   });
@@ -3633,8 +3662,8 @@ function downloadCalculatorPdf() {
   doc.setFontSize(11);
   doc.text(`Date: ${today}`, 40, 84);
 
-  const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Total"]];
-  const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.total]);
+  const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Selling price (per bag)", "Total"]];
+  const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.selling, r.total]);
 
   const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
   if (typeof autoTableFn !== "function") {
