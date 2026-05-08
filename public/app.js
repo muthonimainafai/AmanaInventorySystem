@@ -101,6 +101,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "feeders-drinkers",
   "medicaments",
   "gas",
+  "rose-inventory",
   "nahashon-accounts",
   "calculator",
   "expenditure",
