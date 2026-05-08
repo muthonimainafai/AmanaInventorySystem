@@ -617,7 +617,7 @@ async function initDb() {
   await run("ALTER TABLE chicken_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
   await run(
-    "UPDATE chicken_sales SET delivery_status = 'delivered' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
+    "UPDATE chicken_sales SET delivery_status = 'delivered' WHERE (delivery_status IS NULL OR TRIM(COALESCE(delivery_status, '')) = '') AND LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
   ).catch(() => {});
   await run(
     "UPDATE chicken_sales SET payment_status = 'delivered' WHERE LOWER(TRIM(COALESCE(payment_status, ''))) = 'cleared'"
