@@ -781,17 +781,30 @@ function tableDateSeparatorRow(colSpan) {
   return `<tr class="table-date-separator" aria-hidden="true"><td colspan="${colSpan}"></td></tr>`;
 }
 
-/** Inserts an orange separator row when `date` changes between consecutive rows (same order as API). */
+/** Inserts date separators and always renders latest dates first. */
 function joinRowsWithDateSeparators(rows, colSpan, buildRowHtml) {
   if (!rows.length) return "";
+  const sortedRows = [...rows].sort((a, b) => {
+    const ap = parseDMYParts(a?.date);
+    const bp = parseDMYParts(b?.date);
+    if (ap && bp) {
+      const byDate = compareDMYParts(bp, ap);
+      if (byDate !== 0) return byDate;
+    } else if (ap) {
+      return -1;
+    } else if (bp) {
+      return 1;
+    }
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
   const parts = [];
-  for (let i = 0; i < rows.length; i++) {
+  for (let i = 0; i < sortedRows.length; i++) {
     if (i > 0) {
-      const cur = formatDateDMY(rows[i].date).trim();
-      const prev = formatDateDMY(rows[i - 1].date).trim();
+      const cur = formatDateDMY(sortedRows[i].date).trim();
+      const prev = formatDateDMY(sortedRows[i - 1].date).trim();
       if (cur !== prev) parts.push(tableDateSeparatorRow(colSpan));
     }
-    parts.push(buildRowHtml(rows[i], i));
+    parts.push(buildRowHtml(sortedRows[i], i));
   }
   return parts.join("");
 }
@@ -892,13 +905,8 @@ function chickenSalePaymentStatusLabel(row) {
 }
 
 function chickenSaleDeliveryStatusLabel(row) {
-  const rawDelivery = row.delivery_status;
-  const ds = String(rawDelivery || "").toLowerCase().trim();
+  const ds = String(row.delivery_status || "").toLowerCase().trim();
   if (ds === "delivered") return "Delivered";
-  if (ds === "pending") return "Pending";
-  // Legacy fallback only when delivery status is truly missing.
-  const legacy = String(row.payment_status || "").toLowerCase().trim();
-  if ((rawDelivery == null || String(rawDelivery).trim() === "") && legacy === "delivered") return "Delivered";
   return "Pending";
 }
 

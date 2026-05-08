@@ -4408,10 +4408,6 @@ app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), asyn
   if (!Number.isFinite(idNum) || idNum < 1) {
     return res.status(400).json({ error: "Invalid sale id." });
   }
-  const paymentStatusRaw = String(req.body?.payment_status || "pending").trim().toLowerCase();
-  const paymentStatus = paymentStatusRaw === "delivered" || paymentStatusRaw === "cleared" ? "delivered" : "pending";
-  const deliveryStatusRaw = String(req.body?.delivery_status || "pending").trim().toLowerCase();
-  const deliveryStatus = deliveryStatusRaw === "delivered" ? "delivered" : "pending";
   const row = await get(
     `SELECT cs.*, u.role AS creator_role
      FROM chicken_sales cs
@@ -4420,6 +4416,10 @@ app.put("/api/chicken-sales/:id/payment-status", auth, allowRoles("owner"), asyn
     [idNum]
   );
   if (!row) return res.status(404).json({ error: "Sale not found." });
+  const paymentStatusRaw = String(req.body?.payment_status ?? row.payment_status ?? "pending").trim().toLowerCase();
+  const paymentStatus = paymentStatusRaw === "delivered" || paymentStatusRaw === "cleared" ? "delivered" : "pending";
+  const deliveryStatusRaw = String(req.body?.delivery_status ?? row.delivery_status ?? "pending").trim().toLowerCase();
+  const deliveryStatus = deliveryStatusRaw === "delivered" ? "delivered" : "pending";
   if (String(row.creator_role || "").toLowerCase() !== "employee") {
     return res.status(400).json({ error: "Only staff chicken sales support payment status updates here." });
   }
