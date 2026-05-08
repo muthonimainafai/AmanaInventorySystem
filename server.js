@@ -3263,10 +3263,7 @@ app.delete("/api/gas/:id", auth, allowRoles("owner"), async (req, res) => {
 });
 
 app.get("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {
-  const rows =
-    req.user.role === "owner"
-      ? await all("SELECT * FROM employee_expenditure ORDER BY id DESC")
-      : await all("SELECT * FROM employee_expenditure WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  const rows = await all("SELECT * FROM employee_expenditure ORDER BY id DESC");
   res.json(rows);
 });
 
