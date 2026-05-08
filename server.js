@@ -2827,8 +2827,8 @@ app.put("/api/medicaments/:id", auth, allowRoles("owner"), async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Inventory record not found." });
   const nextQty = Math.floor(quantity);
   const oldQty = Number(existing.quantity_in_stock || 0);
-  const addOnly = Math.max(0, nextQty - oldQty);
-  const nextAccumulated = Number(existing.accumulated_stock || 0) + addOnly;
+  const qtyDelta = nextQty - oldQty;
+  const nextAccumulated = Math.max(0, Number(existing.accumulated_stock || 0) + qtyDelta);
   const result = await run(
     `UPDATE medicaments_inventory SET
       date = ?, item_name = ?, quantity_in_stock = ?, accumulated_stock = ?, buying_price = ?, selling_price = ?, profit_margin = ?, reorder_level = ?, updated_at = ?
