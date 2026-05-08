@@ -164,6 +164,10 @@ const brandSelect = document.getElementById("brand");
 const feedTypeSelect = document.getElementById("feedType");
 const bagSizeInput = document.getElementById("bagSize");
 const quantityInput = document.getElementById("quantityInStock");
+const buyingPriceInput = document.getElementById("buyingPrice");
+const sellingPriceInput = document.getElementById("sellingPrice");
+const profitMarginPerBagInput = document.getElementById("profitMarginPerBag");
+const editPricesBtn = document.getElementById("editPricesBtn");
 const clearBtn = document.getElementById("clearBtn");
 const tableBody = document.getElementById("inventory-body");
 const dateInput = document.getElementById("date");
@@ -1689,10 +1693,68 @@ function resetForm() {
   feedTypeSelect.innerHTML = '<option value="">Select feed type</option>';
   feedTypeSelect.disabled = true;
   bagSizeInput.value = "";
-  document.getElementById("profitMarginPerBag").value = "";
+  profitMarginPerBagInput.value = "";
   document.getElementById("accumulatedProfit").value = "0";
   document.getElementById("accumulatedBags").value = "";
+  setInventoryPriceEditMode(false);
   document.getElementById("saveBtn").textContent = "Save Record";
+}
+
+function syncInventoryProfitMarginFromPrices() {
+  const buying = Number(buyingPriceInput?.value || 0);
+  const selling = Number(sellingPriceInput?.value || 0);
+  const margin = selling - buying;
+  if (!profitMarginPerBagInput) return;
+  profitMarginPerBagInput.value = Number.isFinite(margin) ? margin.toFixed(2) : "0.00";
+}
+
+function setInventoryPriceEditMode(editable) {
+  const canEdit = !!editable;
+  if (buyingPriceInput) buyingPriceInput.readOnly = !canEdit;
+  if (sellingPriceInput) sellingPriceInput.readOnly = !canEdit;
+  if (editPricesBtn) editPricesBtn.textContent = canEdit ? "Lock prices" : "Edit prices";
+}
+
+function findLatestInventoryPriceLine(brand, feedType, bagSize) {
+  const bKey = resolveBrandKey(brand);
+  const fKey = normalizeFeedTypeForMatch(feedType);
+  const bs = Number(bagSize || 0);
+  if (!bKey || !fKey || !Number.isFinite(bs) || bs <= 0) return null;
+  let latest = null;
+  for (const row of state.records || []) {
+    if (resolveBrandKey(row.brand) !== bKey) continue;
+    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
+    if (Number(row.bag_size || 0) !== bs) continue;
+    if (!latest || Number(row.id || 0) > Number(latest.id || 0)) latest = row;
+  }
+  return latest;
+}
+
+function applyInventoryPriceDefaults(force = false) {
+  if (state.user?.role !== "owner") return;
+  if (!force && state.editId != null) return;
+  const brand = brandSelect.value;
+  const feedType = feedTypeSelect.value;
+  const bagSize = Number(bagSizeInput.value || 0);
+  if (!brand || !feedType || !Number.isFinite(bagSize) || bagSize <= 0) {
+    if (state.editId == null) {
+      buyingPriceInput.value = "";
+      sellingPriceInput.value = "";
+      syncInventoryProfitMarginFromPrices();
+      setInventoryPriceEditMode(false);
+    }
+    return;
+  }
+  const latest = findLatestInventoryPriceLine(brand, feedType, bagSize);
+  if (latest) {
+    buyingPriceInput.value = Number(latest.buying_price || 0).toFixed(2);
+    sellingPriceInput.value = Number(latest.selling_price || 0).toFixed(2);
+  } else if (state.editId == null) {
+    buyingPriceInput.value = "";
+    sellingPriceInput.value = "";
+  }
+  syncInventoryProfitMarginFromPrices();
+  setInventoryPriceEditMode(false);
 }
 
 function renderOwnerPassThroughBagSales() {
@@ -2772,9 +2834,13 @@ function populateForm(row) {
   quantityInput.value = row.quantity_in_stock;
   document.getElementById("accumulatedBags").value =
     row.accumulated_bags != null ? row.accumulated_bags : row.quantity_in_stock;
-  document.getElementById("buyingPrice").value = row.buying_price;
-  document.getElementById("sellingPrice").value = row.selling_price;
-  document.getElementById("profitMarginPerBag").value = row.profit_margin_per_bag ?? 0;
+  buyingPriceInput.value = Number(row.buying_price || 0).toFixed(2);
+  sellingPriceInput.value = Number(row.selling_price || 0).toFixed(2);
+  syncInventoryProfitMarginFromPrices();
+  if (!Number.isFinite(Number(row.profit_margin_per_bag))) {
+    profitMarginPerBagInput.value = "0.00";
+  }
+  setInventoryPriceEditMode(false);
   document.getElementById("accumulatedProfit").value = row.cumulative_bag_profit ?? 0;
   document.getElementById("reorderLevel").value = row.reorder_level;
   document.getElementById("saveBtn").textContent = "Update Record";
@@ -2794,9 +2860,9 @@ function formPayload() {
     feed_type: feedTypeCatalogValue(brandKey, feedTypeSelect.value),
     bag_size: Number(bagSizeInput.value || 0),
     quantity_in_stock: Number(quantityInput.value || 0),
-    buying_price: Number(document.getElementById("buyingPrice").value || 0),
-    selling_price: Number(document.getElementById("sellingPrice").value || 0),
-    profit_margin_per_bag: Number(document.getElementById("profitMarginPerBag").value || 0),
+    buying_price: Number(buyingPriceInput.value || 0),
+    selling_price: Number(sellingPriceInput.value || 0),
+    profit_margin_per_bag: Number(profitMarginPerBagInput.value || 0),
     reorder_level: Number(document.getElementById("reorderLevel").value || 0),
   };
 }
@@ -3222,11 +3288,24 @@ vehicleLogoutBtn?.addEventListener("click", () => {
 
 brandSelect.addEventListener("change", () => {
   populateFeedTypes(brandSelect.value);
+  applyInventoryPriceDefaults();
 });
 
 feedTypeSelect.addEventListener("change", () => {
   bagSizeInput.value = bagSizeFor(brandSelect.value, feedTypeSelect.value);
+  applyInventoryPriceDefaults();
 });
+
+buyingPriceInput?.addEventListener("input", syncInventoryProfitMarginFromPrices);
+sellingPriceInput?.addEventListener("input", syncInventoryProfitMarginFromPrices);
+editPricesBtn?.addEventListener("click", () => {
+  if (state.user?.role !== "owner") return;
+  const isLocked = buyingPriceInput?.readOnly && sellingPriceInput?.readOnly;
+  setInventoryPriceEditMode(isLocked);
+  if (!isLocked) syncInventoryProfitMarginFromPrices();
+});
+setInventoryPriceEditMode(false);
+syncInventoryProfitMarginFromPrices();
 
 openCalendarBtn.addEventListener("click", () => {
   if (dateDisplayInput.value.trim()) {
