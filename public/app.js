@@ -57,6 +57,8 @@ const state = {
   editExpenditureId: null,
   roseEntries: [],
   editRoseId: null,
+  nahashonEntries: [],
+  editNahashonId: null,
   calculatorValues: {},
 };
 
@@ -241,6 +243,11 @@ const roseBody = document.getElementById("rose-body");
 const roseDateDisplay = document.getElementById("roseDateDisplay");
 const roseDate = document.getElementById("roseDate");
 const roseOpenCalendarBtn = document.getElementById("roseOpenCalendarBtn");
+const nahashonForm = document.getElementById("nahashon-form");
+const nahashonBody = document.getElementById("nahashon-body");
+const nahashonDateDisplay = document.getElementById("nahashonDateDisplay");
+const nahashonDate = document.getElementById("nahashonDate");
+const nahashonOpenCalendarBtn = document.getElementById("nahashonOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 
 let refreshTimer = null;
@@ -685,6 +692,7 @@ function applyEmployeeSalesDateRules() {
     ["chDateDisplay", "chDate", "chOpenCalendarBtn"],
     ["expDateDisplay", "expDate", "expOpenCalendarBtn"],
     ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
+    ["nahashonDateDisplay", "nahashonDate", "nahashonOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -2716,6 +2724,68 @@ function renderRoseTable() {
   if (mortEl) mortEl.textContent = String(sumMort);
 }
 
+function resetNahashonForm() {
+  if (!nahashonForm) return;
+  nahashonForm.reset();
+  state.editNahashonId = null;
+  if (nahashonDate) nahashonDate.value = "";
+  if (nahashonDateDisplay) nahashonDateDisplay.value = "";
+  const via = document.getElementById("nahashonSaleVia");
+  if (via) via.value = "Shop";
+  const saveBtn = document.getElementById("nahashonSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function renderNahashonTable() {
+  if (!nahashonBody) return;
+  const rows = sortRowsLatestFirst(state.nahashonEntries || []);
+  if (!rows.length) {
+    nahashonBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
+    const inEl = document.getElementById("nahashonTotalMoneyIn");
+    const outEl = document.getElementById("nahashonTotalMoneyOut");
+    const mortEl = document.getElementById("nahashonTotalMortality");
+    if (inEl) inEl.textContent = "0";
+    if (outEl) outEl.textContent = "0";
+    if (mortEl) mortEl.textContent = "0";
+    return;
+  }
+  let sumIn = 0;
+  let sumOut = 0;
+  let sumMort = 0;
+  nahashonBody.innerHTML = rows
+    .map((row, idx) => {
+      sumIn += Number(row.money_in || 0);
+      sumOut += Number(row.money_out || 0);
+      sumMort += Number(row.mortality || 0);
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${Number(row.quantity || 0)}</td>
+        <td>${Number(row.unit_price || 0)}</td>
+        <td>${Number(row.money_in || 0)}</td>
+        <td>${Number(row.money_out || 0)}</td>
+        <td>${Number(row.mortality || 0)}</td>
+        <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="nahashon" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="nahashon" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const inEl = document.getElementById("nahashonTotalMoneyIn");
+  const outEl = document.getElementById("nahashonTotalMoneyOut");
+  const mortEl = document.getElementById("nahashonTotalMortality");
+  if (inEl) inEl.textContent = String(sumIn);
+  if (outEl) outEl.textContent = String(sumOut);
+  if (mortEl) mortEl.textContent = String(sumMort);
+}
+
 function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
@@ -2911,8 +2981,7 @@ function showPage(page) {
   document.querySelectorAll(".app-page").forEach((sec) => {
     sec.classList.add("hidden");
   });
-  const pageDomKey = page === "nahashon-accounts" ? "rose-inventory" : page;
-  const pageEl = document.getElementById(`page-${pageDomKey}`);
+  const pageEl = document.getElementById(`page-${page}`);
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
   if (page === "nahashon-accounts" && state.appInstance === "terry") {
@@ -2967,6 +3036,7 @@ function showPage(page) {
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
   if (page === "rose-inventory") renderRoseTable();
+  if (page === "nahashon-accounts") renderNahashonTable();
   if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
@@ -3159,6 +3229,7 @@ async function loadAllData() {
     api("/api/gas/sales"),
     api("/api/expenditure"),
     api("/api/rose/inventory"),
+    api("/api/nahashon-accounts"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -3173,6 +3244,7 @@ async function loadAllData() {
   state.gasSales = extras[10].status === "fulfilled" ? extras[10].value : [];
   state.expenditureEntries = extras[11].status === "fulfilled" ? extras[11].value : [];
   state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
+  state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -3202,6 +3274,7 @@ async function loadAllData() {
   renderCalculatorTable();
   renderExpenditureTable();
   renderRoseTable();
+  renderNahashonTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
 }
@@ -3619,6 +3692,9 @@ if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDispl
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
 if (expDateDisplay && expDate && expOpenCalendarBtn) wireDatePicker(expDateDisplay, expDate, expOpenCalendarBtn);
 if (roseDateDisplay && roseDate && roseOpenCalendarBtn) wireDatePicker(roseDateDisplay, roseDate, roseOpenCalendarBtn);
+if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
+  wireDatePicker(nahashonDateDisplay, nahashonDate, nahashonOpenCalendarBtn);
+}
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
@@ -3755,6 +3831,7 @@ document.getElementById("medClearBtn")?.addEventListener("click", resetMedicamen
 document.getElementById("gasClearBtn")?.addEventListener("click", resetGasForm);
 document.getElementById("expClearBtn")?.addEventListener("click", resetExpenditureForm);
 document.getElementById("roseClearBtn")?.addEventListener("click", resetRoseForm);
+document.getElementById("nahashonClearBtn")?.addEventListener("click", resetNahashonForm);
 
 fdForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3941,6 +4018,33 @@ roseForm?.addEventListener("submit", async (event) => {
       await api("/api/rose/inventory", { method: "POST", body: JSON.stringify(payload) });
     }
     resetRoseForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+nahashonForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = nahashonDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("nahashonDescription")?.value || "").trim(),
+    quantity: Number(document.getElementById("nahashonQuantity")?.value || 0),
+    unit_price: Number(document.getElementById("nahashonUnitPrice")?.value || 0),
+    money_in: Number(document.getElementById("nahashonMoneyIn")?.value || 0),
+    money_out: Number(document.getElementById("nahashonMoneyOut")?.value || 0),
+    mortality: Number(document.getElementById("nahashonMortality")?.value || 0),
+    sale_via: String(document.getElementById("nahashonSaleVia")?.value || "Shop").trim(),
+  };
+  try {
+    if (state.editNahashonId) {
+      await api(`/api/nahashon-accounts/${state.editNahashonId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/nahashon-accounts", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetNahashonForm();
     await loadAllData();
   } catch (error) {
     alert(error.message);
@@ -4962,6 +5066,48 @@ roseBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/rose/inventory/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+nahashonBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "nahashon") return;
+  const row = state.nahashonEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editNahashonId = row.id;
+    if (nahashonDate) nahashonDate.value = toIsoDate(row.date);
+    if (nahashonDateDisplay) nahashonDateDisplay.value = formatDateDMY(row.date);
+    const desc = document.getElementById("nahashonDescription");
+    const qty = document.getElementById("nahashonQuantity");
+    const unit = document.getElementById("nahashonUnitPrice");
+    const min = document.getElementById("nahashonMoneyIn");
+    const mout = document.getElementById("nahashonMoneyOut");
+    const mort = document.getElementById("nahashonMortality");
+    const via = document.getElementById("nahashonSaleVia");
+    if (desc) desc.value = row.description || "";
+    if (qty) qty.value = row.quantity ?? 0;
+    if (unit) unit.value = row.unit_price ?? 0;
+    if (min) min.value = row.money_in ?? 0;
+    if (mout) mout.value = row.money_out ?? 0;
+    if (mort) mort.value = row.mortality ?? 0;
+    if (via) via.value = row.sale_via || "Shop";
+    const saveBtn = document.getElementById("nahashonSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/nahashon-accounts/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
