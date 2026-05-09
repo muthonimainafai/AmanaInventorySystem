@@ -269,26 +269,32 @@ function applyAppTheme() {
     : "amana";
   const isUfaray = tenant === "ufaray";
   const isRose = tenant === "rose";
-  const isNahah = tenant === "nahah" || tenant === "terry" || tenant === "cess" || tenant === "shop";
+  const isMainaFaithCess = tenant === "maina-faith-cess";
+  const isNahah =
+    tenant === "nahah" || tenant === "terry" || tenant === "cess" || tenant === "shop" || isMainaFaithCess;
   document.body.classList.toggle("ufaray-theme", isUfaray);
   document.body.classList.toggle("rose-theme", isRose);
   document.body.classList.toggle("nahah-theme", isNahah);
-  document.title = isUfaray
-    ? "Ufaray Feeds - Desktop Inventory"
-    : isRose
-      ? "Rose Inventory - Desktop Inventory"
-      : isNahah
-        ? "Nahah Feeds Inventory System - Desktop Inventory"
-      : "Amana Kuku Feeds - Desktop Inventory";
+  document.title = isMainaFaithCess
+    ? "Maina+Faith+Cess - Desktop Inventory"
+    : isUfaray
+      ? "Ufaray Feeds - Desktop Inventory"
+      : isRose
+        ? "Rose Inventory - Desktop Inventory"
+        : isNahah
+          ? "Nahah Feeds Inventory System - Desktop Inventory"
+        : "Amana Kuku Feeds - Desktop Inventory";
   const portalSiteTitle = document.getElementById("portalSiteTitle");
   if (portalSiteTitle) {
-    portalSiteTitle.textContent = isUfaray
-      ? "UFARAY FEEDS"
-      : isRose
-        ? "ROSE INVENTORY"
-        : isNahah
-          ? "NAHAH FEEDS INVENTORY SYSTEM"
-          : "AMANA KUKU FEEDS";
+    portalSiteTitle.textContent = isMainaFaithCess
+      ? "Maina+Faith+Cess"
+      : isUfaray
+        ? "UFARAY FEEDS"
+        : isRose
+          ? "ROSE INVENTORY"
+          : isNahah
+            ? "NAHAH FEEDS INVENTORY SYSTEM"
+            : "AMANA KUKU FEEDS";
   }
   const loginTitle = document.getElementById("loginCardTitle");
   if (loginTitle) {
@@ -329,7 +335,7 @@ function applyAppTheme() {
           : state.appInstance === "cess"
             ? "Records"
             : state.appInstance === "maina-faith-cess"
-              ? "Records"
+              ? "Maina+Faith+Cess"
             : "Rose Inventory";
   }
 }
@@ -3003,7 +3009,12 @@ function showPage(page) {
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
   if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "maina-faith-cess")) {
-    pageHeading.textContent = state.appInstance === "terry" ? "Terry Records" : "Records";
+    pageHeading.textContent =
+      state.appInstance === "terry"
+        ? "Terry Records"
+        : state.appInstance === "maina-faith-cess"
+          ? "Maina+Faith+Cess"
+          : "Records";
   }
   if (page === "chicken-inventory" && state.user?.role === "employee") {
     pageHeading.textContent = "Chicken Sales";
