@@ -1,7 +1,7 @@
 const state = {
   appInstance: (() => {
     const saved = (localStorage.getItem("amanaAppInstance") || "amana").trim().toLowerCase();
-    return ["amana", "ufaray", "rose", "nahah", "terry", "cess", "shop"].includes(saved) ? saved : "amana";
+    return ["amana", "ufaray", "rose", "nahah", "terry", "cess", "maina-faith-cess", "shop"].includes(saved) ? saved : "amana";
   })(),
   token: (localStorage.getItem("amanaToken") || "").trim(),
   user: JSON.parse(localStorage.getItem("amanaUser") || "null"),
@@ -82,11 +82,16 @@ function isRecordsTenant() {
 }
 
 function isTerryCessOrShopTenant() {
-  return state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "shop";
+  return (
+    state.appInstance === "terry" ||
+    state.appInstance === "cess" ||
+    state.appInstance === "maina-faith-cess" ||
+    state.appInstance === "shop"
+  );
 }
 
 function isTerryOrCessTenant() {
-  return state.appInstance === "terry" || state.appInstance === "cess";
+  return state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "maina-faith-cess";
 }
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
@@ -252,14 +257,14 @@ let refreshTimer = null;
 let catalogInitialized = false;
 
 function persistAppInstance() {
-  const normalized = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "shop"].includes(state.appInstance)
+  const normalized = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "maina-faith-cess", "shop"].includes(state.appInstance)
     ? state.appInstance
     : "amana";
   localStorage.setItem("amanaAppInstance", normalized);
 }
 
 function applyAppTheme() {
-  const tenant = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "shop"].includes(state.appInstance)
+  const tenant = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "maina-faith-cess", "shop"].includes(state.appInstance)
     ? state.appInstance
     : "amana";
   const isUfaray = tenant === "ufaray";
@@ -291,6 +296,8 @@ function applyAppTheme() {
       ? "Terry Inventory Login"
       : tenant === "cess"
         ? "Cess Inventory Login"
+        : tenant === "maina-faith-cess"
+          ? "Maina+Faith+Cess Inventory Login"
         : tenant === "shop"
           ? "Shop Inventory Login"
         : isUfaray
@@ -308,6 +315,8 @@ function applyAppTheme() {
           ? "Terry Records"
           : state.appInstance === "cess"
             ? "Records"
+            : state.appInstance === "maina-faith-cess"
+              ? "Records"
             : "Rose Inventory";
   }
   const rosePageTitle = document.getElementById("roseInventoryPageTitle");
@@ -319,6 +328,8 @@ function applyAppTheme() {
           ? "Terry Records"
           : state.appInstance === "cess"
             ? "Records"
+            : state.appInstance === "maina-faith-cess"
+              ? "Records"
             : "Rose Inventory";
   }
 }
@@ -326,7 +337,7 @@ function applyAppTheme() {
 async function api(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
-    "X-App-Instance": ["amana", "ufaray", "rose", "terry", "cess", "shop"].includes(state.appInstance)
+    "X-App-Instance": ["amana", "ufaray", "rose", "terry", "cess", "maina-faith-cess", "shop"].includes(state.appInstance)
       ? state.appInstance
       : "amana",
     ...(options.headers || {}),
@@ -1318,7 +1329,7 @@ function showLoggedIn() {
       ? false
       : state.appInstance === "terry"
       ? page === "rose-inventory" || page === "calculator"
-      : state.appInstance === "cess"
+      : state.appInstance === "cess" || state.appInstance === "maina-faith-cess"
       ? page === "rose-inventory" || page === "calculator"
       : state.appInstance === "shop"
       ? page === "inventory" || page === "sales-bags" || page === "calculator"
@@ -2970,7 +2981,7 @@ function showPage(page) {
   if (state.appInstance === "terry" && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
   }
-  if (state.appInstance === "cess" && page !== "rose-inventory" && page !== "calculator") {
+  if ((state.appInstance === "cess" || state.appInstance === "maina-faith-cess") && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
   }
   if ((isTerryOrCessTenant() || state.appInstance === "shop") && page === "calculator") {
@@ -2991,7 +3002,7 @@ function showPage(page) {
   const pageEl = document.getElementById(`page-${page}`);
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
-  if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess")) {
+  if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "maina-faith-cess")) {
     pageHeading.textContent = state.appInstance === "terry" ? "Terry Records" : "Records";
   }
   if (page === "chicken-inventory" && state.user?.role === "employee") {
@@ -3094,7 +3105,7 @@ function formPayload() {
 
 async function loadCatalogFromServer() {
   const restrictForTerryCess = (catalog) => {
-    if (!(state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "shop")) return catalog;
+    if (!(state.appInstance === "terry" || state.appInstance === "cess" || state.appInstance === "maina-faith-cess" || state.appInstance === "shop")) return catalog;
     const sigmaKey = Object.keys(catalog || {}).find((b) => normalizeBrandName(b) === normalizeBrandName("Sigma"));
     if (!sigmaKey) return {};
     const items = (catalog[sigmaKey] || []).filter((i) => {
@@ -3345,6 +3356,11 @@ document.getElementById("openCessBtn")?.addEventListener("click", () => {
   persistAppInstance();
   showLoginCard();
 });
+document.getElementById("openMainaFaithCessBtn")?.addEventListener("click", () => {
+  state.appInstance = "maina-faith-cess";
+  persistAppInstance();
+  showLoginCard();
+});
 document.getElementById("openShopBtn")?.addEventListener("click", () => {
   state.appInstance = "shop";
   persistAppInstance();
@@ -3383,7 +3399,7 @@ loginForm.addEventListener("submit", async (event) => {
     showPage(
       state.appInstance === "terry"
         ? "rose-inventory"
-        : state.appInstance === "cess"
+        : state.appInstance === "cess" || state.appInstance === "maina-faith-cess"
         ? "rose-inventory"
         : state.appInstance === "shop"
           ? "inventory"
@@ -3627,7 +3643,7 @@ async function boot() {
     showPage(
       state.appInstance === "terry"
         ? "rose-inventory"
-        : state.appInstance === "cess"
+        : state.appInstance === "cess" || state.appInstance === "maina-faith-cess"
         ? "rose-inventory"
         : state.appInstance === "shop"
           ? "inventory"
