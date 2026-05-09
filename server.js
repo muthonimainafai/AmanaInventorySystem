@@ -114,17 +114,23 @@ function tenantLoginEnv(tenant) {
     const mfcEmployeeUsername = String(process.env.MAINA_FAITH_CESS_EMPLOYEE_USERNAME || process.env.MFC_EMPLOYEE_USERNAME || "").trim();
     const mfcEmployeePassword = String(process.env.MAINA_FAITH_CESS_EMPLOYEE_PASSWORD || process.env.MFC_EMPLOYEE_PASSWORD || "");
     const mfcEmployeeFullName = String(process.env.MAINA_FAITH_CESS_EMPLOYEE_FULL_NAME || process.env.MFC_EMPLOYEE_FULL_NAME || "").trim();
+    const defaultEmployeeUsername = "employee";
+    const defaultEmployeePassword = "Employee@123";
+    const defaultEmployeeFullName = "Maina+Faith+Cess Employee";
     return {
       tenant: "maina-faith-cess",
+      ownerOnly: true,
       owner: {
         username: mfcOwnerUsername || AMANA_OWNER_USERNAME,
         password: mfcOwnerPassword || AMANA_OWNER_PASSWORD,
         fullName: mfcOwnerFullName || AMANA_OWNER_FULL_NAME,
       },
       employee: {
-        username: mfcEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
-        password: mfcEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
-        fullName: mfcEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+        // Keep tenant employee defaults isolated so owner-only env setup does not
+        // accidentally collide with AMANA employee usernames and fail initialization.
+        username: mfcEmployeeUsername || defaultEmployeeUsername,
+        password: mfcEmployeePassword || defaultEmployeePassword,
+        fullName: mfcEmployeeFullName || defaultEmployeeFullName,
       },
       sourceLabel:
         mfcOwnerUsername || mfcEmployeeUsername || mfcOwnerPassword || mfcEmployeePassword
@@ -237,6 +243,7 @@ function tenantLoginEnv(tenant) {
   }
   return {
     tenant: "amana",
+    ownerOnly: false,
     owner: { username: AMANA_OWNER_USERNAME, password: AMANA_OWNER_PASSWORD, fullName: AMANA_OWNER_FULL_NAME },
     employee: { username: AMANA_EMPLOYEE_USERNAME, password: AMANA_EMPLOYEE_PASSWORD, fullName: AMANA_EMPLOYEE_FULL_NAME },
     sourceLabel: "AMANA_*",
@@ -905,34 +912,46 @@ async function initDb() {
 
   const anyUser = await get("SELECT id FROM users LIMIT 1");
   const login = tenantLoginEnv(activeTenant());
+  const ownerOnly = Boolean(login.ownerOnly);
   if (!anyUser) {
-    if (login.owner.username.toLowerCase() === login.employee.username.toLowerCase()) {
+    if (!ownerOnly && login.owner.username.toLowerCase() === login.employee.username.toLowerCase()) {
       throw new Error(
         `${login.tenant.toUpperCase()}: owner and staff usernames must differ. Fix your .env and restart.`
       );
     }
-    if (login.owner.password.length < 8 || login.employee.password.length < 8) {
+    const hasWeakPassword = ownerOnly
+      ? login.owner.password.length < 8
+      : login.owner.password.length < 8 || login.employee.password.length < 8;
+    if (hasWeakPassword) {
       // eslint-disable-next-line no-console
       console.warn(
         `[${login.tenant}] ${login.sourceLabel} passwords should be at least 8 characters. Using configured values anyway.`
       );
     }
     const ownerHash = await bcrypt.hash(login.owner.password, 10);
-    const employeeHash = await bcrypt.hash(login.employee.password, 10);
     await run(
       "INSERT INTO users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
       [login.owner.username, ownerHash, "owner", login.owner.fullName]
     );
-    await run(
-      "INSERT INTO users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
-      [login.employee.username, employeeHash, "employee", login.employee.fullName]
-    );
+    if (!ownerOnly) {
+      const employeeHash = await bcrypt.hash(login.employee.password, 10);
+      await run(
+        "INSERT INTO users (username, password_hash, role, full_name) VALUES (?,?,?,?)",
+        [login.employee.username, employeeHash, "employee", login.employee.fullName]
+      );
+    }
     // eslint-disable-next-line no-console
     console.log(
-      `[${login.tenant}] Created default users: owner “${login.owner.username}”, staff “${login.employee.username}”. Set ${login.sourceLabel} in .env for your own credentials.`
+      ownerOnly
+        ? `[${login.tenant}] Created default owner user: “${login.owner.username}”. This tenant is owner-only. Set ${login.sourceLabel} in .env for your own credentials.`
+        : `[${login.tenant}] Created default users: owner “${login.owner.username}”, staff “${login.employee.username}”. Set ${login.sourceLabel} in .env for your own credentials.`
     );
   } else {
     await syncLoginUsersFromEnv(login);
+  }
+  if (ownerOnly) {
+    // Enforce owner-only access for this tenant even if legacy employee rows exist.
+    await run("DELETE FROM users WHERE role = 'employee'");
   }
   const anyVehicleUser = await get("SELECT id FROM vehicle_users LIMIT 1");
   if (!anyVehicleUser) {
@@ -1009,7 +1028,7 @@ async function syncLoginUsersFromEnv(login) {
     ]);
   }
   const employee = await get("SELECT id, username FROM users WHERE role = ? ORDER BY id LIMIT 1", ["employee"]);
-  if (employee) {
+  if (employee && !login.ownerOnly) {
     await renameCreatedByEverywhere(employee.username, login.employee.username);
     const hash = await bcrypt.hash(login.employee.password, 10);
     await run("UPDATE users SET username = ?, full_name = ?, password_hash = ? WHERE id = ?", [
