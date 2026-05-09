@@ -28,6 +28,8 @@ function loadEnvFile() {
       key.startsWith("NAHAH_") ||
       key.startsWith("TERRY_") ||
       key.startsWith("CESS_") ||
+      key.startsWith("TERRY_AND_CESS_") ||
+      key.startsWith("TAC_") ||
       key.startsWith("MAINA_FAITH_CESS_") ||
       key.startsWith("MFC_") ||
       key.startsWith("ROSE_") ||
@@ -104,6 +106,31 @@ function tenantLoginEnv(tenant) {
       sourceLabel:
         cessOwnerUsername || cessEmployeeUsername || cessOwnerPassword || cessEmployeePassword
           ? "CESS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
+  if (t === "terry-and-cess") {
+    const tacOwnerUsername = String(process.env.TERRY_AND_CESS_OWNER_USERNAME || process.env.TAC_OWNER_USERNAME || "").trim();
+    const tacOwnerPassword = String(process.env.TERRY_AND_CESS_OWNER_PASSWORD || process.env.TAC_OWNER_PASSWORD || "");
+    const tacOwnerFullName = String(process.env.TERRY_AND_CESS_OWNER_FULL_NAME || process.env.TAC_OWNER_FULL_NAME || "").trim();
+    const tacEmployeeUsername = String(process.env.TERRY_AND_CESS_EMPLOYEE_USERNAME || process.env.TAC_EMPLOYEE_USERNAME || "").trim();
+    const tacEmployeePassword = String(process.env.TERRY_AND_CESS_EMPLOYEE_PASSWORD || process.env.TAC_EMPLOYEE_PASSWORD || "");
+    const tacEmployeeFullName = String(process.env.TERRY_AND_CESS_EMPLOYEE_FULL_NAME || process.env.TAC_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "terry-and-cess",
+      owner: {
+        username: tacOwnerUsername || AMANA_OWNER_USERNAME,
+        password: tacOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: tacOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: tacEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: tacEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: tacEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        tacOwnerUsername || tacEmployeeUsername || tacOwnerPassword || tacEmployeePassword
+          ? "TERRY_AND_CESS_* / TAC_*"
           : "AMANA_* (fallback)",
     };
   }
@@ -261,6 +288,7 @@ function normalizeAppTenant(value) {
   if (t === "rose") return "rose";
   if (t === "terry") return "terry";
   if (t === "cess") return "cess";
+  if (t === "terry-and-cess") return "terry-and-cess";
   if (t === "maina-faith-cess") return "maina-faith-cess";
   if (t === "shop") return "shop";
   if (t === "nahah") return "nahah";
@@ -275,6 +303,7 @@ function dbFileNameForTenant(tenant) {
   const t = normalizeAppTenant(tenant);
   if (t === "terry") return "inventory-terry.db";
   if (t === "cess") return "inventory-cess.db";
+  if (t === "terry-and-cess") return "inventory-terry-and-cess.db";
   if (t === "maina-faith-cess") return "inventory-maina-faith-cess.db";
   if (t === "shop") return "inventory-shop.db";
   if (t === "nahah") return "inventory-nahah.db";
@@ -1084,7 +1113,13 @@ function validateFeed(brand, feedType, bagSize) {
 
 function isTerryCessOrShopTenant() {
   const t = activeTenant();
-  return t === "terry" || t === "cess" || t === "shop";
+  return (
+    t === "terry" ||
+    t === "cess" ||
+    t === "terry-and-cess" ||
+    t === "maina-faith-cess" ||
+    t === "shop"
+  );
 }
 
 function catalogForActiveTenant() {
@@ -4986,6 +5021,8 @@ async function startServer(port = PORT) {
   await ensureTenantInitialized("amana");
   await ensureTenantInitialized("terry");
   await ensureTenantInitialized("cess");
+  await ensureTenantInitialized("terry-and-cess");
+  await ensureTenantInitialized("maina-faith-cess");
   await ensureTenantInitialized("shop");
   await ensureTenantInitialized("nahah");
   await ensureTenantInitialized("rose");
