@@ -71,7 +71,6 @@ const PAGE_HEADINGS = {
   "feeders-drinkers": "Feeders and Drinkers inventory",
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
-  "nahashon-accounts": "Nahashon Accounts",
   "rose-inventory": "Rose Inventory",
   calculator: "Calculator",
   expenditure: "Expenditure",
@@ -102,7 +101,6 @@ const OWNER_ALLOWED_PAGES = new Set([
   "medicaments",
   "gas",
   "rose-inventory",
-  "nahashon-accounts",
   "calculator",
   "expenditure",
   "balance",
@@ -204,7 +202,6 @@ const retailFeedForm = document.getElementById("retail-feed-form");
 const rfBrand = document.getElementById("rfBrand");
 const rfFeedType = document.getElementById("rfFeedType");
 const roseInventoryTabLabel = document.getElementById("roseInventoryTabLabel");
-const nahashonAccountsTabLabel = document.getElementById("nahashonAccountsTabLabel");
 
 const chickenForm = document.getElementById("chicken-form");
 const chickenInventoryBody = document.getElementById("chicken-inventory-body");
@@ -1309,9 +1306,6 @@ function showLoggedIn() {
   if (roseInventoryTabLabel) {
     roseInventoryTabLabel.textContent = state.appInstance === "terry" ? "Terry Records" : "Rose Inventory";
   }
-  if (nahashonAccountsTabLabel) {
-    nahashonAccountsTabLabel.textContent = state.appInstance === "terry" ? "Nahashon Records" : "Nahashon Accounts";
-  }
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
     const isOwnerSalesPageHiddenForTenant =
@@ -1323,7 +1317,7 @@ function showLoggedIn() {
     const shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : state.appInstance === "terry"
-      ? page === "rose-inventory" || page === "nahashon-accounts" || page === "calculator"
+      ? page === "rose-inventory" || page === "calculator"
       : state.appInstance === "cess"
       ? page === "rose-inventory" || page === "calculator"
       : state.appInstance === "shop"
@@ -2973,7 +2967,7 @@ function showPage(page) {
       return showPage("inventory");
     }
   }
-  if (state.appInstance === "terry" && page !== "nahashon-accounts" && page !== "rose-inventory" && page !== "calculator") {
+  if (state.appInstance === "terry" && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
   }
   if (state.appInstance === "cess" && page !== "rose-inventory" && page !== "calculator") {
@@ -2997,9 +2991,6 @@ function showPage(page) {
   const pageEl = document.getElementById(`page-${page}`);
   if (pageEl) pageEl.classList.remove("hidden");
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
-  if (page === "nahashon-accounts" && state.appInstance === "terry") {
-    pageHeading.textContent = "Nahashon Records";
-  }
   if (page === "rose-inventory" && (state.appInstance === "terry" || state.appInstance === "cess")) {
     pageHeading.textContent = state.appInstance === "terry" ? "Terry Records" : "Records";
   }
@@ -3020,8 +3011,7 @@ function showPage(page) {
     page === "sales-kg" ||
     page === "chicken-inventory" ||
     page === "expenditure" ||
-    page === "rose-inventory" ||
-    page === "nahashon-accounts"
+    page === "rose-inventory"
   ) {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -3049,7 +3039,6 @@ function showPage(page) {
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
   if (page === "rose-inventory") renderRoseTable();
-  if (page === "nahashon-accounts") renderNahashonTable();
   if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
