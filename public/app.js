@@ -121,8 +121,14 @@ const OWNER_ALLOWED_PAGES = new Set([
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
 
-/** KSh per day — used only for the Balance page “remaining after operational costs” banner. */
-const DAILY_OPERATIONAL_COST = 540;
+/** Balance page only: Ufaray Feeds vs Amana (and other non-Ufaray portals) use different daily operational rates. */
+const DAILY_OPERATIONAL_COST_UFARAY_KES = 180;
+const DAILY_OPERATIONAL_COST_AMANA_KES = 540;
+
+function balanceDailyOperationalCostKes() {
+  return state.appInstance === "ufaray" ? DAILY_OPERATIONAL_COST_UFARAY_KES : DAILY_OPERATIONAL_COST_AMANA_KES;
+}
+
 const BUSINESS_OPENED_DMY = "04/05/2026";
 
 /** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
@@ -728,7 +734,8 @@ function updateBalanceBanner() {
   const combined = getOwnerCombinedProfitTotal();
   const today = state.shopToday || clientShopTodayDMY();
   const days = inclusiveBusinessDaysFromOpen(BUSINESS_OPENED_DMY, today);
-  const operational = days * DAILY_OPERATIONAL_COST;
+  const dailyOps = balanceDailyOperationalCostKes();
+  const operational = days * dailyOps;
   const expRows = state.expenditureEntries || [];
   const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.total) || 0), 0);
   const remaining = combined - operational - totalExpenditure;
@@ -737,9 +744,9 @@ function updateBalanceBanner() {
     const isNegative = remaining < 0;
     el.textContent = isNegative ? `- ${formatted}` : formatted;
   });
-  const meta = `${currency(combined)} - (${currency(
-    DAILY_OPERATIONAL_COST
-  )} × ${days} day${days === 1 ? "" : "s"}) - ${currency(totalExpenditure)} (expenditure) = ${currency(
+  const meta = `${currency(combined)} - (${currency(dailyOps)} × ${days} day${days === 1 ? "" : "s"}) - ${currency(
+    totalExpenditure
+  )} (expenditure) = ${currency(
     remaining
   )} · Opened ${BUSINESS_OPENED_DMY}`;
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
