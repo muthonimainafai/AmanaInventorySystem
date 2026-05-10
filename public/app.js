@@ -121,7 +121,8 @@ const OWNER_ALLOWED_PAGES = new Set([
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
 
-const DAILY_OPERATIONAL_COST = 180;
+/** KSh per day — used only for the Balance page “remaining after operational costs” banner. */
+const DAILY_OPERATIONAL_COST = 540;
 const BUSINESS_OPENED_DMY = "04/05/2026";
 
 /** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
