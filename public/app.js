@@ -121,12 +121,13 @@ const OWNER_ALLOWED_PAGES = new Set([
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
 const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
 
-/** Balance page only: Ufaray Feeds vs Amana (and other non-Ufaray portals) use different daily operational rates. */
-const DAILY_OPERATIONAL_COST_UFARAY_KES = 180;
-const DAILY_OPERATIONAL_COST_AMANA_KES = 540;
+/** Balance page only: daily operational cost (KES) per shop — Amana vs Ufaray are independent. */
+const BALANCE_PAGE_DAILY_OPERATIONAL_COST_KES_AMANA = 540;
+const BALANCE_PAGE_DAILY_OPERATIONAL_COST_KES_UFARAY = 180;
 
 function balanceDailyOperationalCostKes() {
-  return state.appInstance === "ufaray" ? DAILY_OPERATIONAL_COST_UFARAY_KES : DAILY_OPERATIONAL_COST_AMANA_KES;
+  if (state.appInstance === "ufaray") return BALANCE_PAGE_DAILY_OPERATIONAL_COST_KES_UFARAY;
+  return BALANCE_PAGE_DAILY_OPERATIONAL_COST_KES_AMANA;
 }
 
 const BUSINESS_OPENED_DMY = "04/05/2026";
@@ -187,6 +188,7 @@ const brandSelect = document.getElementById("brand");
 const feedTypeSelect = document.getElementById("feedType");
 const bagSizeInput = document.getElementById("bagSize");
 const quantityInput = document.getElementById("quantityInStock");
+const bagsBoughtInput = document.getElementById("bagsBought");
 const buyingPriceInput = document.getElementById("buyingPrice");
 const sellingPriceInput = document.getElementById("sellingPrice");
 const profitMarginPerBagInput = document.getElementById("profitMarginPerBag");
@@ -590,36 +592,20 @@ function calculatorRowsFromCatalog() {
   return rows;
 }
 
-/** Latest owner buying price from Feed Inventory for this exact line (records are id DESC). */
+/** Latest owner buying price from Feed Inventory for this catalog line (newest row by id). */
 function findInventoryBuyingPriceForCalculator(brand, feedType, bagSize) {
-  const bs = Number(bagSize);
-  if (!Number.isFinite(bs) || bs <= 0) return null;
-  const bKey = normalizeBrandName(brand);
-  const fKey = normalizeFeedTypeForMatch(feedType);
-  for (const row of state.records || []) {
-    if (Number(row.bag_size) !== bs) continue;
-    if (normalizeBrandName(row.brand) !== bKey) continue;
-    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
-    const bp = Number(row.buying_price);
-    return Number.isFinite(bp) ? bp : null;
-  }
-  return null;
+  const row = findLatestInventoryRowForCatalogLine(state.records, brand, feedType, bagSize);
+  if (!row) return null;
+  const bp = Number(row.buying_price);
+  return Number.isFinite(bp) ? bp : null;
 }
 
-/** Latest owner selling price from Feed Inventory for this exact line (records are id DESC). */
+/** Latest owner selling price from Feed Inventory for this catalog line (newest row by id). */
 function findInventorySellingPriceForCalculator(brand, feedType, bagSize) {
-  const bs = Number(bagSize);
-  if (!Number.isFinite(bs) || bs <= 0) return null;
-  const bKey = normalizeBrandName(brand);
-  const fKey = normalizeFeedTypeForMatch(feedType);
-  for (const row of state.records || []) {
-    if (Number(row.bag_size) !== bs) continue;
-    if (normalizeBrandName(row.brand) !== bKey) continue;
-    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
-    const sp = Number(row.selling_price);
-    return Number.isFinite(sp) ? sp : null;
-  }
-  return null;
+  const row = findLatestInventoryRowForCatalogLine(state.records, brand, feedType, bagSize);
+  if (!row) return null;
+  const sp = Number(row.selling_price);
+  return Number.isFinite(sp) ? sp : null;
 }
 
 function calculatorRowKey(brand, feedType, bagSize) {
@@ -752,6 +738,9 @@ function updateBalanceBanner() {
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
     el.textContent = meta;
   });
+  document.querySelectorAll(".js-balance-daily-op-rate").forEach((el) => {
+    el.textContent = `Ksh ${Number(dailyOps).toLocaleString("en-KE")}`;
+  });
 }
 
 function applyEmployeeSalesDateRules() {
@@ -821,6 +810,32 @@ function feedTypeCatalogValue(brandKey, feedType) {
   const target = normalizeFeedTypeForMatch(feedType);
   const found = items.find((i) => normalizeFeedTypeForMatch(i.type) === target);
   return found ? found.type : feedType;
+}
+
+/** Aligns inventory rows to the same catalog line as the UI (brand + feed + bag size). */
+function inventoryLineMatchesCatalogProduct(row, catalogBrand, catalogFeedType, catalogBagSize) {
+  const bk = resolveBrandKey(catalogBrand);
+  if (resolveBrandKey(row.brand) !== bk) return false;
+  const bs = Number(catalogBagSize);
+  if (!Number.isFinite(bs) || bs <= 0) return false;
+  if (Number(row.bag_size) !== bs) return false;
+  const wantFt = feedTypeCatalogValue(bk, catalogFeedType);
+  const rowFt = feedTypeCatalogValue(bk, row.feed_type);
+  if (rowFt === wantFt) return true;
+  return normalizeFeedTypeForMatch(row.feed_type) === normalizeFeedTypeForMatch(catalogFeedType);
+}
+
+/** Newest inventory row for this catalog line (max id), regardless of array order. */
+function findLatestInventoryRowForCatalogLine(rows, catalogBrand, catalogFeedType, catalogBagSize) {
+  const bs = Number(catalogBagSize);
+  if (!Number.isFinite(bs) || bs <= 0) return null;
+  let best = null;
+  for (const row of rows || []) {
+    if (!inventoryLineMatchesCatalogProduct(row, catalogBrand, catalogFeedType, bs)) continue;
+    const id = Number(row.id || 0);
+    if (!best || id > Number(best.id || 0)) best = row;
+  }
+  return best;
 }
 
 /** Maize Germ (Wishwa), Broken Wheat, Wheat Bran/Pollard — owner can set retail weight (kg) per opened bag. */
@@ -1703,20 +1718,12 @@ function applyDefaultSkBagOpened() {
   el.value = carry > 1e-6 ? "0" : "1";
 }
 
-/** Matches server getInventoryItem: same bag_size, normalized brand + feed; first row wins (list is id DESC). */
+/** Employee sales: selling price for this catalog line (newest inventory row by id). */
 function findInventorySellingPrice(brand, feedType, bagSize) {
-  const bs = Number(bagSize);
-  if (!Number.isFinite(bs) || bs <= 0) return null;
-  const bKey = normalizeBrandName(brand);
-  const fKey = normalizeFeedTypeForMatch(feedType);
-  for (const row of state.inventoryPricing) {
-    if (Number(row.bag_size) !== bs) continue;
-    if (normalizeBrandName(row.brand) !== bKey) continue;
-    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
-    const sp = Number(row.selling_price);
-    return Number.isFinite(sp) ? sp : null;
-  }
-  return null;
+  const row = findLatestInventoryRowForCatalogLine(state.inventoryPricing, brand, feedType, bagSize);
+  if (!row) return null;
+  const sp = Number(row.selling_price);
+  return Number.isFinite(sp) ? sp : null;
 }
 
 /** Retail price per kg from owner (GET /api/retail-feed-pricing), if configured for this product. */
@@ -1881,6 +1888,20 @@ function statusLabel(row) {
     : '<span class="status-ok">OK</span>';
 }
 
+function updateInventoryStockFieldsMode() {
+  const editing = state.editId != null && Number(state.editId) > 0;
+  if (quantityInput) {
+    quantityInput.readOnly = !editing;
+    quantityInput.required = editing;
+    if (!editing) quantityInput.value = "";
+  }
+  if (bagsBoughtInput) {
+    bagsBoughtInput.readOnly = false;
+    bagsBoughtInput.required = !editing;
+    if (!editing) bagsBoughtInput.value = "";
+  }
+}
+
 function resetForm() {
   form.reset();
   state.editId = null;
@@ -1894,8 +1915,10 @@ function resetForm() {
   if (reorderLevelInput) reorderLevelInput.value = "0";
   document.getElementById("accumulatedProfit").value = "0";
   document.getElementById("accumulatedBags").value = "";
+  if (bagsBoughtInput) bagsBoughtInput.value = "";
   setInventoryPriceEditMode(true);
   document.getElementById("saveBtn").textContent = "Save Record";
+  updateInventoryStockFieldsMode();
 }
 
 function syncInventoryProfitMarginFromPrices() {
@@ -1915,14 +1938,19 @@ function setInventoryPriceEditMode(editable) {
 
 function findLatestInventoryPriceLine(brand, feedType, bagSize) {
   const bKey = resolveBrandKey(brand);
-  const fKey = normalizeFeedTypeForMatch(feedType);
+  const wantCanon = feedTypeCatalogValue(bKey, feedType);
   const bs = Number(bagSize || 0);
-  if (!bKey || !fKey) return null;
+  if (!bKey || !String(feedType || "").trim()) return null;
   let latestExactBag = null;
   let latestAnyBag = null;
   for (const row of state.records || []) {
     if (resolveBrandKey(row.brand) !== bKey) continue;
-    if (normalizeFeedTypeForMatch(row.feed_type) !== fKey) continue;
+    const rowCanon = feedTypeCatalogValue(bKey, row.feed_type);
+    if (
+      rowCanon !== wantCanon &&
+      normalizeFeedTypeForMatch(row.feed_type) !== normalizeFeedTypeForMatch(feedType)
+    )
+      continue;
     if (!latestAnyBag || Number(row.id || 0) > Number(latestAnyBag.id || 0)) latestAnyBag = row;
     if (Number.isFinite(bs) && bs > 0 && Number(row.bag_size || 0) === bs) {
       if (!latestExactBag || Number(row.id || 0) > Number(latestExactBag.id || 0)) {
@@ -2151,21 +2179,23 @@ function renderOwnerUfarayNewPageSales() {
 
 function renderTable() {
   if (!state.records.length) {
-    tableBody.innerHTML = '<tr><td colspan="15" class="empty">No records.</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="16" class="empty">No records.</td></tr>';
     return;
   }
 
-  tableBody.innerHTML = joinRowsWithDateSeparators(state.records, 15, (row) => {
+  tableBody.innerHTML = joinRowsWithDateSeparators(state.records, 16, (row) => {
     const canDelete = state.user.role === "owner";
     const lineCumulative = currency(row.cumulative_bag_profit ?? 0);
     const ufarayBags = Number(row.bags_sold_pass_through ?? 0);
     const accBags = row.accumulated_bags != null ? row.accumulated_bags : row.quantity_in_stock;
+    const bagsBought = row.bags_bought != null ? row.bags_bought : 0;
     return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${displayBrand(row.brand)}</td>
         <td>${displayFeedType(row.feed_type)}</td>
         <td>${row.bag_size} kg</td>
+        <td>${bagsBought}</td>
         <td>${row.quantity_in_stock}</td>
         <td>${accBags}</td>
         <td>${currency(row.buying_price)}</td>
@@ -3147,6 +3177,7 @@ function populateForm(row) {
   feedTypeSelect.value = feedTypeCatalogValue(brandKey, row.feed_type);
   bagSizeInput.value = row.bag_size;
   quantityInput.value = row.quantity_in_stock;
+  if (bagsBoughtInput) bagsBoughtInput.value = row.bags_bought != null ? String(row.bags_bought) : "0";
   document.getElementById("accumulatedBags").value =
     row.accumulated_bags != null ? row.accumulated_bags : row.quantity_in_stock;
   buyingPriceInput.value = Number(row.buying_price || 0).toFixed(2);
@@ -3159,6 +3190,7 @@ function populateForm(row) {
   document.getElementById("accumulatedProfit").value = row.cumulative_bag_profit ?? 0;
   document.getElementById("reorderLevel").value = row.reorder_level;
   document.getElementById("saveBtn").textContent = "Update Record";
+  updateInventoryStockFieldsMode();
 }
 
 function formPayload() {
@@ -3169,12 +3201,16 @@ function formPayload() {
   const brandKey = resolveBrandKey(brandSelect.value);
   const dateCanon = formatDateDMY(dateValue).trim();
 
+  const bagsBoughtRaw = bagsBoughtInput?.value != null ? String(bagsBoughtInput.value).trim() : "";
+  const bagsBoughtNum = bagsBoughtRaw === "" ? NaN : Number(bagsBoughtRaw);
+
   return {
     date: dateCanon,
     brand: brandKey,
     feed_type: feedTypeCatalogValue(brandKey, feedTypeSelect.value),
     bag_size: Number(bagSizeInput.value || 0),
     quantity_in_stock: Number(quantityInput.value || 0),
+    bags_bought: Number.isFinite(bagsBoughtNum) ? Math.max(0, Math.floor(bagsBoughtNum)) : null,
     buying_price: Number(buyingPriceInput.value || 0),
     selling_price: Number(sellingPriceInput.value || 0),
     profit_margin_per_bag: Number(profitMarginPerBagInput.value || 0),
@@ -3647,6 +3683,7 @@ editPricesBtn?.addEventListener("click", () => {
 });
 setInventoryPriceEditMode(true);
 syncInventoryProfitMarginFromPrices();
+updateInventoryStockFieldsMode();
 
 openCalendarBtn.addEventListener("click", () => {
   if (dateDisplayInput.value.trim()) {
@@ -3676,8 +3713,15 @@ refreshBtn.addEventListener("click", async () => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
-    const payload = formPayload();
     const editId = state.editId != null ? Number(state.editId) : null;
+    if (!(editId != null && Number.isFinite(editId) && editId > 0)) {
+      const bb = Number(bagsBoughtInput?.value || 0);
+      if (!Number.isFinite(bb) || bb < 1) {
+        alert("Enter Bags bought (at least 1) when adding stock.");
+        return;
+      }
+    }
+    const payload = formPayload();
     if (editId != null && Number.isFinite(editId) && editId > 0) {
       await api(`/api/inventory/${editId}`, {
         method: "PUT",

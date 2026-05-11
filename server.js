@@ -691,6 +691,7 @@ async function initDb() {
   await run("ALTER TABLE inventory ADD COLUMN profit_margin_per_bag REAL NOT NULL DEFAULT 0").catch(() => {});
   await run("ALTER TABLE inventory ADD COLUMN accumulated_profit REAL NOT NULL DEFAULT 0").catch(() => {});
   await run("ALTER TABLE inventory ADD COLUMN accumulated_bags INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  await run("ALTER TABLE inventory ADD COLUMN bags_bought INTEGER NOT NULL DEFAULT 0").catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS app_meta (
@@ -1178,6 +1179,30 @@ function resolveBrandKey(brand) {
   return Object.keys(feedCatalog).find((b) => normalizeBrand(b) === target) || brand;
 }
 
+function feedCatalogTypeValue(brandKey, feedType) {
+  const catalog = catalogForActiveTenant();
+  const bk = resolveBrandKey(brandKey);
+  const items = catalog[bk] || [];
+  const target = normalizeFeedType(feedType);
+  const found = items.find((i) => normalizeFeedType(i.type) === target);
+  return found ? found.type : feedType;
+}
+
+/** Same catalog product as the client (canonical feed + bag size when provided). */
+function inventoryRowMatchesCatalogProduct(rowBrand, rowFeedType, rowBagSize, catalogBrand, catalogFeedType, catalogBagSize) {
+  const bk = resolveBrandKey(catalogBrand);
+  if (resolveBrandKey(String(rowBrand || "")) !== bk) return false;
+  if (catalogBagSize != null && String(catalogBagSize) !== "") {
+    const bs = Number(catalogBagSize);
+    if (Number.isFinite(bs) && bs > 0 && Number(rowBagSize) !== bs) return false;
+  }
+  const wantFt = feedCatalogTypeValue(bk, catalogFeedType);
+  const rowFt = feedCatalogTypeValue(bk, rowFeedType);
+  if (rowFt === wantFt) return true;
+  if (normalizeFeedType(rowFeedType) === normalizeFeedType(catalogFeedType)) return true;
+  return feedTypeEquivalent(rowFeedType, catalogFeedType, rowBagSize, catalogBagSize);
+}
+
 /** Shop calendar day for sales-date checks and reporting (Kenya default). Override with AMANA_TZ. */
 const AMANA_TZ = process.env.AMANA_TZ || "Africa/Nairobi";
 
@@ -1607,10 +1632,8 @@ async function getInventoryRowsForProduct(brand, feedType, bagSize) {
      ORDER BY id ASC`,
     [Number(bagSize)]
   );
-  return rows.filter(
-    (r) =>
-      normalizeBrand(r.brand) === normalizeBrand(brand) &&
-      feedTypeEquivalent(r.feed_type, feedType, r.bag_size, bagSize)
+  return rows.filter((r) =>
+    inventoryRowMatchesCatalogProduct(r.brand, r.feed_type, r.bag_size, brand, feedType, bagSize)
   );
 }
 
@@ -1625,7 +1648,7 @@ async function getInventoryItemAnyBagSize(brand, feedType, bagSizeHint) {
   const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
   const matched = rows.filter(
     (r) =>
-      normalizeBrand(r.brand) === normalizeBrand(brand) &&
+      resolveBrandKey(r.brand) === resolveBrandKey(brand) &&
       feedTypeEquivalent(r.feed_type, feedType, r.bag_size, bagSizeHint)
   );
   return matched.length ? matched[matched.length - 1] : null;
@@ -1636,7 +1659,7 @@ async function getInventoryItemByBrandAndBagSize(brand, bagSize) {
   const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
   const targetBag = Number(bagSize);
   const matched = rows.filter(
-    (r) => normalizeBrand(r.brand) === normalizeBrand(brand) && Number(r.bag_size) === targetBag
+    (r) => resolveBrandKey(r.brand) === resolveBrandKey(brand) && Number(r.bag_size) === targetBag
   );
   return matched.length ? matched[matched.length - 1] : null;
 }
@@ -1644,7 +1667,7 @@ async function getInventoryItemByBrandAndBagSize(brand, bagSize) {
 /** Newest inventory row for this brand, regardless of feed type and bag size (last-resort fallback). */
 async function getInventoryItemByBrandAny(brand) {
   const rows = await all("SELECT * FROM inventory ORDER BY id ASC");
-  const matched = rows.filter((r) => normalizeBrand(r.brand) === normalizeBrand(brand));
+  const matched = rows.filter((r) => resolveBrandKey(r.brand) === resolveBrandKey(brand));
   return matched.length ? matched[matched.length - 1] : null;
 }
 
@@ -2132,7 +2155,11 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
   try {
     const payload = req.body;
     const bagSize = Number(payload.bag_size);
-    const addQty = Number(payload.quantity_in_stock);
+    const fromBagsBought =
+      payload.bags_bought != null && String(payload.bags_bought).trim() !== ""
+        ? Number(payload.bags_bought)
+        : NaN;
+    const addQty = Number.isFinite(fromBagsBought) && fromBagsBought >= 1 ? fromBagsBought : Number(payload.quantity_in_stock);
     const dateCanon = normalizeInventoryDate(payload.date);
     if (!dateCanon) {
       return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -2142,7 +2169,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       return res.status(400).json({ error: "Invalid brand/feed type/bag size combination." });
     }
     if (!Number.isFinite(addQty) || addQty < 1) {
-      return res.status(400).json({ error: "Quantity in stock must be at least 1 when adding stock." });
+      return res.status(400).json({ error: "Bags bought must be at least 1 when adding stock (or legacy quantity in stock)." });
     }
 
     const margin = Number(payload.profit_margin_per_bag);
@@ -2160,11 +2187,12 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
         const nextQty = Number(current.quantity_in_stock || 0) + addQty;
         const nextAcc = Math.max(0, Number(current.accumulated_bags || 0) + addQty);
         const totalStock = bagSize * nextQty;
+        const nextBagsBought = Math.max(0, Number(current.bags_bought || 0) + addQty);
         await run(
           `UPDATE inventory SET
            date = ?, brand = ?, feed_type = ?, bag_size = ?,
            quantity_in_stock = ?, cost_price = 0, buying_price = ?, selling_price = ?, total_stock = ?, reorder_level = ?,
-           profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, updated_at = ?
+           profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, bags_bought = ?, updated_at = ?
            WHERE id = ?`,
           [
             dateCanon,
@@ -2179,6 +2207,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
             margin,
             Number(current.accumulated_profit || 0),
             nextAcc,
+            nextBagsBought,
             now,
             current.id,
           ]
@@ -2189,8 +2218,8 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       await run(
         `INSERT INTO inventory
          (date, brand, feed_type, bag_size, quantity_in_stock, cost_price, buying_price, selling_price, total_stock, reorder_level,
-          profit_margin_per_bag, accumulated_profit, accumulated_bags, created_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+          profit_margin_per_bag, accumulated_profit, accumulated_bags, bags_bought, created_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
         [
           dateCanon,
           brandCanon,
@@ -2202,6 +2231,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
           totalStock,
           Number(payload.reorder_level),
           margin,
+          addQty,
           addQty,
           req.user.username,
           now,
@@ -2218,13 +2248,14 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       const combinedQty = matches.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0) + addQty;
       const maxAccAmong = Math.max(0, ...matches.map((r) => Number(r.accumulated_bags ?? 0)));
       const combinedAccBags = maxAccAmong + addQty;
+      const combinedBagsBought = matches.reduce((s, r) => s + Number(r.bags_bought || 0), 0) + addQty;
       const combinedProfit = matches.reduce((s, r) => s + Number(r.accumulated_profit || 0), 0);
       const totalStock = bagSize * combinedQty;
       await run(
         `UPDATE inventory SET
          date = ?, brand = ?, feed_type = ?, bag_size = ?,
          quantity_in_stock = ?, cost_price = 0, buying_price = ?, selling_price = ?, total_stock = ?, reorder_level = ?,
-         profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, updated_at = ?
+         profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, bags_bought = ?, updated_at = ?
          WHERE id = ?`,
         [
           dateCanon,
@@ -2239,6 +2270,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
           margin,
           combinedProfit,
           Math.max(0, combinedAccBags),
+          Math.max(0, combinedBagsBought),
           now,
           keeper.id,
         ]
@@ -2256,9 +2288,11 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
     const carryQty = allProduct.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0);
     const carryAcc =
       allProduct.length > 0 ? Math.max(...allProduct.map((r) => Number(r.accumulated_bags ?? 0))) : 0;
+    const carryBagsBought = allProduct.reduce((s, r) => s + Number(r.bags_bought || 0), 0);
     const carryProfit = allProduct.reduce((s, r) => s + Number(r.accumulated_profit || 0), 0);
     const newQty = carryQty + addQty;
     const newAcc = carryAcc + addQty;
+    const newBagsBought = carryBagsBought + addQty;
     const totalStock = bagSize * newQty;
     await run("BEGIN TRANSACTION");
     try {
@@ -2268,8 +2302,8 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       await run(
         `INSERT INTO inventory
     (date, brand, feed_type, bag_size, quantity_in_stock, cost_price, buying_price, selling_price, total_stock, reorder_level,
-     profit_margin_per_bag, accumulated_profit, accumulated_bags, created_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     profit_margin_per_bag, accumulated_profit, accumulated_bags, bags_bought, created_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           dateCanon,
           brandCanon,
@@ -2283,6 +2317,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
           margin,
           carryProfit,
           newAcc,
+          newBagsBought,
           req.user.username,
           now,
         ]
@@ -2322,7 +2357,7 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const existing = await get(
-      "SELECT accumulated_profit, quantity_in_stock, COALESCE(accumulated_bags, 0) AS accumulated_bags FROM inventory WHERE id = ?",
+      "SELECT accumulated_profit, quantity_in_stock, COALESCE(accumulated_bags, 0) AS accumulated_bags, COALESCE(bags_bought, 0) AS bags_bought FROM inventory WHERE id = ?",
       [id]
     );
     if (!existing) {
@@ -2332,6 +2367,10 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     const margin = Number(payload.profit_margin_per_bag);
     // On owner edit, accumulated_bags should mirror the edited current quantity for that record.
     const nextAccumulatedBags = Math.max(0, quantity);
+    const nextBagsBought =
+      payload.bags_bought != null && String(payload.bags_bought).trim() !== ""
+        ? Math.max(0, Math.floor(Number(payload.bags_bought)))
+        : Math.max(0, Number(existing.bags_bought || 0));
 
     const dateCanon = normalizeInventoryDate(payload.date);
     if (!dateCanon) {
@@ -2347,7 +2386,7 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
       `UPDATE inventory SET
       date = ?, brand = ?, feed_type = ?, bag_size = ?, quantity_in_stock = ?,
       cost_price = 0, buying_price = ?, selling_price = ?, total_stock = ?, reorder_level = ?,
-      profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, updated_at = ?
+      profit_margin_per_bag = ?, accumulated_profit = ?, accumulated_bags = ?, bags_bought = ?, updated_at = ?
     WHERE id = ?`,
       [
         dateCanon,
@@ -2362,6 +2401,7 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
         margin,
         Number(existing.accumulated_profit || 0),
         nextAccumulatedBags,
+        nextBagsBought,
         new Date().toISOString(),
         id,
       ]

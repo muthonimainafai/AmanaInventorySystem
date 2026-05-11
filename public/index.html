@@ -203,10 +203,18 @@
               </label>
 
               <label>
-                Quantity in Stock (bags)
-                <input type="number" id="quantityInStock" min="0" step="1" required />
+                Bags bought (this save)
+                <input type="number" id="bagsBought" min="1" step="1" inputmode="numeric" />
                 <span class="field-hint">
-                  For a <strong>new save</strong> on a <strong>new day</strong>, enter <strong>only the bags you are adding today</strong> (e.g. 20). Any stock still on hand from earlier (e.g. 10) is added automatically. When you <strong>Update Record</strong>, enter the full quantity you want on that line.
+                  When <strong>saving a new intake</strong>, enter how many bags you purchased. That amount is added to <strong>current stock</strong> and to <strong>accumulated bags</strong>. Not used when you <strong>Update Record</strong> (edit a row)—use Bags bought on that row only if you need to correct the total recorded for the line.
+                </span>
+              </label>
+
+              <label>
+                Quantity in Stock (bags)
+                <input type="number" id="quantityInStock" min="0" step="1" />
+                <span class="field-hint">
+                  <strong>New save:</strong> leave blank—stock is computed from previous on-hand plus <strong>Bags bought</strong>. <strong>Update Record:</strong> enter the full bags on hand for this line.
                 </span>
               </label>
 
@@ -246,7 +254,7 @@
             </div>
 
             <p class="field-hint inventory-save-hint">
-              <strong>Same day:</strong> a second save for the same brand, feed, and bag size adds to that day’s row. <strong>New day:</strong> one new row is created; quantity = yesterday’s remaining stock + today’s intake, and accumulated bags = previous total + today’s intake (example: 10 left + 20 new → quantity 30, accumulated 30). Use <strong>Clear</strong> before <strong>Save Record</strong> if the button still says “Update Record”.
+              <strong>Same day:</strong> a second save for the same brand, feed, and bag size adds to that day’s row. <strong>New day:</strong> one new row is created; <strong>Bags bought</strong> is today’s intake; quantity = yesterday’s remaining stock + bags bought, and accumulated bags = previous total + bags bought (example: 10 left + 20 bought → quantity 30, accumulated 30, bags bought total includes all intakes merged into the row). Use <strong>Clear</strong> before <strong>Save Record</strong> if the button still says “Update Record”.
             </p>
 
             <div class="actions">
@@ -279,6 +287,7 @@
                   <th>Brand</th>
                   <th>Feed Type</th>
                   <th>Bag Size</th>
+                  <th title="Total bags purchased and recorded on this line (sums intakes merged into the row).">Bags bought</th>
                   <th>CurrentStock(Bags)</th>
                   <th title="Running total of bags for this brand and feed type; not reduced by sales.">Accumulated Bags</th>
                   <th>Buying</th>
@@ -294,7 +303,7 @@
               </thead>
               <tbody id="inventory-body">
                 <tr>
-                  <td colspan="15" class="empty">No records.</td>
+                  <td colspan="16" class="empty">No records.</td>
                 </tr>
               </tbody>
             </table>
@@ -1411,7 +1420,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Remaining balance after daily operational costs</p>
                   <p class="profit-highlight-sub">
-                    Combined accumulated profits minus Ksh 540 per day from the opening date (inclusive) to today, and minus total recorded expenditures.
+                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day from the opening date (inclusive) to today, and minus total recorded expenditures.
                   </p>
                 </div>
                 <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>
