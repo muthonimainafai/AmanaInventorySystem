@@ -681,6 +681,10 @@ async function initDb() {
   await run("ALTER TABLE chicken_sales ADD COLUMN delivery_status TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_brand TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_type TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_bag_qty INTEGER").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_line_total REAL").catch(() => {});
   await run(
     "UPDATE chicken_sales SET delivery_status = 'delivered' WHERE (delivery_status IS NULL OR TRIM(COALESCE(delivery_status, '')) = '') AND LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
   ).catch(() => {});
@@ -1796,6 +1800,90 @@ async function adjustChickenBreedAccumulatedProfit(breed, deltaProfit) {
 function chickenStaffSalePaymentIsCleared(row) {
   const s = String(row?.payment_status ?? "pending").trim().toLowerCase();
   return s === "delivered" || s === "cleared";
+}
+
+/**
+ * Staff chick sales: bundled feed line from Feed Inventory (brand + feed type + bag qty).
+ * Recomputes `feed_line_total` from current inventory selling price × bags (never trust client total).
+ * @returns {Promise<{feed_brand: string|null, feed_type: string|null, feed_bag_qty: number|null, feed_line_total: number|null}|null>} null if validation failed (response already sent).
+ */
+async function resolveEmployeeChickenFeedBundle(req, res, p, existingRow = null) {
+  if (req.user.role !== "employee") {
+    return { feed_brand: null, feed_type: null, feed_bag_qty: null, feed_line_total: null };
+  }
+  const brandRaw =
+    p.feed_brand != null && String(p.feed_brand).trim() !== ""
+      ? String(p.feed_brand).trim()
+      : existingRow?.feed_brand != null && String(existingRow.feed_brand).trim() !== ""
+        ? String(existingRow.feed_brand).trim()
+        : "";
+  const feedTypeRaw =
+    p.feed_type != null && String(p.feed_type).trim() !== ""
+      ? String(p.feed_type).trim()
+      : existingRow?.feed_type != null && String(existingRow.feed_type).trim() !== ""
+        ? String(existingRow.feed_type).trim()
+        : "";
+  if (!brandRaw || !feedTypeRaw) {
+    const hadLegacyEmpty =
+      existingRow &&
+      (!existingRow.feed_brand || String(existingRow.feed_brand).trim() === "") &&
+      (!existingRow.feed_type || String(existingRow.feed_type).trim() === "");
+    if (hadLegacyEmpty) {
+      return { feed_brand: null, feed_type: null, feed_bag_qty: null, feed_line_total: null };
+    }
+    res.status(400).json({ error: "Select feed brand and feed type for this chick sale." });
+    return null;
+  }
+  let bagQtyRaw = p.feed_bag_qty;
+  if (bagQtyRaw === undefined || bagQtyRaw === null || String(bagQtyRaw).trim() === "") {
+    if (existingRow != null && existingRow.feed_bag_qty != null && String(existingRow.feed_bag_qty).trim() !== "") {
+      bagQtyRaw = existingRow.feed_bag_qty;
+    } else {
+      bagQtyRaw = 0;
+    }
+  }
+  const bagQty = bagQtyRaw === "" || bagQtyRaw == null ? NaN : Math.floor(Number(bagQtyRaw));
+  if (!Number.isFinite(bagQty) || bagQty < 0) {
+    res.status(400).json({ error: "Feed quantity (bags) must be a whole number zero or greater." });
+    return null;
+  }
+  const brandKey = resolveBrandKey(brandRaw);
+  const catalog = catalogForActiveTenant();
+  if (!catalog[brandKey] || !Array.isArray(catalog[brandKey]) || !catalog[brandKey].length) {
+    res.status(400).json({ error: "Unknown feed brand for this site." });
+    return null;
+  }
+  const ftCanon = feedCatalogTypeValue(brandKey, feedTypeRaw);
+  const typeOk = catalog[brandKey].some((i) => normalizeFeedType(i.type) === normalizeFeedType(ftCanon));
+  if (!typeOk) {
+    res.status(400).json({ error: "Select a valid feed type for this brand." });
+    return null;
+  }
+  const defaultBagSize = catalogBagSizeForFeed(brandKey, ftCanon);
+  const lookupFeedType = canonicalFeedTypeForLookup(brandKey, ftCanon, defaultBagSize);
+  let itemResolved =
+    (await getInventoryItem(brandKey, lookupFeedType, Number(defaultBagSize))) ||
+    (await getInventoryItemAnyBagSize(brandKey, lookupFeedType, defaultBagSize));
+  if (!itemResolved) {
+    res.status(400).json({
+      error: "No Feed Inventory line for this brand and feed type. The owner must add stock first.",
+    });
+    return null;
+  }
+  const selling = Number(itemResolved.selling_price);
+  if (!Number.isFinite(selling) || selling < 0) {
+    res.status(400).json({ error: "Feed Inventory selling price is missing for this product." });
+    return null;
+  }
+  const storedBrand = resolveBrandKey(itemResolved.brand) || brandKey;
+  const storedType = feedCatalogTypeValue(brandKey, itemResolved.feed_type) || ftCanon;
+  const lineTotal = bagQty * selling;
+  return {
+    feed_brand: storedBrand,
+    feed_type: storedType,
+    feed_bag_qty: bagQty,
+    feed_line_total: lineTotal,
+  };
 }
 
 async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
@@ -4515,6 +4603,8 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   if (!(await assertEmployeeChickenSalePrice(req, res, breed, unitPrice))) return;
   const marginSnap = await resolveChickenSaleMarginSnap(req, res, breed, unitPrice, p);
   if (marginSnap == null) return;
+  const feedBundle = await resolveEmployeeChickenFeedBundle(req, res, p, null);
+  if (feedBundle == null) return;
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
@@ -4523,8 +4613,8 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, feed_brand, feed_type, feed_bag_qty, feed_line_total, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       p.date,
       description,
@@ -4541,6 +4631,10 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
       cust.delivery_status,
       throughParty,
       passThroughStatus,
+      feedBundle.feed_brand,
+      feedBundle.feed_type,
+      feedBundle.feed_bag_qty,
+      feedBundle.feed_line_total,
       req.user.username,
       nowIso,
       nowIso,
@@ -4578,6 +4672,8 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   if (!(await assertEmployeeChickenSalePrice(req, res, breed, unitPrice))) return;
   const marginSnap = await resolveChickenSaleMarginSnap(req, res, breed, unitPrice, p);
   if (marginSnap == null) return;
+  const feedBundle = await resolveEmployeeChickenFeedBundle(req, res, p, currentCh);
+  if (feedBundle == null) return;
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
@@ -4585,7 +4681,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
     await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
   }
   await run(
-    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, updated_at=? WHERE id=?`,
+    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, feed_brand=?, feed_type=?, feed_bag_qty=?, feed_line_total=?, updated_at=? WHERE id=?`,
     [
       p.date,
       description,
@@ -4602,6 +4698,10 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
       cust.delivery_status,
       throughParty,
       passThroughStatus,
+      feedBundle.feed_brand,
+      feedBundle.feed_type,
+      feedBundle.feed_bag_qty,
+      feedBundle.feed_line_total,
       new Date().toISOString(),
       Number(req.params.id),
     ]

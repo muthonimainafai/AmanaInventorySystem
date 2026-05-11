@@ -348,7 +348,7 @@
           <div class="card">
             <h3 class="card-title">Retail Feed Inventory</h3>
             <p class="field-hint">
-              Set <strong>price per kg</strong> and <strong>profit margin per kg</strong> for each product. Staff on <strong>Sales Per Kg</strong> must use
+              Set <strong>price per kg</strong> for each product; <strong>profit margin per kg</strong> is calculated as retail price per kg minus your Feed Inventory <strong>buying price per kg</strong> (buying price per bag ÷ bag size) when that stock exists. Staff on <strong>Sales Per Kg</strong> must use
               these prices when a line exists here; otherwise they use Feed Inventory (selling price ÷ bag size). <strong>Accumulated profit</strong> on each
               line increases by margin × kg sold on each sale. Wholesale stock stays under <strong>Feed Inventory</strong>. For
               <strong>Maize (Germ Wishwa)</strong>, <strong>Broken (Wheat)</strong>, and <strong>Wheat (Bran / Pollard)</strong>, you can set
@@ -370,7 +370,7 @@
                 </label>
                 <label>
                   Profit margin per kg
-                  <input type="number" id="rfMarginPerKg" step="0.01" required />
+                  <input type="number" id="rfMarginPerKg" step="0.01" required readonly title="Retail price per kg minus Feed Inventory cost per kg." />
                 </label>
                 <label>
                   Accumulated profit
@@ -460,9 +460,9 @@
             <h3 class="card-title">Chicken Sales Inventory</h3>
             <p class="field-hint">
               Record chick sales by breed. <strong>Minimum order:</strong> 50 chicks. <span class="owner-only-highlight hidden"
-                ><strong>Owner:</strong> set buying, selling, and profit margin per chick (revenue uses selling price). </span
+                ><strong>Owner:</strong> set buying and selling per chick; profit margin is calculated automatically (selling − buying). </span
               ><span class="employee-only-action hidden"
-                ><strong>Staff:</strong> <strong>Price per chick</strong> follows the selling price last saved by the owner for that breed (from their sales). </span
+                ><strong>Staff:</strong> <strong>Price per chick</strong> follows the selling price last saved by the owner for that breed (from their sales). Choose <strong>Feed brand</strong> and <strong>Feed type</strong> from Feed Inventory; <strong>Feed amount</strong> is bags × that line’s selling price per bag. </span
               >
             </p>
             <form id="chicken-form">
@@ -499,8 +499,8 @@
                 </label>
                 <label class="owner-only-highlight hidden">
                   Profit margin (per chick)
-                  <input type="number" id="chProfitMarginPerChick" min="0" step="0.01" />
-                  <span class="field-hint">Margin on each chick — should equal selling − buying (updates when you change buying or selling).</span>
+                  <input type="number" id="chProfitMarginPerChick" min="0" step="0.01" readonly title="Selling price minus buying price." />
+                  <span class="field-hint">Calculated automatically as <strong>selling − buying</strong> when you change those prices or the breed.</span>
                 </label>
                 <label>
                   Notes — optional
@@ -521,6 +521,28 @@
                     <option value="Ufaray">By Ufaray</option>
                   </select>
                 </label>
+                <div class="grid employee-only-action hidden" style="grid-column: 1 / -1">
+                  <label>
+                    Feed brand
+                    <select id="chFeedBrand">
+                      <option value="">Select brand</option>
+                    </select>
+                  </label>
+                  <label>
+                    Feed type
+                    <select id="chFeedType" disabled>
+                      <option value="">Select feed type</option>
+                    </select>
+                  </label>
+                  <label>
+                    Feed quantity (bags)
+                    <input type="number" id="chFeedBagQty" min="0" step="1" value="0" required title="Number of feed bags sold with this chick order." />
+                  </label>
+                  <label>
+                    Feed amount (KES)
+                    <input type="text" id="chFeedLineTotal" readonly title="Bags × selling price per bag from Feed Inventory for the selected product." />
+                  </label>
+                </div>
               </div>
               <fieldset class="chicken-customer-fieldset employee-only-action hidden">
                 <legend class="chicken-customer-legend">Customer Details</legend>
@@ -563,7 +585,7 @@
               </fieldset>
               <p class="field-hint inventory-save-hint">
                 <span class="owner-only-highlight hidden"
-                  ><strong>New record:</strong> choose breed, chicks (≥ 50), buying price, selling price, and margin (selling − buying). </span
+                  ><strong>New record:</strong> choose breed, chicks (≥ 50), buying price, and selling price (margin follows automatically). </span
                 ><span class="employee-only-action hidden"
                   ><strong>New sale:</strong> choose breed and chicks; price per chick is locked to the owner’s selling price for that breed. </span
                 ><strong>Edit:</strong> use <strong>Edit</strong> on a row below.
@@ -594,7 +616,7 @@
             <h4 class="card-title owner-only-highlight hidden" style="margin-top: 0">Chicks in shop &amp; staff sales</h4>
             <h4 class="card-title employee-only-action hidden" style="margin-top: 0">Chick sales history</h4>
             <p class="field-hint owner-only-highlight hidden">
-              Lists <strong>your inventory</strong> and <strong>staff chick sales</strong>. <strong>Profit (sale)</strong> is KES&nbsp;0 on your lines; for staff lines it is margin × chicks when <strong>Payment status</strong> is Cleared, otherwise KES&nbsp;0. For each <strong>staff</strong> line, staff-entered <strong>customer name, phone, money paid, balance, payment status, and delivery status</strong> appear in the table columns. Click a staff sale row to load the same details into <strong>Customer details (from staff)</strong> above. Use <strong>Edit</strong> on your inventory rows to update inventory details, and use the status dropdowns + <strong>Save</strong> in the table on staff rows.
+              Lists <strong>your inventory</strong> and <strong>staff chick sales</strong>. <strong>Profit (sale)</strong> is KES&nbsp;0 on your lines; for staff lines it is margin × chicks when <strong>Payment status</strong> is Cleared, otherwise KES&nbsp;0. For <strong>staff</strong> lines, <strong>Brand / Feed type / Quantity (bags) / Feed amount</strong> reflect the bundled feed from Feed Inventory (amount = bags × selling price per bag). Staff-entered <strong>customer name, phone, money paid, balance, payment status, and delivery status</strong> appear in the table columns. Click a staff sale row to load the same details into <strong>Customer details (from staff)</strong> above. Use <strong>Edit</strong> on your inventory rows to update inventory details, and use the status dropdowns + <strong>Save</strong> in the table on staff rows.
             </p>
             <p class="field-hint employee-only-action hidden">
               Your recorded chick sales for the shop. Use <strong>Edit</strong> or <strong>Delete</strong> on your rows as needed.
@@ -642,6 +664,10 @@
                     <th>Chicks</th>
                     <th>Price/chick</th>
                     <th title="Chicks × price per chick for this sale.">Total</th>
+                    <th>Brand</th>
+                    <th>Feed type</th>
+                    <th title="Feed bags sold with this order (from staff entry).">Quantity (bags)</th>
+                    <th title="Bags × Feed Inventory selling price per bag for that brand and feed type.">Feed amount</th>
                     <th>Customer</th>
                     <th>Phone</th>
                     <th>Paid</th>
@@ -656,20 +682,24 @@
                 </thead>
                 <tbody id="chicken-inventory-body">
                   <tr>
-                    <td colspan="16" class="empty chicken-inventory-empty-msg">Loading…</td>
+                    <td colspan="20" class="empty chicken-inventory-empty-msg">Loading…</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
           <div class="card owner-only-highlight hidden">
-            <h3 class="card-title">Via Amana kuku feeds</h3>
+            <h3 class="card-title" id="chickenViaPassThroughTitle">Via Amana kuku feeds</h3>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Date</th>
                     <th>Number of chicks</th>
+                    <th>Brand</th>
+                    <th>Feed type</th>
+                    <th title="Feed bags with this order.">Quantity (bags)</th>
+                    <th title="Bags × selling price per bag from Feed Inventory.">Feed amount</th>
                     <th>Buying price per chick</th>
                     <th>Total costs</th>
                     <th>Status</th>
@@ -679,7 +709,7 @@
                 </thead>
                 <tbody id="ufaray-chicken-sales-body">
                   <tr>
-                    <td colspan="7" class="empty">No Ufaray chicken sales yet.</td>
+                    <td colspan="11" class="empty">No Ufaray chicken sales yet.</td>
                   </tr>
                 </tbody>
               </table>
@@ -888,7 +918,7 @@
                 </label>
                 <label class="owner-only-highlight hidden">
                   Profit margin
-                  <input type="number" id="fdProfitMargin" min="0" step="0.01" required />
+                  <input type="number" id="fdProfitMargin" min="0" step="0.01" required readonly title="Selling price minus buying price." />
                 </label>
                 <label class="owner-only-highlight hidden">
                   Reorder level
@@ -1009,7 +1039,7 @@
                 </label>
                 <label class="owner-only-highlight hidden">
                   Profit margin
-                  <input type="number" id="medProfitMargin" min="0" step="0.01" required />
+                  <input type="number" id="medProfitMargin" min="0" step="0.01" required readonly title="Selling price minus buying price." />
                 </label>
                 <label class="owner-only-highlight hidden">
                   Reorder level
@@ -1087,7 +1117,7 @@
           <div class="card">
             <h3 class="card-title">Gas</h3>
             <p class="field-hint">
-              Owner records cylinder sizes (kg), prices, and margins. Employees record sales; selling price comes from the latest owner inventory line for that size.
+              Owner records cylinder sizes (kg), buying and selling prices (profit margin is calculated as selling − buying). Employees record sales; selling price comes from the latest owner inventory line for that size.
             </p>
             <form id="gas-form">
               <div class="grid">
@@ -1138,7 +1168,7 @@
                 </label>
                 <label class="owner-only-highlight hidden">
                   Profit margin
-                  <input type="number" id="gasProfitMargin" min="0" step="0.01" required />
+                  <input type="number" id="gasProfitMargin" min="0" step="0.01" required readonly title="Selling price minus buying price." />
                 </label>
                 <label class="owner-only-highlight hidden">
                   Reorder level

@@ -231,6 +231,10 @@ const chDateDisplay = document.getElementById("chDateDisplay");
 const chDate = document.getElementById("chDate");
 const chOpenCalendarBtn = document.getElementById("chOpenCalendarBtn");
 const chSaleType = document.getElementById("chSaleType");
+const chFeedBrand = document.getElementById("chFeedBrand");
+const chFeedType = document.getElementById("chFeedType");
+const chFeedBagQty = document.getElementById("chFeedBagQty");
+const chFeedLineTotal = document.getElementById("chFeedLineTotal");
 const fdForm = document.getElementById("fd-form");
 const fdBody = document.getElementById("fd-body");
 const fdItem = document.getElementById("fdItem");
@@ -374,6 +378,11 @@ function applyAppTheme() {
             : state.appInstance === "maina-faith-cess"
               ? "Maina+Faith+Cess"
             : "Rose Inventory";
+  }
+  const chickenViaPassThroughTitle = document.getElementById("chickenViaPassThroughTitle");
+  if (chickenViaPassThroughTitle) {
+    chickenViaPassThroughTitle.textContent =
+      state.appInstance === "amana" ? "Via Ufaray Feeds" : "Via Amana kuku feeds";
   }
 }
 
@@ -1609,6 +1618,65 @@ function populateRfFeedTypes(brand) {
   rfFeedType.disabled = false;
 }
 
+/** Rows used to resolve Feed Inventory selling price for staff chick sales (full inventory for owner, pricing snapshot for staff). */
+function chickenFeedInventoryRowsForPriceLookup() {
+  if (state.user?.role === "employee") return state.inventoryPricing || [];
+  return state.records || [];
+}
+
+function populateChChickenFeedTypes(brand) {
+  if (!chFeedType) return;
+  const cur = chFeedType.value;
+  const brandKey = resolveBrandKey(brand);
+  chFeedType.innerHTML = '<option value="">Select feed type</option>';
+  if (!brandKey || !state.catalog[brandKey]) {
+    chFeedType.disabled = true;
+    syncChEmployeeBundledFeedAmount();
+    return;
+  }
+  state.catalog[brandKey].forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.type;
+    option.textContent = displayFeedType(item.type);
+    chFeedType.appendChild(option);
+  });
+  chFeedType.disabled = false;
+  if (cur && [...chFeedType.options].some((o) => o.value === cur)) chFeedType.value = cur;
+  syncChEmployeeBundledFeedAmount();
+}
+
+function syncChEmployeeBundledFeedAmount() {
+  if (!chFeedBrand || !chFeedType || !chFeedBagQty || !chFeedLineTotal) return;
+  if (state.user?.role !== "employee") return;
+  const brand = String(chFeedBrand.value || "").trim();
+  const ft = String(chFeedType.value || "").trim();
+  const bags = Math.floor(Number(chFeedBagQty.value || 0));
+  if (!Number.isFinite(bags) || bags < 0) {
+    chFeedLineTotal.value = "";
+    return;
+  }
+  if (!brand || !ft) {
+    chFeedLineTotal.value = "";
+    return;
+  }
+  const bs = bagSizeFor(brand, ft);
+  if (!Number.isFinite(bs) || bs <= 0) {
+    chFeedLineTotal.value = "";
+    return;
+  }
+  const inv = findLatestInventoryRowForCatalogLine(chickenFeedInventoryRowsForPriceLookup(), brand, ft, bs);
+  if (!inv) {
+    chFeedLineTotal.value = "";
+    return;
+  }
+  const unit = Number(inv.selling_price);
+  if (!Number.isFinite(unit)) {
+    chFeedLineTotal.value = "";
+    return;
+  }
+  chFeedLineTotal.value = (bags * unit).toFixed(2);
+}
+
 function wireDatePicker(dateDisplay, dateInput, openBtn) {
   openBtn.addEventListener("click", () => {
     if (dateDisplay.value.trim()) {
@@ -1830,20 +1898,7 @@ function applyOwnerChickenPricesFromBreed() {
 
 function syncOwnerChickenMarginFromBuySell() {
   if (state.user?.role !== "owner") return;
-  const buy = Number(document.getElementById("chBuyingPrice")?.value);
-  const sell = Number(document.getElementById("chSellingPrice")?.value);
-  const mEl = document.getElementById("chProfitMarginPerChick");
-  if (!mEl || !Number.isFinite(buy) || !Number.isFinite(sell)) return;
-  mEl.value = String(Math.round((sell - buy) * 100) / 100);
-}
-
-function syncOwnerChickenSellFromBuyMargin() {
-  if (state.user?.role !== "owner") return;
-  const buy = Number(document.getElementById("chBuyingPrice")?.value);
-  const m = Number(document.getElementById("chProfitMarginPerChick")?.value);
-  const sellEl = document.getElementById("chSellingPrice");
-  if (!sellEl || !Number.isFinite(buy) || !Number.isFinite(m)) return;
-  sellEl.value = String(Math.round((buy + m) * 100) / 100);
+  syncOwnerLineProfitMargin("chBuyingPrice", "chSellingPrice", "chProfitMarginPerChick");
 }
 
 function applyEmployeeFeedSalePricingUi() {
@@ -1879,6 +1934,7 @@ function applyEmployeeFeedSalePricingUi() {
     applyEmployeeSalesKgPriceFromInventory();
     applyEmployeeChickenPriceFromBreeds();
     updateChickenCustomerAmounts();
+    syncChEmployeeBundledFeedAmount();
   }
 }
 
@@ -1926,12 +1982,58 @@ function resetForm() {
   updateInventoryStockFieldsMode();
 }
 
+/** Profit margin from buying vs selling (two decimal places). */
+function computeMarginFromBuySell(buy, sell) {
+  const b = Number(buy);
+  const s = Number(sell);
+  if (!Number.isFinite(b) || !Number.isFinite(s)) return null;
+  return Math.round((s - b) * 100) / 100;
+}
+
+function syncOwnerLineProfitMargin(buyInputId, sellInputId, marginInputId) {
+  const buyEl = document.getElementById(buyInputId);
+  const sellEl = document.getElementById(sellInputId);
+  const marginEl = document.getElementById(marginInputId);
+  if (!(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement) || !(marginEl instanceof HTMLInputElement)) return;
+  const m = computeMarginFromBuySell(buyEl.value, sellEl.value);
+  marginEl.value = m != null ? m.toFixed(2) : "0.00";
+}
+
+/** Retail margin per kg = retail price per kg − (Feed Inventory buying price per bag ÷ bag kg). */
+function syncRetailFeedMarginFromPrices() {
+  if (state.user?.role !== "owner") return;
+  const brandEl = document.getElementById("rfBrand");
+  const ftEl = document.getElementById("rfFeedType");
+  const priceEl = document.getElementById("rfPricePerKg");
+  const marginEl = document.getElementById("rfMarginPerKg");
+  if (!(brandEl instanceof HTMLSelectElement) || !(ftEl instanceof HTMLSelectElement)) return;
+  if (!(priceEl instanceof HTMLInputElement) || !(marginEl instanceof HTMLInputElement)) return;
+  const brand = String(brandEl.value || "").trim();
+  const ft = String(ftEl.value || "").trim();
+  const retail = Number(priceEl.value);
+  if (!brand || !ft) {
+    marginEl.value = "";
+    return;
+  }
+  const brandKey = resolveBrandKey(brand);
+  const ftCanon = feedTypeCatalogValue(brandKey, ft);
+  const bagKg = bagSizeFor(brandKey, ftCanon);
+  const buyPerBag = findInventoryBuyingPriceForCalculator(brandKey, ftCanon, bagKg);
+  if (!Number.isFinite(bagKg) || bagKg <= 0 || buyPerBag == null || !Number.isFinite(Number(buyPerBag))) {
+    marginEl.value = Number.isFinite(retail) && String(priceEl.value || "").trim() !== "" ? "0.00" : "";
+    return;
+  }
+  const costPerKg = Number(buyPerBag) / bagKg;
+  const m = Number.isFinite(retail) ? retail - costPerKg : NaN;
+  marginEl.value = Number.isFinite(m) ? m.toFixed(2) : "0.00";
+}
+
 function syncInventoryProfitMarginFromPrices() {
   const buying = Number(buyingPriceInput?.value || 0);
   const selling = Number(sellingPriceInput?.value || 0);
-  const margin = selling - buying;
+  const margin = computeMarginFromBuySell(buying, selling);
   if (!profitMarginPerBagInput) return;
-  profitMarginPerBagInput.value = Number.isFinite(margin) ? margin.toFixed(2) : "0.00";
+  profitMarginPerBagInput.value = margin != null ? margin.toFixed(2) : "0.00";
 }
 
 function setInventoryPriceEditMode(editable) {
@@ -2043,15 +2145,16 @@ function renderOwnerUfarayChickenSales() {
   if (state.user.role !== "owner" || state.currentPage !== "chicken-inventory") return;
   const rows = (state.chickenSales || []).filter((r) => String(r.through_party || "").trim() !== "");
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">No Ufaray chicken sales yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty">No Ufaray chicken sales yet.</td></tr>';
     return;
   }
-  tbody.innerHTML = joinRowsWithDateSeparators(rows, 7, (row) => {
+  tbody.innerHTML = joinRowsWithDateSeparators(rows, 11, (row) => {
     const qty = Number(row.quantity_birds) || 0;
     const unit = Number(row.unit_price) || 0;
     const margin = Number(row.margin_snap) || 0;
     const buyingPerChick = Math.max(0, unit - margin);
     const totalAmount = qty * buyingPerChick;
+    const feedCells = chickenSaleBundledFeedCellsHtml(row, false);
     const status =
       String(row.pass_through_status || "pending").toLowerCase() === "cleared" ||
       String(row.pass_through_status || "pending").toLowerCase() === "solved"
@@ -2061,6 +2164,7 @@ function renderOwnerUfarayChickenSales() {
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${qty}</td>
+        ${feedCells}
         <td>${currency(buyingPerChick)}</td>
         <td>${currency(totalAmount)}</td>
         <td>
@@ -2631,6 +2735,7 @@ function resetFeedersDrinkersForm() {
   if (document.getElementById("fdSaveBtn")) {
     document.getElementById("fdSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
   }
+  syncOwnerLineProfitMargin("fdBuyingPrice", "fdSellingPrice", "fdProfitMargin");
 }
 
 function resetMedicamentsForm() {
@@ -2642,6 +2747,7 @@ function resetMedicamentsForm() {
   if (document.getElementById("medSaveBtn")) {
     document.getElementById("medSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
   }
+  syncOwnerLineProfitMargin("medBuyingPrice", "medSellingPrice", "medProfitMargin");
 }
 
 function resetGasForm() {
@@ -2654,6 +2760,7 @@ function resetGasForm() {
   if (document.getElementById("gasSaveBtn")) {
     document.getElementById("gasSaveBtn").textContent = state.user?.role === "employee" ? "Save sale" : "Save record";
   }
+  syncOwnerLineProfitMargin("gasBuyingPrice", "gasSellingPrice", "gasProfitMargin");
 }
 
 function renderExpenditureTable() {
@@ -2899,11 +3006,28 @@ function renderNahashonTable() {
   if (mortEl) mortEl.textContent = String(sumMort);
 }
 
+function chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow) {
+  if (isOwnerInventoryRow) {
+    return "<td>—</td><td>—</td><td>—</td><td>—</td>";
+  }
+  const fb = row.feed_brand && String(row.feed_brand).trim();
+  const ft = row.feed_type && String(row.feed_type).trim();
+  const qtyRaw = row.feed_bag_qty;
+  const qty = qtyRaw === "" || qtyRaw == null ? NaN : Math.floor(Number(qtyRaw));
+  const totalRaw = row.feed_line_total;
+  const total = totalRaw === "" || totalRaw == null ? NaN : Number(totalRaw);
+  const brandCell = fb ? escapeHtmlCell(displayBrand(fb)) : "—";
+  const ftCell = ft ? escapeHtmlCell(displayFeedType(ft)) : "—";
+  const qtyCell = Number.isFinite(qty) ? escapeHtmlCell(String(qty)) : "—";
+  const amtCell = Number.isFinite(total) ? currency(total) : "—";
+  return `<td>${brandCell}</td><td>${ftCell}</td><td>${qtyCell}</td><td>${amtCell}</td>`;
+}
+
 function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
   const isEmployeeViewer = state.user.role === "employee";
-  const colSpan = isEmployeeViewer ? 15 : 16;
+  const colSpan = isEmployeeViewer ? 19 : 20;
   if (!state.chickenSales.length) {
     return `<tr><td colspan="${colSpan}" class="empty">${emptyMsg}</td></tr>`;
   }
@@ -2924,6 +3048,7 @@ function chickenSalesTableRowsHtml() {
     const profitCell = isEmployeeViewer ? "" : `<td>${formatChickenSaleProfitCell(row)}</td>`;
     const viaRaw = String(row.through_party || "").trim();
     const viaCell = viaRaw ? `By ${viaRaw}` : "—";
+    const feedCells = chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow);
     return `
       <tr data-chicken-row-id="${row.id}">
         <td>${formatDateDMY(row.date)}</td>
@@ -2932,6 +3057,7 @@ function chickenSalesTableRowsHtml() {
         <td>${row.quantity_birds}</td>
         <td>${currency(row.unit_price)}</td>
         <td>${currency(saleLineTotalChicken(row))}</td>
+        ${feedCells}
         ${customerCells}
         ${profitCell}
         <td>${viaCell}</td>
@@ -3039,12 +3165,24 @@ function resetChickenForm() {
   chDateDisplay.value = "";
   configureChickenPaymentStatusOptions();
   if (chSaleType) chSaleType.value = "";
+  if (state.user?.role === "employee" && chFeedBrand) {
+    populateBrandSelect(chFeedBrand);
+    if (chFeedType) {
+      chFeedType.innerHTML = '<option value="">Select feed type</option>';
+      chFeedType.disabled = true;
+    }
+    if (chFeedBagQty) chFeedBagQty.value = "0";
+    if (chFeedLineTotal) chFeedLineTotal.value = "";
+  }
   const chSave = document.getElementById("chSaveBtn");
   if (chSave) chSave.textContent = state.user?.role === "owner" ? "Save inventory" : "Save sale";
   populateChickenBreedSelect();
   applyEmployeeSalesDateRules();
   applyEmployeeFeedSalePricingUi();
-  if (state.user?.role === "owner") applyOwnerChickenPricesFromBreed();
+  if (state.user?.role === "owner") {
+    applyOwnerChickenPricesFromBreed();
+    syncOwnerChickenMarginFromBuySell();
+  }
   const cn = document.getElementById("chCustomerName");
   const cp = document.getElementById("chCustomerPhone");
   const mp = document.getElementById("chMoneyPaid");
@@ -3159,6 +3297,7 @@ function showPage(page) {
     renderRetailPricingTable();
     renderRetailInventoryTable();
     updateRetailCumulativeProfitDisplay();
+    syncRetailFeedMarginFromPrices();
   }
   if (page === "feeders-drinkers") renderFeedersDrinkersTable();
   if (page === "medicaments") renderMedicamentsTable();
@@ -3268,12 +3407,14 @@ async function loadAllData() {
     brandSelect.options.length <= 1 ||
     sbBrand.options.length <= 1 ||
     skBrand.options.length <= 1 ||
-    (rfBrand && rfBrand.options.length <= 1);
+    (rfBrand && rfBrand.options.length <= 1) ||
+    (chFeedBrand && chFeedBrand.options.length <= 1);
   if (mustFillBrandDropdowns && Object.keys(state.catalog || {}).length > 0) {
     populateBrands();
     populateBrandSelect(sbBrand);
     populateBrandSelect(skBrand);
     if (rfBrand) populateBrandSelect(rfBrand);
+    if (chFeedBrand) populateBrandSelect(chFeedBrand);
     catalogInitialized = true;
   }
 
@@ -3866,6 +4007,11 @@ skDate.addEventListener("change", () => applyDefaultSkBagOpened());
 wireDatePicker(skDateDisplay, skDate, skOpenCalendarBtn);
 
 wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
+chFeedBrand?.addEventListener("change", () => {
+  populateChChickenFeedTypes(chFeedBrand.value);
+});
+chFeedType?.addEventListener("change", () => syncChEmployeeBundledFeedAmount());
+chFeedBagQty?.addEventListener("input", () => syncChEmployeeBundledFeedAmount());
 if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, fdDate, fdOpenCalendarBtn);
 if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
@@ -3983,7 +4129,10 @@ document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {
     applyEmployeeChickenPriceFromBreeds();
     updateChickenCustomerAmounts();
-  } else applyOwnerChickenPricesFromBreed();
+  } else {
+    applyOwnerChickenPricesFromBreed();
+    syncOwnerChickenMarginFromBuySell();
+  }
 });
 
 document.getElementById("chQuantity")?.addEventListener("input", updateChickenCustomerAmounts);
@@ -3996,10 +4145,6 @@ document.getElementById("chBuyingPrice")?.addEventListener("input", () => {
 
 document.getElementById("chSellingPrice")?.addEventListener("input", () => {
   syncOwnerChickenMarginFromBuySell();
-});
-
-document.getElementById("chProfitMarginPerChick")?.addEventListener("input", () => {
-  syncOwnerChickenSellFromBuyMargin();
 });
 
 document.getElementById("sbClearBtn").addEventListener("click", resetSalesBagForm);
@@ -4036,6 +4181,7 @@ fdForm?.addEventListener("submit", async (event) => {
     }
     return;
   }
+  syncOwnerLineProfitMargin("fdBuyingPrice", "fdSellingPrice", "fdProfitMargin");
   const payload = {
     date: dateValue,
     item_name: fdItem.value,
@@ -4082,6 +4228,7 @@ medForm?.addEventListener("submit", async (event) => {
     }
     return;
   }
+  syncOwnerLineProfitMargin("medBuyingPrice", "medSellingPrice", "medProfitMargin");
   const payload = {
     date: dateValue,
     item_name: medItem.value,
@@ -4131,6 +4278,7 @@ gasForm?.addEventListener("submit", async (event) => {
   }
   const sizeKg = Number(gasSizeKg?.value || 0);
   if (!Number.isFinite(sizeKg) || sizeKg <= 0) return alert("Select cylinder size: 6 kg or 12 kg.");
+  syncOwnerLineProfitMargin("gasBuyingPrice", "gasSellingPrice", "gasProfitMargin");
   const payload = {
     date: dateValue,
     size_kg: sizeKg,
@@ -4152,6 +4300,22 @@ gasForm?.addEventListener("submit", async (event) => {
     alert(error.message);
   }
 });
+
+for (const id of ["fdBuyingPrice", "fdSellingPrice"]) {
+  document.getElementById(id)?.addEventListener("input", () =>
+    syncOwnerLineProfitMargin("fdBuyingPrice", "fdSellingPrice", "fdProfitMargin")
+  );
+}
+for (const id of ["medBuyingPrice", "medSellingPrice"]) {
+  document.getElementById(id)?.addEventListener("input", () =>
+    syncOwnerLineProfitMargin("medBuyingPrice", "medSellingPrice", "medProfitMargin")
+  );
+}
+for (const id of ["gasBuyingPrice", "gasSellingPrice"]) {
+  document.getElementById(id)?.addEventListener("input", () =>
+    syncOwnerLineProfitMargin("gasBuyingPrice", "gasSellingPrice", "gasProfitMargin")
+  );
+}
 
 expenditureForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -4342,21 +4506,16 @@ chickenForm.addEventListener("submit", async (event) => {
     weight_kg: null,
     through_party: String(chSaleType?.value || "").trim() || null,
   };
-  const PRICE_MATCH_CH = 0.015;
   if (state.user.role === "owner") {
     const buy = Number(document.getElementById("chBuyingPrice")?.value);
     const sell = Number(document.getElementById("chSellingPrice")?.value);
-    const pm = Number(document.getElementById("chProfitMarginPerChick")?.value);
     if (!Number.isFinite(buy) || !Number.isFinite(sell) || buy < 0 || sell < 0) {
       alert("Enter buying and selling price per chick.");
       return;
     }
-    if (!Number.isFinite(pm) || pm < 0) {
-      alert("Enter profit margin per chick.");
-      return;
-    }
-    if (Math.abs(pm - (sell - buy)) > PRICE_MATCH_CH) {
-      alert("Profit margin must equal selling price minus buying price.");
+    const pm = computeMarginFromBuySell(buy, sell);
+    if (pm == null) {
+      alert("Could not calculate profit margin from buying and selling prices.");
       return;
     }
     payload.buying_price = buy;
@@ -4372,6 +4531,20 @@ chickenForm.addEventListener("submit", async (event) => {
     payload.unit_price = unitPriceNum;
   }
   if (state.user.role === "employee") {
+    const fb = String(chFeedBrand?.value || "").trim();
+    const ft = String(chFeedType?.value || "").trim();
+    if (!fb || !ft) {
+      alert("Select feed brand and feed type for this chick sale.");
+      return;
+    }
+    const fbags = Math.floor(Number(chFeedBagQty?.value ?? 0));
+    if (!Number.isFinite(fbags) || fbags < 0) {
+      alert("Feed quantity (bags) must be a whole number zero or greater.");
+      return;
+    }
+    payload.feed_brand = fb;
+    payload.feed_type = ft;
+    payload.feed_bag_qty = fbags;
     const unitForLine = Number(payload.unit_price);
     const lineTotal = qty * unitForLine;
     const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
@@ -4674,6 +4847,12 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
       weight_kg: row.weight_kg ?? null,
       unit_price: Number(row.unit_price) || 0,
       through_party: row.through_party,
+      feed_brand: String(row.feed_brand || "").trim(),
+      feed_type: String(row.feed_type || "").trim(),
+      feed_bag_qty:
+        row.feed_bag_qty != null && row.feed_bag_qty !== ""
+          ? Math.floor(Number(row.feed_bag_qty))
+          : 0,
       customer_name: row.customer_name || "",
       customer_phone: row.customer_phone || "",
       money_paid: Number(row.money_paid) || 0,
@@ -4816,6 +4995,7 @@ function wireChickenTableClicks(tbody) {
         } else {
           applyOwnerChickenPricesFromBreed();
         }
+        syncOwnerChickenMarginFromBuySell();
       } else {
         const unitEl = document.getElementById("chUnitPrice");
         if (unitEl) unitEl.value = row.unit_price;
@@ -4833,6 +5013,23 @@ function wireChickenTableClicks(tbody) {
         }
         if (ds) {
           ds.value = chickenSaleDeliveryStatusLabel(row) === "Delivered" ? "delivered" : "pending";
+        }
+        if (chFeedBrand) {
+          populateBrandSelect(chFeedBrand);
+          const bk = row.feed_brand ? resolveBrandKey(String(row.feed_brand)) : "";
+          if (bk && [...chFeedBrand.options].some((o) => o.value === bk)) chFeedBrand.value = bk;
+          else if (row.feed_brand) chFeedBrand.value = String(row.feed_brand);
+          populateChChickenFeedTypes(chFeedBrand.value);
+          if (chFeedType && row.feed_type) {
+            const want = feedTypeCatalogValue(resolveBrandKey(chFeedBrand.value), String(row.feed_type));
+            if ([...chFeedType.options].some((o) => o.value === want)) chFeedType.value = want;
+            else if ([...chFeedType.options].some((o) => o.value === row.feed_type)) chFeedType.value = String(row.feed_type);
+          }
+          if (chFeedBagQty) {
+            chFeedBagQty.value =
+              row.feed_bag_qty != null && row.feed_bag_qty !== "" ? String(Math.floor(Number(row.feed_bag_qty))) : "0";
+          }
+          syncChEmployeeBundledFeedAmount();
         }
         updateChickenCustomerAmounts();
       }
@@ -4883,6 +5080,7 @@ function resetRetailFeedForm() {
   const wEl = document.getElementById("rfWeightKg");
   if (wEl) wEl.value = "";
   updateRfWeightFieldVisibility();
+  syncRetailFeedMarginFromPrices();
   const saveBtn = document.getElementById("rfSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save retail line";
 }
@@ -4894,7 +5092,6 @@ function populateRetailFeedForm(row) {
   populateRfFeedTypes(brandKey);
   if (rfFeedType) rfFeedType.value = feedTypeCatalogValue(brandKey, row.feed_type);
   document.getElementById("rfPricePerKg").value = row.price_per_kg;
-  document.getElementById("rfMarginPerKg").value = row.profit_margin_per_kg;
   document.getElementById("rfAccumulatedProfit").value = row.accumulated_profit ?? 0;
   const wEl = document.getElementById("rfWeightKg");
   if (wEl) {
@@ -4902,21 +5099,27 @@ function populateRetailFeedForm(row) {
     wEl.value = w != null && w !== "" && Number(w) > 0 ? String(w) : "";
   }
   updateRfWeightFieldVisibility();
+  syncRetailFeedMarginFromPrices();
   document.getElementById("rfSaveBtn").textContent = "Update retail line";
 }
 
 rfBrand?.addEventListener("change", () => {
   populateRfFeedTypes(rfBrand.value);
   updateRfWeightFieldVisibility();
+  syncRetailFeedMarginFromPrices();
 });
 
 rfFeedType?.addEventListener("change", () => {
   updateRfWeightFieldVisibility();
+  syncRetailFeedMarginFromPrices();
 });
+
+document.getElementById("rfPricePerKg")?.addEventListener("input", syncRetailFeedMarginFromPrices);
 
 retailFeedForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!rfBrand || !rfFeedType) return;
+  syncRetailFeedMarginFromPrices();
   const payload = {
     brand: resolveBrandKey(rfBrand.value),
     feed_type: rfFeedType.value,
@@ -5022,8 +5225,8 @@ fdBody?.addEventListener("click", async (event) => {
     document.getElementById("fdQuantity").value = row.quantity_in_stock;
     document.getElementById("fdBuyingPrice").value = row.buying_price;
     document.getElementById("fdSellingPrice").value = row.selling_price;
-    document.getElementById("fdProfitMargin").value = row.profit_margin ?? 0;
     document.getElementById("fdReorderLevel").value = row.reorder_level;
+    syncOwnerLineProfitMargin("fdBuyingPrice", "fdSellingPrice", "fdProfitMargin");
     document.getElementById("fdSaveBtn").textContent = "Update record";
     return;
   }
@@ -5081,8 +5284,8 @@ medBody?.addEventListener("click", async (event) => {
     document.getElementById("medQuantity").value = row.quantity_in_stock;
     document.getElementById("medBuyingPrice").value = row.buying_price;
     document.getElementById("medSellingPrice").value = row.selling_price;
-    document.getElementById("medProfitMargin").value = row.profit_margin ?? 0;
     document.getElementById("medReorderLevel").value = row.reorder_level;
+    syncOwnerLineProfitMargin("medBuyingPrice", "medSellingPrice", "medProfitMargin");
     document.getElementById("medSaveBtn").textContent = "Update record";
     return;
   }
@@ -5159,8 +5362,8 @@ gasBody?.addEventListener("click", async (event) => {
     document.getElementById("gasQuantity").value = row.quantity_in_stock;
     document.getElementById("gasBuyingPrice").value = row.buying_price;
     document.getElementById("gasSellingPrice").value = row.selling_price;
-    document.getElementById("gasProfitMargin").value = row.profit_margin ?? 0;
     document.getElementById("gasReorderLevel").value = row.reorder_level;
+    syncOwnerLineProfitMargin("gasBuyingPrice", "gasSellingPrice", "gasProfitMargin");
     document.getElementById("gasSaveBtn").textContent = "Update record";
     return;
   }
