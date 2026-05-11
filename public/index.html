@@ -1407,9 +1407,7 @@
         <div id="page-expenditure" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Expenditure</h3>
-            <p class="field-hint">
-              Record money going out and the total for this line (for example they can match, or total can include other charges you track separately).
-            </p>
+            <p class="field-hint">Record the amount of money going out for each line.</p>
             <form id="expenditure-form">
               <div class="grid">
                 <label class="date-field">
@@ -1434,10 +1432,6 @@
                   Money out
                   <input type="number" id="expMoneyOut" min="0" step="0.01" required />
                 </label>
-                <label>
-                  Total
-                  <input type="number" id="expTotal" min="0" step="0.01" required />
-                </label>
               </div>
               <div class="actions">
                 <button type="submit" id="expSaveBtn">Save entry</button>
@@ -1451,7 +1445,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Total expenditure</p>
                   <p class="profit-highlight-sub">
-                    Sum of the Total amount from every saved line on this page (shared owner + employee expenditure records).
+                    Sum of money out from every saved line on this page (shared owner + employee expenditure records).
                   </p>
                 </div>
                 <span class="js-exp-expenditure-total-value profit-highlight-amount">KES 0</span>
@@ -1465,11 +1459,10 @@
                     <th>Date</th>
                     <th>Description</th>
                     <th>Money out</th>
-                    <th>Total</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="exp-body"><tr><td colspan="5" class="empty">No records.</td></tr></tbody>
+                <tbody id="exp-body"><tr><td colspan="4" class="empty">No records.</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -1580,6 +1573,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-11-calc-customer-form"></script>
+    <script src="app.js?v=2026-05-11-expenditure-no-total"></script>
   </body>
 </html>

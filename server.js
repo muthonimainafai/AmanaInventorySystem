@@ -3556,13 +3556,10 @@ app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, 
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
   const moneyOut = Number(p.money_out);
-  const total = Number(p.total);
   if (!Number.isFinite(moneyOut) || moneyOut < 0) {
     return res.status(400).json({ error: "Money out must be a valid non-negative number." });
   }
-  if (!Number.isFinite(total) || total < 0) {
-    return res.status(400).json({ error: "Total must be a valid non-negative number." });
-  }
+  const total = moneyOut;
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO employee_expenditure (date, description, money_out, total, created_by, created_at, updated_at)
@@ -3586,13 +3583,10 @@ app.put("/api/expenditure/:id", auth, allowRoles("owner", "employee"), async (re
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
   const moneyOut = Number(p.money_out);
-  const total = Number(p.total);
   if (!Number.isFinite(moneyOut) || moneyOut < 0) {
     return res.status(400).json({ error: "Money out must be a valid non-negative number." });
   }
-  if (!Number.isFinite(total) || total < 0) {
-    return res.status(400).json({ error: "Total must be a valid non-negative number." });
-  }
+  const total = moneyOut;
   await run(
     `UPDATE employee_expenditure SET date = ?, description = ?, money_out = ?, total = ?, updated_at = ? WHERE id = ?`,
     [dateCanon, description, moneyOut, total, new Date().toISOString(), id]

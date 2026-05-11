@@ -100,6 +100,15 @@ function isTerryCessOrShopTenant() {
   );
 }
 
+/** Calculator tab + page (with PDFs) allowed for staff on these tenants — same UI as owner. */
+function staffMayAccessCalculatorTenant() {
+  return (
+    isTerryCessOrShopTenant() ||
+    state.appInstance === "amana" ||
+    state.appInstance === "ufaray"
+  );
+}
+
 function isTerryOrCessTenant() {
   return (
     state.appInstance === "terry" ||
@@ -593,16 +602,15 @@ function updateMedicamentsProfitDisplay() {
 
 function updateExpenditureAccumulatedDisplay() {
   const rows = state.expenditureEntries || [];
-  const sumTotal = rows.reduce((s, r) => s + (Number(r.total) || 0), 0);
   const sumMoneyOut = rows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
-  const val = currency(sumTotal);
+  const val = currency(sumMoneyOut);
   document.querySelectorAll(".js-exp-expenditure-total-value").forEach((el) => {
     el.textContent = val;
   });
   const meta =
     rows.length === 0
       ? "No records yet."
-      : `${rows.length} record${rows.length === 1 ? "" : "s"} · Sum of Total: ${currency(sumTotal)} · Sum of Money out: ${currency(sumMoneyOut)}`;
+      : `${rows.length} record${rows.length === 1 ? "" : "s"} · Sum of money out: ${currency(sumMoneyOut)}`;
   document.querySelectorAll(".js-exp-expenditure-total-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -750,7 +758,7 @@ function updateBalanceBanner() {
   const dailyOps = balanceDailyOperationalCostKes();
   const operational = days * dailyOps;
   const expRows = state.expenditureEntries || [];
-  const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.total) || 0), 0);
+  const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
   const remaining = combined - operational - totalExpenditure;
   document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
     const formatted = currency(Math.abs(remaining));
@@ -1398,8 +1406,8 @@ function showLoggedIn() {
   const isOwner = state.user.role === "owner";
   document.querySelectorAll(".owner-only-tab").forEach((el) => {
     const isCalculatorTab = el instanceof HTMLElement && el.dataset?.page === "calculator";
-    const allowCalculatorForNahahUsers = isCalculatorTab && isTerryCessOrShopTenant();
-    el.classList.toggle("hidden", !(isOwner || allowCalculatorForNahahUsers));
+    const allowCalculatorForStaff = isCalculatorTab && staffMayAccessCalculatorTenant();
+    el.classList.toggle("hidden", !(isOwner || allowCalculatorForStaff));
   });
   document.querySelectorAll(".owner-only-highlight").forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
@@ -1425,7 +1433,7 @@ function showLoggedIn() {
       (page === "sales-bags" || page === "sales-kg");
     const recordsTenant = isRecordsTenant();
     const terryCessShopTenant = isTerryCessOrShopTenant();
-    const shouldShow = isOwnerSalesPageHiddenForTenant
+    let shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : state.appInstance === "terry"
       ? page === "rose-inventory" || page === "calculator"
@@ -1444,6 +1452,9 @@ function showLoggedIn() {
         : isOwner
           ? OWNER_ALLOWED_PAGES.has(page)
           : !OWNER_INVENTORY_PAGES.has(page);
+    if (!isOwner && page === "calculator" && staffMayAccessCalculatorTenant()) {
+      shouldShow = true;
+    }
     btn.classList.toggle("hidden", !shouldShow);
   });
   [fdForm, medForm, gasForm].forEach((frm) => {
@@ -2784,7 +2795,7 @@ function resetGasForm() {
 function renderExpenditureTable() {
   if (!expBody) return;
   const rows = state.expenditureEntries || [];
-  const colSpan = 5;
+  const colSpan = 4;
   if (!rows.length) {
     expBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
     updateExpenditureAccumulatedDisplay();
@@ -2795,7 +2806,6 @@ function renderExpenditureTable() {
         <td>${formatDateDMY(row.date)}</td>
         <td>${escapeHtmlCell(row.description)}</td>
         <td>${currency(row.money_out)}</td>
-        <td>${currency(row.total)}</td>
         <td>
           <div class="row-actions">
             <button type="button" data-kind="exp" data-action="edit" data-id="${row.id}">Edit</button>
@@ -3232,8 +3242,8 @@ function showPage(page) {
   ) {
     return showPage("rose-inventory");
   }
-  if ((isTerryOrCessTenant() || state.appInstance === "shop") && page === "calculator") {
-    // Allow calculator for both owner and employee in Nahah users.
+  if (staffMayAccessCalculatorTenant() && page === "calculator") {
+    // Allow calculator for owner and staff on Amana, Ufaray, and Nahah shop tenants.
   } else if (page === "calculator" && state.user?.role !== "owner") {
     return showPage("inventory");
   }
@@ -3974,13 +3984,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
     if (state.user.role === "owner" && !OWNER_ALLOWED_PAGES.has(page)) return;
     if (state.user.role !== "owner" && OWNER_INVENTORY_PAGES.has(page)) {
-      const staffMayUseCalculator =
-        page === "calculator" &&
-        (state.appInstance === "terry" ||
-          state.appInstance === "cess" ||
-          state.appInstance === "terry-and-cess" ||
-          state.appInstance === "maina-faith-cess" ||
-          state.appInstance === "shop");
+      const staffMayUseCalculator = page === "calculator" && staffMayAccessCalculatorTenant();
       if (!staffMayUseCalculator) return;
     }
     showPage(page);
@@ -4039,14 +4043,6 @@ fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 
-document.getElementById("expMoneyOut")?.addEventListener("input", () => {
-  const totalEl = document.getElementById("expTotal");
-  const outEl = document.getElementById("expMoneyOut");
-  if (!totalEl || !outEl) return;
-  if (state.editExpenditureId) return;
-  const t = totalEl.value.trim();
-  if (t === "" || Number(t) === 0) totalEl.value = outEl.value;
-});
 calcBody?.addEventListener("input", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement)) return;
@@ -4513,11 +4509,12 @@ expenditureForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = expDateDisplay.value.trim();
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const moneyOut = Number(document.getElementById("expMoneyOut")?.value || 0);
   const payload = {
     date: dateValue,
     description: String(document.getElementById("expDescription")?.value || "").trim(),
-    money_out: Number(document.getElementById("expMoneyOut")?.value || 0),
-    total: Number(document.getElementById("expTotal")?.value || 0),
+    money_out: moneyOut,
+    total: moneyOut,
   };
   try {
     if (state.editExpenditureId) {
@@ -5586,10 +5583,8 @@ expBody?.addEventListener("click", async (event) => {
     if (expDateDisplay) expDateDisplay.value = formatDateDMY(row.date);
     const desc = document.getElementById("expDescription");
     const out = document.getElementById("expMoneyOut");
-    const tot = document.getElementById("expTotal");
     if (desc) desc.value = row.description || "";
     if (out) out.value = row.money_out ?? 0;
-    if (tot) tot.value = row.total ?? 0;
     const saveBtn = document.getElementById("expSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
     return;
