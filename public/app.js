@@ -280,6 +280,9 @@ const nahashonDateDisplay = document.getElementById("nahashonDateDisplay");
 const nahashonDate = document.getElementById("nahashonDate");
 const nahashonOpenCalendarBtn = document.getElementById("nahashonOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
+const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
+const calcDueDate = document.getElementById("calcDueDate");
+const calcDueOpenCalendarBtn = document.getElementById("calcDueOpenCalendarBtn");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -4026,6 +4029,9 @@ if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDispl
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
 if (expDateDisplay && expDate && expOpenCalendarBtn) wireDatePicker(expDateDisplay, expDate, expOpenCalendarBtn);
 if (roseDateDisplay && roseDate && roseOpenCalendarBtn) wireDatePicker(roseDateDisplay, roseDate, roseOpenCalendarBtn);
+if (calcDueDateDisplay && calcDueDate && calcDueOpenCalendarBtn) {
+  wireDatePicker(calcDueDateDisplay, calcDueDate, calcDueOpenCalendarBtn);
+}
 if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
   wireDatePicker(nahashonDateDisplay, nahashonDate, nahashonOpenCalendarBtn);
 }
@@ -4054,15 +4060,34 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying'], input[data-kind='calc-selling']").forEach((el) => {
     if (el instanceof HTMLInputElement) el.value = "";
   });
-  const billTo = document.getElementById("calcBillTo");
-  if (billTo instanceof HTMLInputElement) billTo.value = "";
+  const nameEl = document.getElementById("calcCustomerName");
+  const mobileEl = document.getElementById("calcCustomerMobile");
+  if (nameEl instanceof HTMLInputElement) nameEl.value = "";
+  if (mobileEl instanceof HTMLInputElement) mobileEl.value = "";
+  if (calcDueDateDisplay instanceof HTMLInputElement) calcDueDateDisplay.value = "";
+  if (calcDueDate instanceof HTMLInputElement) calcDueDate.value = "";
   updateCalculatorGrandTotalDisplay();
 });
 
-function getCalcBillToText() {
-  const el = document.getElementById("calcBillTo");
+document.getElementById("calcCustomerForm")?.addEventListener("submit", (e) => e.preventDefault());
+
+function getCalcCustomerBillPdfText() {
+  const nameEl = document.getElementById("calcCustomerName");
+  const mobileEl = document.getElementById("calcCustomerMobile");
+  const name = nameEl instanceof HTMLInputElement ? nameEl.value.trim() : "";
+  const mobile = mobileEl instanceof HTMLInputElement ? mobileEl.value.trim() : "";
+  const parts = [];
+  if (name) parts.push(name);
+  if (mobile) parts.push(`Mobile: ${mobile}`);
+  return parts.join("\n") || "—";
+}
+
+/** Due date for invoice PDFs: valid DD/MM/YYYY from field, else shop today. */
+function getCalcDueDateForPdf() {
+  const el = document.getElementById("calcDueDateDisplay");
   const t = el instanceof HTMLInputElement ? el.value.trim() : "";
-  return t || "—";
+  if (t && isValidDMY(t)) return t;
+  return state.shopToday || clientShopTodayDMY();
 }
 
 /** Rows with bags > 0 plus parsed prices for PDF exports. */
@@ -4162,7 +4187,28 @@ function downloadCalculatorPdf(mode = "calculator") {
     doc.text("Calculator", 40, 64);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
-    doc.text(`Date: ${today}`, 40, 84);
+    let metaY = 84;
+    doc.text(`Date: ${today}`, 40, metaY);
+    metaY += 14;
+    const cn = document.getElementById("calcCustomerName");
+    const cm = document.getElementById("calcCustomerMobile");
+    const cname = cn instanceof HTMLInputElement ? cn.value.trim() : "";
+    const cmob = cm instanceof HTMLInputElement ? cm.value.trim() : "";
+    const dueDisp = document.getElementById("calcDueDateDisplay");
+    const dueStr = dueDisp instanceof HTMLInputElement ? dueDisp.value.trim() : "";
+    const duePdf = dueStr && isValidDMY(dueStr) ? dueStr : null;
+    if (cname) {
+      doc.text(`Customer: ${cname}`, 40, metaY);
+      metaY += 14;
+    }
+    if (cmob) {
+      doc.text(`Mobile: ${cmob}`, 40, metaY);
+      metaY += 14;
+    }
+    if (duePdf) {
+      doc.text(`Due date: ${duePdf}`, 40, metaY);
+      metaY += 14;
+    }
 
     const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Selling price (per bag)", "Total"]];
     const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.selling, r.total]);
@@ -4170,7 +4216,7 @@ function downloadCalculatorPdf(mode = "calculator") {
     autoTableFn.call(doc, {
       head,
       body,
-      startY: 98,
+      startY: metaY + 10,
       styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
       headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
     });
@@ -4211,9 +4257,10 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.setFontSize(10);
   doc.text("BILL TO", margin, blockTop);
   doc.setFont("helvetica", "normal");
-  const billRaw = getCalcBillToText();
+  const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
   doc.text(billLines, margin, blockTop + 14);
+  const dueForPdf = getCalcDueDateForPdf();
 
   const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
   const terms = isProforma ? "Cost estimate — not a tax invoice" : "Due on receipt";
@@ -4223,7 +4270,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   ry += 14;
   doc.text(`DATE: ${today}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`DUE DATE: ${today}`, rightX, ry, { align: "right" });
+  doc.text(`DUE DATE: ${dueForPdf}`, rightX, ry, { align: "right" });
   ry += 14;
   doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
 
