@@ -212,17 +212,17 @@
 
               <label>
                 Quantity in Stock (bags)
-                <input type="number" id="quantityInStock" min="0" step="1" />
+                <input type="number" id="quantityInStock" min="0" step="1" title="Current bags on hand." />
                 <span class="field-hint">
-                  <strong>New save:</strong> leave blank—stock is computed from previous on-hand plus <strong>Bags bought</strong>. <strong>Update Record:</strong> enter the full bags on hand for this line.
+                  <strong>New save:</strong> leave blank—stock is computed from previous on-hand plus <strong>Bags bought</strong>. <strong>Update Record:</strong> edit the current bags on hand for this line.
                 </span>
               </label>
 
               <label>
                 Accumulated Bags
-                <input type="number" id="accumulatedBags" min="0" step="1" readonly title="Running total of bags for this brand and feed type; not reduced when employees sell." />
+                <input type="number" id="accumulatedBags" min="0" step="1" title="Running total of bags for this line; editable when you update the record." />
                 <span class="field-hint">
-                  Total bags recorded for this product line (carried forward + each new intake). <strong>Does not go down</strong> when staff sell. Sales reduce <strong>Quantity</strong> only.
+                  Total bags recorded for this product line (carried forward + intakes). Staff sales reduce <strong>Quantity</strong> only; you can correct this total when <strong>Update Record</strong> is active. <strong>New save:</strong> filled automatically after save.
                 </span>
               </label>
 

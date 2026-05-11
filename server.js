@@ -2349,7 +2349,10 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const bagSize = Number(payload.bag_size);
-    const quantity = Number(payload.quantity_in_stock);
+    const quantity = Math.floor(Number(payload.quantity_in_stock));
+    if (!Number.isFinite(quantity) || quantity < 0) {
+      return res.status(400).json({ error: "Quantity in stock must be a valid non-negative integer." });
+    }
     const totalStock = bagSize * quantity;
 
     if (!validateFeed(payload.brand, payload.feed_type, bagSize)) {
@@ -2365,8 +2368,14 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const margin = Number(payload.profit_margin_per_bag);
-    // On owner edit, accumulated_bags should mirror the edited current quantity for that record.
-    const nextAccumulatedBags = Math.max(0, quantity);
+    let nextAccumulatedBags = Math.max(0, Number(existing.accumulated_bags || 0));
+    if (payload.accumulated_bags != null) {
+      const a = Math.floor(Number(payload.accumulated_bags));
+      if (!Number.isFinite(a) || a < 0) {
+        return res.status(400).json({ error: "Accumulated bags must be a valid non-negative integer." });
+      }
+      nextAccumulatedBags = a;
+    }
     const nextBagsBought =
       payload.bags_bought != null && String(payload.bags_bought).trim() !== ""
         ? Math.max(0, Math.floor(Number(payload.bags_bought)))

@@ -1895,6 +1895,11 @@ function updateInventoryStockFieldsMode() {
     quantityInput.required = editing;
     if (!editing) quantityInput.value = "";
   }
+  const accBagsEl = document.getElementById("accumulatedBags");
+  if (accBagsEl instanceof HTMLInputElement) {
+    accBagsEl.readOnly = !editing;
+    if (!editing) accBagsEl.value = "";
+  }
   if (bagsBoughtInput) {
     bagsBoughtInput.readOnly = false;
     bagsBoughtInput.required = !editing;
@@ -3203,6 +3208,10 @@ function formPayload() {
 
   const bagsBoughtRaw = bagsBoughtInput?.value != null ? String(bagsBoughtInput.value).trim() : "";
   const bagsBoughtNum = bagsBoughtRaw === "" ? NaN : Number(bagsBoughtRaw);
+  const editing = state.editId != null && Number(state.editId) > 0;
+  const accEl = document.getElementById("accumulatedBags");
+  const accRaw = accEl instanceof HTMLInputElement ? String(accEl.value || "").trim() : "";
+  const accNum = accRaw === "" ? NaN : Number(accRaw);
 
   return {
     date: dateCanon,
@@ -3211,6 +3220,8 @@ function formPayload() {
     bag_size: Number(bagSizeInput.value || 0),
     quantity_in_stock: Number(quantityInput.value || 0),
     bags_bought: Number.isFinite(bagsBoughtNum) ? Math.max(0, Math.floor(bagsBoughtNum)) : null,
+    accumulated_bags:
+      editing && Number.isFinite(accNum) && accNum >= 0 ? Math.max(0, Math.floor(accNum)) : null,
     buying_price: Number(buyingPriceInput.value || 0),
     selling_price: Number(sellingPriceInput.value || 0),
     profit_margin_per_bag: Number(profitMarginPerBagInput.value || 0),
