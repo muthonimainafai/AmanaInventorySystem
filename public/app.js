@@ -379,10 +379,9 @@ function applyAppTheme() {
               ? "Maina+Faith+Cess"
             : "Rose Inventory";
   }
-  const chickenViaPassThroughTitle = document.getElementById("chickenViaPassThroughTitle");
-  if (chickenViaPassThroughTitle) {
-    chickenViaPassThroughTitle.textContent =
-      state.appInstance === "amana" ? "Via Ufaray Feeds" : "Via Amana kuku feeds";
+  const passThroughTitles = document.querySelectorAll(".js-via-pass-through-title");
+  for (const el of passThroughTitles) {
+    el.textContent = state.appInstance === "amana" ? "Via Ufaray Feeds" : "Via Amana kuku feeds";
   }
 }
 
