@@ -559,6 +559,10 @@ button.danger {
   gap: 8px;
 }
 
+.calc-pdf-actions {
+  flex-wrap: wrap;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

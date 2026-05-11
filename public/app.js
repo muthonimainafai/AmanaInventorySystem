@@ -79,6 +79,13 @@ const PAGE_HEADINGS = {
   balance: "Balance",
 };
 
+function updateCalculatorModeUi() {
+  const calcSubheading = document.getElementById("calculatorSubheading");
+  if (calcSubheading && !calcSubheading.classList.contains("hidden")) {
+    calcSubheading.textContent = "Calculator";
+  }
+}
+
 function isRecordsTenant() {
   return state.appInstance === "rose";
 }
@@ -383,6 +390,13 @@ function applyAppTheme() {
   for (const el of passThroughTitles) {
     el.textContent = state.appInstance === "amana" ? "Via Ufaray Feeds" : "Via Amana kuku feeds";
   }
+  const calcSubheading = document.getElementById("calculatorSubheading");
+  const calcTitle = document.getElementById("calculatorTitle");
+  if (calcSubheading) calcSubheading.classList.toggle("hidden", state.appInstance === "ufaray");
+  if (calcTitle) {
+    calcTitle.textContent = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  }
+  updateCalculatorModeUi();
 }
 
 async function api(path, options = {}) {
@@ -480,6 +494,12 @@ function currency(value) {
     style: "currency",
     currency: "KES",
   });
+}
+
+/** Plain numeric string with grouping (no currency symbol) for invoice-style PDF columns. */
+function formatKshPlainNumber(value) {
+  const n = Number(value) || 0;
+  return new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
 /** Match server default AMANA_TZ for date fields before the first API response. */
@@ -3255,6 +3275,9 @@ function showPage(page) {
   if (page === "gas" && state.user?.role === "employee") {
     pageHeading.textContent = "Gas Sales";
   }
+  if (page === "calculator" && state.appInstance === "ufaray") {
+    pageHeading.textContent = "Ufaray Feeds";
+  }
   if (
     page === "sales-bags" ||
     page === "sales-kg" ||
@@ -4031,18 +4054,21 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   calcBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying'], input[data-kind='calc-selling']").forEach((el) => {
     if (el instanceof HTMLInputElement) el.value = "";
   });
+  const billTo = document.getElementById("calcBillTo");
+  if (billTo instanceof HTMLInputElement) billTo.value = "";
   updateCalculatorGrandTotalDisplay();
 });
 
-function downloadCalculatorPdf() {
-  if (!calcBody) return;
-  const jsPdfNs = window.jspdf;
-  const JsPdfCtor = jsPdfNs?.jsPDF;
-  if (typeof JsPdfCtor !== "function") {
-    alert("PDF generator is not loaded. Refresh and try again.");
-    return;
-  }
-  const filledRows = [];
+function getCalcBillToText() {
+  const el = document.getElementById("calcBillTo");
+  const t = el instanceof HTMLInputElement ? el.value.trim() : "";
+  return t || "—";
+}
+
+/** Rows with bags > 0 plus parsed prices for PDF exports. */
+function collectCalculatorRowsForPdfExport() {
+  const rows = [];
+  if (!calcBody) return rows;
   calcBody.querySelectorAll("tr").forEach((tr) => {
     if (!(tr instanceof HTMLTableRowElement)) return;
     const cells = tr.querySelectorAll("td");
@@ -4055,61 +4081,194 @@ function downloadCalculatorPdf() {
     const bagsRaw = String(bagsEl.value || "").trim();
     const bagsNum = Number(bagsRaw);
     if (!bagsRaw || !Number.isFinite(bagsNum) || bagsNum <= 0) return;
-    filledRows.push({
+    const buyingNum = Number(String(buyEl.value || "").trim());
+    const sellingNum = Number(String(sellEl.value || "").trim());
+    rows.push({
       brand: cells[0]?.textContent?.trim() || "—",
       feedType: cells[1]?.textContent?.trim() || "—",
       bagSize: cells[2]?.textContent?.trim() || "—",
-      bags: bagsRaw,
-      buying: String(buyEl.value || "").trim() || "—",
-      selling: String(sellEl.value || "").trim() || "—",
-      total: totalCell.textContent?.trim() || "—",
+      bagsStr: bagsRaw,
+      bagsNum,
+      buyingStr: String(buyEl.value || "").trim() || "—",
+      sellingStr: String(sellEl.value || "").trim() || "—",
+      buyingNum,
+      sellingNum,
+      totalCellText: totalCell.textContent?.trim() || "—",
     });
   });
-  if (!filledRows.length) {
+  return rows;
+}
+
+/**
+ * @param {"calculator"|"proforma"|"invoice"} mode
+ */
+function downloadCalculatorPdf(mode = "calculator") {
+  if (!calcBody) return;
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return;
+  }
+  const exportRows = collectCalculatorRowsForPdfExport();
+  if (!exportRows.length) {
     alert("Enter at least one calculator row with number of bags before downloading.");
     return;
   }
+  if (mode === "proforma") {
+    const bad = exportRows.find((r) => !Number.isFinite(r.buyingNum) || r.buyingNum < 0);
+    if (bad) {
+      alert("For a proforma invoice, enter a valid buying price on every line that has bags.");
+      return;
+    }
+  }
+  if (mode === "invoice") {
+    const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
+    if (bad) {
+      alert("For an invoice, enter a valid selling price on every line that has bags.");
+      return;
+    }
+  }
+
   const today = state.shopToday || clientShopTodayDMY();
-  const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
-  const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
+  const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  const fileDate = today.replace(/\//g, "-");
+  const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("Amana kuku feeds", 40, 42);
-  doc.setFontSize(13);
-  doc.text("Calculator", 40, 64);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  doc.text(`Date: ${today}`, 40, 84);
-
-  const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Selling price (per bag)", "Total"]];
-  const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.selling, r.total]);
-
   const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
   if (typeof autoTableFn !== "function") {
     alert("PDF table helper is not loaded. Refresh and try again.");
     return;
   }
-  autoTableFn.call(doc, {
-    head,
-    body,
-    startY: 98,
-    styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
-    headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
+
+  if (mode === "calculator") {
+    const filledRows = exportRows.map((r) => ({
+      brand: r.brand,
+      feedType: r.feedType,
+      bagSize: r.bagSize,
+      bags: r.bagsStr,
+      buying: r.buyingStr,
+      selling: r.sellingStr,
+      total: r.totalCellText,
+    }));
+    const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
+    const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text(businessTitle, 40, 42);
+    doc.setFontSize(13);
+    doc.text("Calculator", 40, 64);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.text(`Date: ${today}`, 40, 84);
+
+    const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Selling price (per bag)", "Total"]];
+    const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.selling, r.total]);
+
+    autoTableFn.call(doc, {
+      head,
+      body,
+      startY: 98,
+      styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
+      headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
+    });
+
+    const finalY = doc.lastAutoTable?.finalY || 98;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(`Total bags: ${totalBags}`, 40, finalY + 24);
+    doc.text(`Grand total: ${currency(grand)}`, 40, finalY + 42);
+    doc.save(`${safeBusiness}-calculator-${fileDate}.pdf`);
+    return;
+  }
+
+  const isProforma = mode === "proforma";
+  const docSuffix = String(Math.floor(10000 + Math.random() * 90000));
+  const docNo = isProforma ? `PF-${docSuffix}` : `INV-${docSuffix}`;
+  const totalBags = exportRows.reduce((s, r) => s + r.bagsNum, 0);
+  const balanceDue = exportRows.reduce((s, r) => {
+    const rate = isProforma ? r.buyingNum : r.sellingNum;
+    return s + r.bagsNum * rate;
+  }, 0);
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const rightX = pageW - margin;
+  let y = 40;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(businessTitle, margin, y);
+  y += 22;
+  doc.setFontSize(19);
+  doc.text(isProforma ? "PROFORMA INVOICE" : "INVOICE", margin, y);
+  y += 26;
+
+  const blockTop = y;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("BILL TO", margin, blockTop);
+  doc.setFont("helvetica", "normal");
+  const billRaw = getCalcBillToText();
+  const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
+  doc.text(billLines, margin, blockTop + 14);
+
+  const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
+  const terms = isProforma ? "Cost estimate — not a tax invoice" : "Due on receipt";
+  let ry = blockTop;
+  doc.setFont("helvetica", "bold");
+  doc.text(`${noLabel} ${docNo}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text(`DATE: ${today}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text(`DUE DATE: ${today}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
+
+  const leftBlockH = 14 + billLines.length * 12;
+  const rightBlockH = 14 * 4;
+  const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
+
+  const tableBody = exportRows.map((r) => {
+    const rate = isProforma ? r.buyingNum : r.sellingNum;
+    const amount = r.bagsNum * rate;
+    const desc = `${r.brand} ${r.feedType} ${r.bagSize}kg`
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+    return [desc, String(r.bagsNum), `Ksh${formatKshPlainNumber(rate)}`, `Ksh${formatKshPlainNumber(amount)}`];
   });
 
-  const finalY = doc.lastAutoTable?.finalY || 98;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(`Total bags: ${totalBags}`, 40, finalY + 24);
-  doc.text(`Grand total: ${currency(grand)}`, 40, finalY + 42);
+  autoTableFn.call(doc, {
+    head: [["DESCRIPTION", "QTY", "RATE", "AMOUNT"]],
+    body: tableBody,
+    startY: headerBottom,
+    styles: { font: "helvetica", fontSize: 10, cellPadding: 5 },
+    headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
+    columnStyles: {
+      1: { halign: "right", cellWidth: 44 },
+      2: { halign: "right", cellWidth: 86 },
+      3: { halign: "right", cellWidth: 86 },
+    },
+  });
 
-  const fileDate = today.replace(/\//g, "-");
-  doc.save(`amana-kuku-feeds-calculator-${fileDate}.pdf`);
+  const finalY = doc.lastAutoTable?.finalY || headerBottom;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(`TOTAL BAGS: ${totalBags}`, rightX, finalY + 22, { align: "right" });
+  doc.text("BALANCE DUE", rightX - 100, finalY + 40, { align: "right" });
+  doc.setFontSize(13);
+  doc.text(`Ksh${formatKshPlainNumber(balanceDue)}`, rightX, finalY + 40, { align: "right" });
+
+  const safeMode = isProforma ? "proforma" : "invoice";
+  doc.save(`${safeBusiness}-${safeMode}-${fileDate}.pdf`);
 }
 
-document.getElementById("calcDownloadBtn")?.addEventListener("click", downloadCalculatorPdf);
+document.getElementById("calcDownloadPdfBtn")?.addEventListener("click", () => downloadCalculatorPdf("calculator"));
+document.getElementById("calcDownloadProformaBtn")?.addEventListener("click", () => downloadCalculatorPdf("proforma"));
+document.getElementById("calcDownloadInvoiceBtn")?.addEventListener("click", () => downloadCalculatorPdf("invoice"));
 
 document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {

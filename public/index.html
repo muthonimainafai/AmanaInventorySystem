@@ -1243,9 +1243,14 @@
 
         <div id="page-calculator" class="app-page hidden">
           <div class="card">
-            <h3 class="card-title">Calculator</h3>
+            <h3 class="card-title" id="calculatorSubheading">Calculator</h3>
             <p class="field-hint">
               Enter the number of bags and buying price for each feed line. Total per row is <strong>bags × buying price</strong>.
+            </p>
+            <p class="field-hint">
+              <strong>Download PDF</strong> exports the calculator as shown below.
+              <strong>Proforma invoice</strong> is a cost-based quotation (rates from buying prices; not a final tax invoice).
+              <strong>Invoice</strong> uses selling prices as the bill to the customer.
             </p>
           </div>
           <div class="card">
@@ -1261,7 +1266,7 @@
               </div>
               <p class="profit-highlight-example js-calc-grand-total-meta"></p>
             </div>
-            <h4 class="card-title">Amana kuku feeds</h4>
+            <h4 class="card-title" id="calculatorTitle">Amana Kuku Feeds</h4>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -1278,9 +1283,17 @@
                 <tbody id="calc-body"><tr><td colspan="7" class="empty">No feed catalog loaded.</td></tr></tbody>
               </table>
             </div>
-            <div class="actions">
+            <div class="grid" style="margin-top: 0.75rem">
+              <label>
+                Bill to (optional — printed on Proforma / Invoice)
+                <input type="text" id="calcBillTo" maxlength="160" placeholder="Customer or business name" autocomplete="organization" />
+              </label>
+            </div>
+            <div class="actions calc-pdf-actions">
               <button type="button" class="secondary" id="calcClearBtn">Clear calculator</button>
-              <button type="button" id="calcDownloadBtn">Download PDF</button>
+              <button type="button" id="calcDownloadPdfBtn">Download PDF</button>
+              <button type="button" id="calcDownloadProformaBtn">Download ProForma Invoice</button>
+              <button type="button" id="calcDownloadInvoiceBtn">Download Invoice</button>
             </div>
           </div>
         </div>
@@ -1547,6 +1560,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-11-pass-through-fix"></script>
+    <script src="app.js?v=2026-05-11-calc-invoice-pdf"></script>
   </body>
 </html>
