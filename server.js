@@ -2003,6 +2003,39 @@ async function reverseChickenSaleProfitEffect(row) {
 }
 
 /**
+ * Staff chicken sales may include bundled feed bags. These should reduce Feed Inventory stock
+ * when sale rows are created/updated, and be restored when rows are reversed/deleted.
+ */
+async function applyChickenSaleFeedInventoryEffect(row, { reverse = false, skipRoleCheck = false } = {}) {
+  if (!row) return;
+  if (!skipRoleCheck) {
+    const u = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
+    if (u?.role !== "employee") return;
+  }
+  const brandRaw = String(row.feed_brand || "").trim();
+  const feedTypeRaw = String(row.feed_type || "").trim();
+  const bags = Math.floor(Number(row.feed_bag_qty));
+  if (!brandRaw || !feedTypeRaw) return;
+  if (!Number.isFinite(bags) || bags <= 0) return;
+  const brandKey = resolveBrandKey(brandRaw);
+  const feedTypeCanon = feedCatalogTypeValue(brandKey, feedTypeRaw);
+  const bagSize = catalogBagSizeForFeed(brandKey, feedTypeCanon);
+  if (!Number.isFinite(bagSize) || bagSize <= 0) return;
+  await adjustInventoryBags({
+    brand: brandKey,
+    feedType: feedTypeCanon,
+    bagSize,
+    deltaBags: reverse ? bags : -bags,
+    recordProfit: false,
+  });
+}
+
+function isChickenFeedInventoryStockError(err) {
+  const msg = String(err?.message || "");
+  return /No matching feed inventory item found|Not enough bags in stock/i.test(msg);
+}
+
+/**
  * Staff margin totals: only rows with Payment status = Delivered (pending counts as 0).
  * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
  */
@@ -2040,6 +2073,7 @@ async function reverseAndDeleteChickenSalesForCreator(creator) {
   const rows = await all("SELECT * FROM chicken_sales WHERE created_by = ?", [creator]);
   for (const row of rows) {
     await reverseChickenSaleProfitEffect(row);
+    await applyChickenSaleFeedInventoryEffect(row, { reverse: true, skipRoleCheck: true });
   }
   const r = await run("DELETE FROM chicken_sales WHERE created_by = ?", [creator]);
   return r.changes || 0;
@@ -4608,40 +4642,63 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
-  if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
-    await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
-  }
   const nowIso = new Date().toISOString();
-  await run(
-    `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, feed_brand, feed_type, feed_bag_qty, feed_line_total, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      p.date,
-      description,
-      qty,
-      weightKg,
-      unitPrice,
-      totalAmount,
-      breed,
-      marginSnapStored,
-      cust.customer_name,
-      cust.customer_phone,
-      cust.money_paid,
-      cust.payment_status,
-      cust.delivery_status,
-      throughParty,
-      passThroughStatus,
-      feedBundle.feed_brand,
-      feedBundle.feed_type,
-      feedBundle.feed_bag_qty,
-      feedBundle.feed_line_total,
-      req.user.username,
-      nowIso,
-      nowIso,
-    ]
-  );
-  await syncChickenBreedPricesFromOwnerSale(req, breed, p, marginSnap);
-  res.json({ ok: true });
+  try {
+    await run("BEGIN");
+    if (recordsProfit) {
+      await applyChickenSaleFeedInventoryEffect(
+        {
+          created_by: req.user.username,
+          feed_brand: feedBundle.feed_brand,
+          feed_type: feedBundle.feed_type,
+          feed_bag_qty: feedBundle.feed_bag_qty,
+        },
+        { skipRoleCheck: true }
+      );
+    }
+    if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
+      await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
+    }
+    await run(
+      `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, feed_brand, feed_type, feed_bag_qty, feed_line_total, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        p.date,
+        description,
+        qty,
+        weightKg,
+        unitPrice,
+        totalAmount,
+        breed,
+        marginSnapStored,
+        cust.customer_name,
+        cust.customer_phone,
+        cust.money_paid,
+        cust.payment_status,
+        cust.delivery_status,
+        throughParty,
+        passThroughStatus,
+        feedBundle.feed_brand,
+        feedBundle.feed_type,
+        feedBundle.feed_bag_qty,
+        feedBundle.feed_line_total,
+        req.user.username,
+        nowIso,
+        nowIso,
+      ]
+    );
+    await syncChickenBreedPricesFromOwnerSale(req, breed, p, marginSnap);
+    await run("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await run("ROLLBACK").catch(() => {});
+    if (isChickenFeedInventoryStockError(err)) {
+      return res.status(400).json({ error: err.message || "Insufficient feed inventory for this chicken sale." });
+    }
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not save chicken sale." });
+  }
 });
 
 app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
@@ -4667,8 +4724,6 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
     ? normalizePassThroughStatus(p.pass_through_status ?? currentCh.pass_through_status)
     : null;
   if (!(await assertChickenSaleRowMatchesActor(req, res, currentCh))) return;
-  /** Chicken sales: employees may edit at any time (no 1-hour window). */
-  await reverseChickenSaleProfitEffect(currentCh);
   if (!(await assertEmployeeChickenSalePrice(req, res, breed, unitPrice))) return;
   const marginSnap = await resolveChickenSaleMarginSnap(req, res, breed, unitPrice, p);
   if (marginSnap == null) return;
@@ -4677,37 +4732,63 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
-  if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
-    await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
+  try {
+    await run("BEGIN");
+    /** Chicken sales: employees may edit at any time (no 1-hour window). */
+    await reverseChickenSaleProfitEffect(currentCh);
+    await applyChickenSaleFeedInventoryEffect(currentCh, { reverse: true });
+    if (recordsProfit && chickenStaffSalePaymentIsCleared({ payment_status: cust.payment_status })) {
+      await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
+    }
+    if (recordsProfit) {
+      await applyChickenSaleFeedInventoryEffect(
+        {
+          created_by: req.user.username,
+          feed_brand: feedBundle.feed_brand,
+          feed_type: feedBundle.feed_type,
+          feed_bag_qty: feedBundle.feed_bag_qty,
+        },
+        { skipRoleCheck: true }
+      );
+    }
+    await run(
+      `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, feed_brand=?, feed_type=?, feed_bag_qty=?, feed_line_total=?, updated_at=? WHERE id=?`,
+      [
+        p.date,
+        description,
+        qty,
+        weightKg,
+        unitPrice,
+        totalAmount,
+        breed,
+        marginSnapStored,
+        cust.customer_name,
+        cust.customer_phone,
+        cust.money_paid,
+        cust.payment_status,
+        cust.delivery_status,
+        throughParty,
+        passThroughStatus,
+        feedBundle.feed_brand,
+        feedBundle.feed_type,
+        feedBundle.feed_bag_qty,
+        feedBundle.feed_line_total,
+        new Date().toISOString(),
+        Number(req.params.id),
+      ]
+    );
+    await syncChickenBreedPricesFromOwnerSale(req, breed, p, marginSnap);
+    await run("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await run("ROLLBACK").catch(() => {});
+    if (isChickenFeedInventoryStockError(err)) {
+      return res.status(400).json({ error: err.message || "Insufficient feed inventory for this chicken sale." });
+    }
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not update chicken sale." });
   }
-  await run(
-    `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, feed_brand=?, feed_type=?, feed_bag_qty=?, feed_line_total=?, updated_at=? WHERE id=?`,
-    [
-      p.date,
-      description,
-      qty,
-      weightKg,
-      unitPrice,
-      totalAmount,
-      breed,
-      marginSnapStored,
-      cust.customer_name,
-      cust.customer_phone,
-      cust.money_paid,
-      cust.payment_status,
-      cust.delivery_status,
-      throughParty,
-      passThroughStatus,
-      feedBundle.feed_brand,
-      feedBundle.feed_type,
-      feedBundle.feed_bag_qty,
-      feedBundle.feed_line_total,
-      new Date().toISOString(),
-      Number(req.params.id),
-    ]
-  );
-  await syncChickenBreedPricesFromOwnerSale(req, breed, p, marginSnap);
-  res.json({ ok: true });
 });
 
 app.put("/api/chicken-sales/:id/pass-through-status", auth, allowRoles("owner"), async (req, res) => {
@@ -4766,18 +4847,25 @@ app.delete("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), asyn
   const idNum = Number(req.params.id);
   const row = await get("SELECT * FROM chicken_sales WHERE id = ?", [idNum]);
   if (!row) return res.status(404).json({ error: "Record not found." });
-  if (req.user.role === "owner") {
+  if (req.user.role !== "owner") {
+    const creator = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
+    if (creator?.role !== "employee" || row.created_by !== req.user.username) {
+      return res.status(403).json({ error: "You can only delete your own chick sales." });
+    }
+  }
+  try {
+    await run("BEGIN");
     await reverseChickenSaleProfitEffect(row);
+    await applyChickenSaleFeedInventoryEffect(row, { reverse: true });
     await run("DELETE FROM chicken_sales WHERE id = ?", [idNum]);
-    return res.json({ ok: true });
+    await run("COMMIT");
+    res.json({ ok: true });
+  } catch (err) {
+    await run("ROLLBACK").catch(() => {});
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not delete chicken sale." });
   }
-  const creator = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
-  if (creator?.role !== "employee" || row.created_by !== req.user.username) {
-    return res.status(403).json({ error: "You can only delete your own chick sales." });
-  }
-  await reverseChickenSaleProfitEffect(row);
-  await run("DELETE FROM chicken_sales WHERE id = ?", [idNum]);
-  res.json({ ok: true });
 });
 
 /**
