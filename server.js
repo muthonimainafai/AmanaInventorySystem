@@ -2506,7 +2506,7 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
       if (!Number.isFinite(b) || b < 0) {
         return res.status(400).json({ error: "Bags bought must be a valid non-negative integer." });
       }
-      // bags_bought is the intake value for this record (not cumulative).
+      // bags_bought is a per-record value. Apply delta to the visible form base values.
       const delta = b - existingBought;
       quantity = Math.max(0, quantityBase + delta);
       nextAccumulatedBags = Math.max(0, nextAccumulatedBags + delta);
