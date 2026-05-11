@@ -2489,6 +2489,11 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const margin = Number(payload.profit_margin_per_bag);
+    const existingQty = Math.max(0, Math.floor(Number(existing.quantity_in_stock || 0)));
+    const existingAcc = Math.max(0, Math.floor(Number(existing.accumulated_bags || 0)));
+    const existingBought = Math.max(0, Math.floor(Number(existing.bags_bought || 0)));
+
+    let quantity = quantityBase;
     let nextAccumulatedBags = Math.max(0, Number(existing.accumulated_bags || 0));
     if (payload.accumulated_bags != null) {
       const a = Math.floor(Number(payload.accumulated_bags));
@@ -2497,19 +2502,18 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
       }
       nextAccumulatedBags = a;
     }
-    let nextBagsBought = Math.max(0, Number(existing.bags_bought || 0));
-    let bagsBoughtDelta = 0;
+    let nextBagsBought = existingBought;
     if (payload.bags_bought != null) {
       const b = Math.floor(Number(payload.bags_bought));
       if (!Number.isFinite(b) || b < 0) {
         return res.status(400).json({ error: "Bags bought must be a valid non-negative integer." });
       }
-      bagsBoughtDelta = b;
-      // On update, bags_bought means "new bags added now", so keep it cumulative.
-      nextBagsBought = Math.max(0, Number(existing.bags_bought || 0) + b);
+      // bags_bought is the intake value for this record (not cumulative).
+      const delta = b - existingBought;
+      quantity = Math.max(0, existingQty + delta);
+      nextAccumulatedBags = Math.max(0, existingAcc + delta);
+      nextBagsBought = b;
     }
-    const quantity = quantityBase + bagsBoughtDelta;
-    nextAccumulatedBags = Math.max(quantity, nextAccumulatedBags + bagsBoughtDelta);
     const totalStock = bagSize * quantity;
 
     const dateCanon = normalizeInventoryDate(payload.date);
