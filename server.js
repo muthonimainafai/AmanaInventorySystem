@@ -2489,8 +2489,6 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const margin = Number(payload.profit_margin_per_bag);
-    const existingQty = Math.max(0, Math.floor(Number(existing.quantity_in_stock || 0)));
-    const existingAcc = Math.max(0, Math.floor(Number(existing.accumulated_bags || 0)));
     const existingBought = Math.max(0, Math.floor(Number(existing.bags_bought || 0)));
 
     let quantity = quantityBase;
@@ -2510,8 +2508,8 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
       }
       // bags_bought is the intake value for this record (not cumulative).
       const delta = b - existingBought;
-      quantity = Math.max(0, existingQty + delta);
-      nextAccumulatedBags = Math.max(0, existingAcc + delta);
+      quantity = Math.max(0, quantityBase + delta);
+      nextAccumulatedBags = Math.max(0, nextAccumulatedBags + delta);
       nextBagsBought = b;
     }
     const totalStock = bagSize * quantity;
