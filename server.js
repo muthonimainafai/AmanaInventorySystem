@@ -2376,10 +2376,14 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
       }
       nextAccumulatedBags = a;
     }
-    const nextBagsBought =
-      payload.bags_bought != null && String(payload.bags_bought).trim() !== ""
-        ? Math.max(0, Math.floor(Number(payload.bags_bought)))
-        : Math.max(0, Number(existing.bags_bought || 0));
+    let nextBagsBought = Math.max(0, Number(existing.bags_bought || 0));
+    if (payload.bags_bought != null) {
+      const b = Math.floor(Number(payload.bags_bought));
+      if (!Number.isFinite(b) || b < 0) {
+        return res.status(400).json({ error: "Bags bought must be a valid non-negative integer." });
+      }
+      nextBagsBought = b;
+    }
 
     const dateCanon = normalizeInventoryDate(payload.date);
     if (!dateCanon) {
