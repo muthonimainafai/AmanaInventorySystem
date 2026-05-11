@@ -632,16 +632,12 @@ function calculatorRememberRowFromInputs(tr) {
   if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement)) return;
   const key = calculatorRowKey(brand, feedType, bagSize);
   const bagsRaw = bagsEl.value;
-  const buyingRaw = buyEl.value;
-  const sellingRaw = sellEl.value;
-  if (!bagsRaw.trim() && !buyingRaw.trim() && !sellingRaw.trim()) {
+  if (!bagsRaw.trim()) {
     delete state.calculatorValues[key];
     return;
   }
   state.calculatorValues[key] = {
     bags: bagsRaw,
-    buying: buyingRaw,
-    selling: sellingRaw,
   };
 }
 
@@ -2822,18 +2818,9 @@ function renderCalculatorTable() {
         const remembered = state.calculatorValues[rowKey];
         const defaultBuying = findInventoryBuyingPriceForCalculator(row.brand, row.feedType, row.bagSize);
         const defaultSelling = findInventorySellingPriceForCalculator(row.brand, row.feedType, row.bagSize);
-        const buyingValue =
-          remembered?.buying != null && String(remembered.buying).trim() !== ""
-            ? remembered.buying
-            : defaultBuying != null
-              ? String(defaultBuying)
-              : "";
-        const sellingValue =
-          remembered?.selling != null && String(remembered.selling).trim() !== ""
-            ? remembered.selling
-            : defaultSelling != null
-              ? String(defaultSelling)
-              : "";
+        // Calculator prices should always reflect Feed Inventory latest values for this product.
+        const buyingValue = defaultBuying != null ? String(defaultBuying) : "";
+        const sellingValue = defaultSelling != null ? String(defaultSelling) : "";
         return `
       <tr data-calc-brand="${escapeHtmlCell(row.brand)}" data-calc-feed-type="${escapeHtmlCell(row.feedType)}" data-calc-bag-size="${row.bagSize}">
         <td>${displayBrand(row.brand)}</td>

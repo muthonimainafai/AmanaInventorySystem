@@ -2471,11 +2471,10 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
     }
 
     const bagSize = Number(payload.bag_size);
-    const quantity = Math.floor(Number(payload.quantity_in_stock));
-    if (!Number.isFinite(quantity) || quantity < 0) {
+    const quantityBase = Math.floor(Number(payload.quantity_in_stock));
+    if (!Number.isFinite(quantityBase) || quantityBase < 0) {
       return res.status(400).json({ error: "Quantity in stock must be a valid non-negative integer." });
     }
-    const totalStock = bagSize * quantity;
 
     if (!validateFeed(payload.brand, payload.feed_type, bagSize)) {
       return res.status(400).json({ error: "Invalid brand/feed type/bag size combination." });
@@ -2499,13 +2498,19 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
       nextAccumulatedBags = a;
     }
     let nextBagsBought = Math.max(0, Number(existing.bags_bought || 0));
+    let bagsBoughtDelta = 0;
     if (payload.bags_bought != null) {
       const b = Math.floor(Number(payload.bags_bought));
       if (!Number.isFinite(b) || b < 0) {
         return res.status(400).json({ error: "Bags bought must be a valid non-negative integer." });
       }
-      nextBagsBought = b;
+      bagsBoughtDelta = b;
+      // On update, bags_bought means "new bags added now", so keep it cumulative.
+      nextBagsBought = Math.max(0, Number(existing.bags_bought || 0) + b);
     }
+    const quantity = quantityBase + bagsBoughtDelta;
+    nextAccumulatedBags = Math.max(quantity, nextAccumulatedBags + bagsBoughtDelta);
+    const totalStock = bagSize * quantity;
 
     const dateCanon = normalizeInventoryDate(payload.date);
     if (!dateCanon) {
