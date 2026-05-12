@@ -1438,7 +1438,7 @@
         <div id="page-cess-accounts" class="app-page hidden">
           <div class="card">
             <h3 class="card-title" id="cessAccountsPageTitle">Cess Accounts</h3>
-            <p class="field-hint">Track Cess account lines with money in, money out, and mortality (same layout as Rose Inventory).</p>
+            <p class="field-hint">Track Cess account lines with money in and money out (same structure as Rose Inventory, without mortality).</p>
             <form id="cess-accounts-form">
               <div class="grid">
                 <label class="date-field">
@@ -1470,10 +1470,6 @@
                   <input type="number" id="cessAccMoneyOut" min="0" step="0.01" />
                 </label>
                 <label>
-                  Mortality
-                  <input type="number" id="cessAccMortality" min="0" step="1" />
-                </label>
-                <label>
                   Sale via
                   <select id="cessAccSaleVia">
                     <option value="Shop">Shop</option>
@@ -1500,18 +1496,16 @@
                     <th>Unit price</th>
                     <th>Money in</th>
                     <th>Money out</th>
-                    <th>Mortality</th>
                     <th>Sale via</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="cess-accounts-body"><tr><td colspan="10" class="empty">No records.</td></tr></tbody>
+                <tbody id="cess-accounts-body"><tr><td colspan="9" class="empty">No records.</td></tr></tbody>
                 <tfoot>
                   <tr>
                     <th colspan="5">Total</th>
                     <th id="cessAccTotalMoneyIn">0</th>
                     <th id="cessAccTotalMoneyOut">0</th>
-                    <th id="cessAccTotalMortality">0</th>
                     <th>—</th>
                     <th>—</th>
                   </tr>

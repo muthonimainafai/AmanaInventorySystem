@@ -3028,23 +3028,19 @@ function renderCessAccountsTable() {
   if (!cessAccountsBody) return;
   const rows = sortRowsLatestFirst(state.cessAccountsEntries || []);
   if (!rows.length) {
-    cessAccountsBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
+    cessAccountsBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
     const inEl = document.getElementById("cessAccTotalMoneyIn");
     const outEl = document.getElementById("cessAccTotalMoneyOut");
-    const mortEl = document.getElementById("cessAccTotalMortality");
     if (inEl) inEl.textContent = "0";
     if (outEl) outEl.textContent = "0";
-    if (mortEl) mortEl.textContent = "0";
     return;
   }
   let sumIn = 0;
   let sumOut = 0;
-  let sumMort = 0;
   cessAccountsBody.innerHTML = rows
     .map((row, idx) => {
       sumIn += Number(row.money_in || 0);
       sumOut += Number(row.money_out || 0);
-      sumMort += Number(row.mortality || 0);
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -3054,7 +3050,6 @@ function renderCessAccountsTable() {
         <td>${Number(row.unit_price || 0)}</td>
         <td>${Number(row.money_in || 0)}</td>
         <td>${Number(row.money_out || 0)}</td>
-        <td>${Number(row.mortality || 0)}</td>
         <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
         <td>
           <div class="row-actions">
@@ -3067,10 +3062,8 @@ function renderCessAccountsTable() {
     .join("");
   const inEl = document.getElementById("cessAccTotalMoneyIn");
   const outEl = document.getElementById("cessAccTotalMoneyOut");
-  const mortEl = document.getElementById("cessAccTotalMortality");
   if (inEl) inEl.textContent = String(sumIn);
   if (outEl) outEl.textContent = String(sumOut);
-  if (mortEl) mortEl.textContent = String(sumMort);
 }
 
 function resetNahashonForm() {
@@ -4690,7 +4683,6 @@ cessAccountsForm?.addEventListener("submit", async (event) => {
     unit_price: Number(document.getElementById("cessAccUnitPrice")?.value || 0),
     money_in: Number(document.getElementById("cessAccMoneyIn")?.value || 0),
     money_out: Number(document.getElementById("cessAccMoneyOut")?.value || 0),
-    mortality: Number(document.getElementById("cessAccMortality")?.value || 0),
     sale_via: String(document.getElementById("cessAccSaleVia")?.value || "Shop").trim(),
   };
   try {
@@ -5815,14 +5807,12 @@ cessAccountsBody?.addEventListener("click", async (event) => {
     const unit = document.getElementById("cessAccUnitPrice");
     const min = document.getElementById("cessAccMoneyIn");
     const mout = document.getElementById("cessAccMoneyOut");
-    const mort = document.getElementById("cessAccMortality");
     const via = document.getElementById("cessAccSaleVia");
     if (desc) desc.value = row.description || "";
     if (qty) qty.value = row.quantity ?? 0;
     if (unit) unit.value = row.unit_price ?? 0;
     if (min) min.value = row.money_in ?? 0;
     if (mout) mout.value = row.money_out ?? 0;
-    if (mort) mort.value = row.mortality ?? 0;
     if (via) via.value = row.sale_via || "Shop";
     const saveBtn = document.getElementById("cessAccSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";

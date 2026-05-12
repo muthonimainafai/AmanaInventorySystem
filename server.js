@@ -3816,16 +3816,15 @@ app.post("/api/cess-accounts", auth, allowRoles("owner", "employee"), async (req
   let unitPrice;
   let moneyIn;
   let moneyOut;
-  let mortality;
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
     unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
     moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
     moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
-    mortality = parseRoseNonNegativeField(p.mortality, "Mortality");
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
+  const mortality = 0;
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO cess_accounts_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, created_by, created_at, updated_at)
@@ -3852,16 +3851,15 @@ app.put("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), async (
   let unitPrice;
   let moneyIn;
   let moneyOut;
-  let mortality;
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
     unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
     moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
     moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
-    mortality = parseRoseNonNegativeField(p.mortality, "Mortality");
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
+  const mortality = 0;
   await run(
     `UPDATE cess_accounts_entries
      SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, mortality = ?, sale_via = ?, updated_at = ?
