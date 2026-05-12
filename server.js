@@ -887,6 +887,24 @@ async function initDb() {
   `);
   await run("ALTER TABLE nahashon_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS cess_accounts_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      money_in REAL NOT NULL,
+      money_out REAL NOT NULL,
+      mortality REAL NOT NULL,
+      sale_via TEXT NOT NULL DEFAULT 'Shop',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await run("ALTER TABLE cess_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
+
   const accBagsMigrated = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_bags_v1"]);
   if (!accBagsMigrated || accBagsMigrated.value !== "1") {
     await run(`UPDATE inventory SET accumulated_bags = quantity_in_stock`);
@@ -3775,6 +3793,89 @@ app.delete("/api/nahashon-accounts/:id", auth, allowRoles("owner", "employee"), 
     req.user.role === "owner"
       ? await run("DELETE FROM nahashon_accounts_entries WHERE id = ?", [Number(req.params.id)])
       : await run("DELETE FROM nahashon_accounts_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
+app.get("/api/cess-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM cess_accounts_entries ORDER BY id DESC")
+      : await all("SELECT * FROM cess_accounts_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/cess-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  const saleVia = normalizeRoseSaleVia(p.sale_via);
+  if (!saleVia) return res.status(400).json({ error: "Sale via must be Terry, Cess, or Shop." });
+  let quantity;
+  let unitPrice;
+  let moneyIn;
+  let moneyOut;
+  let mortality;
+  try {
+    quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
+    unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+    mortality = parseRoseNonNegativeField(p.mortality, "Mortality");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO cess_accounts_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM cess_accounts_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM cess_accounts_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  const saleVia = normalizeRoseSaleVia(p.sale_via);
+  if (!saleVia) return res.status(400).json({ error: "Sale via must be Terry, Cess, or Shop." });
+  let quantity;
+  let unitPrice;
+  let moneyIn;
+  let moneyOut;
+  let mortality;
+  try {
+    quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
+    unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+    mortality = parseRoseNonNegativeField(p.mortality, "Mortality");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  await run(
+    `UPDATE cess_accounts_entries
+     SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, mortality = ?, sale_via = ?, updated_at = ?
+     WHERE id = ?`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM cess_accounts_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM cess_accounts_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });

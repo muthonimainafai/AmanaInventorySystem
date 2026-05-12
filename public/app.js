@@ -59,6 +59,8 @@ const state = {
   editExpenditureId: null,
   roseEntries: [],
   editRoseId: null,
+  cessAccountsEntries: [],
+  editCessAccountsId: null,
   nahashonEntries: [],
   editNahashonId: null,
   calculatorValues: {},
@@ -74,6 +76,7 @@ const PAGE_HEADINGS = {
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
   "rose-inventory": "Rose Inventory",
+  "cess-accounts": "Cess Accounts",
   calculator: "Calculator",
   expenditure: "Expenditure",
   balance: "Balance",
@@ -130,6 +133,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "medicaments",
   "gas",
   "rose-inventory",
+  "cess-accounts",
   "calculator",
   "expenditure",
   "balance",
@@ -283,6 +287,11 @@ const roseBody = document.getElementById("rose-body");
 const roseDateDisplay = document.getElementById("roseDateDisplay");
 const roseDate = document.getElementById("roseDate");
 const roseOpenCalendarBtn = document.getElementById("roseOpenCalendarBtn");
+const cessAccountsForm = document.getElementById("cess-accounts-form");
+const cessAccountsBody = document.getElementById("cess-accounts-body");
+const cessAccDateDisplay = document.getElementById("cessAccDateDisplay");
+const cessAccDate = document.getElementById("cessAccDate");
+const cessAccOpenCalendarBtn = document.getElementById("cessAccOpenCalendarBtn");
 const nahashonForm = document.getElementById("nahashon-form");
 const nahashonBody = document.getElementById("nahashon-body");
 const nahashonDateDisplay = document.getElementById("nahashonDateDisplay");
@@ -401,6 +410,12 @@ function applyAppTheme() {
   const passThroughTitles = document.querySelectorAll(".js-via-pass-through-title");
   for (const el of passThroughTitles) {
     el.textContent = state.appInstance === "amana" ? "Via Ufaray Feeds" : "Via Amana kuku feeds";
+  }
+  for (const el of document.querySelectorAll(".js-via-ufaray-bags-hint")) {
+    el.innerHTML =
+      state.appInstance === "amana"
+        ? "Each row is a staff-recorded <strong>Sales Per Bags</strong> entry with <strong>Sale recorded for</strong> set to <strong>By Ufaray</strong> (pass-through: no shop profit on these bags). <strong>Total</strong> is buying cost × bags; customer price per bag is shown for reference. Edit or delete under <strong>Sales Per Bags</strong>."
+        : "Each row is a staff-recorded <strong>Sales Per Bags</strong> entry with <strong>Sale recorded for</strong> set to <strong>Via Amana</strong>. <strong>Total</strong> is buying cost × bags; customer price per bag is shown for reference. Edit or delete under <strong>Sales Per Bags</strong>.";
   }
   const calcSubheading = document.getElementById("calculatorSubheading");
   const calcTitle = document.getElementById("calculatorTitle");
@@ -788,6 +803,7 @@ function applyEmployeeSalesDateRules() {
     ["chDateDisplay", "chDate", "chOpenCalendarBtn"],
     ["expDateDisplay", "expDate", "expOpenCalendarBtn"],
     ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
+    ["cessAccDateDisplay", "cessAccDate", "cessAccOpenCalendarBtn"],
     ["nahashonDateDisplay", "nahashonDate", "nahashonOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
@@ -1016,6 +1032,9 @@ function bagSaleViaOptions() {
   }
   if (state.appInstance === "ufaray") {
     return ["", "Amana"];
+  }
+  if (state.appInstance === "amana") {
+    return ["", "Ufaray", "Cess"];
   }
   return [""];
 }
@@ -1412,6 +1431,9 @@ function showLoggedIn() {
   document.querySelectorAll(".owner-only-highlight").forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
   });
+  document.querySelectorAll(".amana-only-bag-cess-block").forEach((el) => {
+    el.classList.toggle("hidden", !isOwner || state.appInstance !== "amana");
+  });
   document.querySelectorAll(".employee-only-action").forEach((el) => {
     el.classList.toggle("hidden", state.user.role !== "employee");
   });
@@ -1454,6 +1476,9 @@ function showLoggedIn() {
           : !OWNER_INVENTORY_PAGES.has(page);
     if (!isOwner && page === "calculator" && staffMayAccessCalculatorTenant()) {
       shouldShow = true;
+    }
+    if (page === "cess-accounts") {
+      shouldShow = state.appInstance === "amana";
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -2127,14 +2152,10 @@ function applyInventoryPriceDefaults(force = false) {
   setInventoryPriceEditMode(true);
 }
 
-function renderOwnerPassThroughBagSales() {
-  const tbody = document.getElementById("ufaray-bag-sales-body");
+function renderOwnerPassThroughBagSalesTable(tbody, rows, kindPrefix, emptyHtml) {
   if (!tbody) return;
-  if (state.user.role !== "owner" || state.currentPage !== "inventory") return;
-  const rows = (state.salesBags || []).filter((r) => String(r.through_party || "").trim() !== "");
   if (!rows.length) {
-    tbody.innerHTML =
-      '<tr><td colspan="11" class="empty">No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Via Amana).</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="11" class="empty">${emptyHtml}</td></tr>`;
     return;
   }
   tbody.innerHTML = joinRowsWithDateSeparators(rows, 11, (row) => {
@@ -2153,19 +2174,46 @@ function renderOwnerPassThroughBagSales() {
         <td>${currency(saleLineTotalBags(row))}</td>
         <td>${viaCell}</td>
         <td>
-          <select data-kind="ufaray-status" data-id="${row.id}">
+          <select data-kind="${kindPrefix}-status" data-id="${row.id}">
             <option value="pending" ${status === "pending" ? "selected" : ""}>Pending</option>
             <option value="cleared" ${status === "cleared" ? "selected" : ""}>Cleared</option>
           </select>
         </td>
         <td>${row.created_by}</td>
         <td>
-          <button type="button" data-kind="ufaray-edit" data-id="${row.id}">Edit</button>
-          <button type="button" data-kind="ufaray-delete" data-id="${row.id}">Delete</button>
-          <button type="button" data-kind="ufaray-status-save" data-id="${row.id}">Save</button>
+          <button type="button" data-kind="${kindPrefix}-edit" data-id="${row.id}">Edit</button>
+          <button type="button" data-kind="${kindPrefix}-delete" data-id="${row.id}">Delete</button>
+          <button type="button" data-kind="${kindPrefix}-status-save" data-id="${row.id}">Save</button>
         </td>
       </tr>`;
   });
+}
+
+function renderOwnerPassThroughBagSales() {
+  const tbodyUfaray = document.getElementById("ufaray-bag-sales-body");
+  const tbodyCess = document.getElementById("cess-bag-sales-body");
+  if (!tbodyUfaray) return;
+  if (state.user.role !== "owner" || state.currentPage !== "inventory") return;
+  const bags = state.salesBags || [];
+  const primaryRows = bags.filter((r) => {
+    const tp = normalizeSaleVia(r.through_party);
+    if (state.appInstance === "amana") return tp === "Ufaray";
+    return tp === "Amana";
+  });
+  const primaryEmpty =
+    state.appInstance === "amana"
+      ? "No Via Ufaray Feeds bag sales yet. Staff record these under Sales Per Bags with Sale recorded for set to By Ufaray."
+      : "No pass-through bag sales yet. Staff record these under Sales Per Bags using Sale recorded for (Via Amana).";
+  renderOwnerPassThroughBagSalesTable(tbodyUfaray, primaryRows, "ufaray", primaryEmpty);
+  if (tbodyCess && state.appInstance === "amana") {
+    const cessRows = bags.filter((r) => normalizeSaleVia(r.through_party) === "Cess");
+    renderOwnerPassThroughBagSalesTable(
+      tbodyCess,
+      cessRows,
+      "cess",
+      "No Via Cess Accounts bag sales yet. Staff record these under Sales Per Bags with Sale recorded for set to By Cess."
+    );
+  }
 }
 
 function renderOwnerUfarayChickenSales() {
@@ -2963,6 +3011,68 @@ function renderRoseTable() {
   if (mortEl) mortEl.textContent = String(sumMort);
 }
 
+function resetCessAccountsForm() {
+  if (!cessAccountsForm) return;
+  cessAccountsForm.reset();
+  state.editCessAccountsId = null;
+  if (cessAccDate) cessAccDate.value = "";
+  if (cessAccDateDisplay) cessAccDateDisplay.value = "";
+  const via = document.getElementById("cessAccSaleVia");
+  if (via) via.value = "Shop";
+  const saveBtn = document.getElementById("cessAccSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function renderCessAccountsTable() {
+  if (!cessAccountsBody) return;
+  const rows = sortRowsLatestFirst(state.cessAccountsEntries || []);
+  if (!rows.length) {
+    cessAccountsBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
+    const inEl = document.getElementById("cessAccTotalMoneyIn");
+    const outEl = document.getElementById("cessAccTotalMoneyOut");
+    const mortEl = document.getElementById("cessAccTotalMortality");
+    if (inEl) inEl.textContent = "0";
+    if (outEl) outEl.textContent = "0";
+    if (mortEl) mortEl.textContent = "0";
+    return;
+  }
+  let sumIn = 0;
+  let sumOut = 0;
+  let sumMort = 0;
+  cessAccountsBody.innerHTML = rows
+    .map((row, idx) => {
+      sumIn += Number(row.money_in || 0);
+      sumOut += Number(row.money_out || 0);
+      sumMort += Number(row.mortality || 0);
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${Number(row.quantity || 0)}</td>
+        <td>${Number(row.unit_price || 0)}</td>
+        <td>${Number(row.money_in || 0)}</td>
+        <td>${Number(row.money_out || 0)}</td>
+        <td>${Number(row.mortality || 0)}</td>
+        <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="cess-acc" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="cess-acc" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const inEl = document.getElementById("cessAccTotalMoneyIn");
+  const outEl = document.getElementById("cessAccTotalMoneyOut");
+  const mortEl = document.getElementById("cessAccTotalMortality");
+  if (inEl) inEl.textContent = String(sumIn);
+  if (outEl) outEl.textContent = String(sumOut);
+  if (mortEl) mortEl.textContent = String(sumMort);
+}
+
 function resetNahashonForm() {
   if (!nahashonForm) return;
   nahashonForm.reset();
@@ -3230,6 +3340,9 @@ function showPage(page) {
       return showPage("inventory");
     }
   }
+  if (page === "cess-accounts" && state.appInstance !== "amana") {
+    return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+  }
   if (state.appInstance === "terry" && page !== "rose-inventory" && page !== "calculator") {
     return showPage("rose-inventory");
   }
@@ -3296,7 +3409,8 @@ function showPage(page) {
     page === "sales-kg" ||
     page === "chicken-inventory" ||
     page === "expenditure" ||
-    page === "rose-inventory"
+    page === "rose-inventory" ||
+    page === "cess-accounts"
   ) {
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -3325,6 +3439,7 @@ function showPage(page) {
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
   if (page === "rose-inventory") renderRoseTable();
+  if (page === "cess-accounts") renderCessAccountsTable();
   if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
@@ -3541,6 +3656,7 @@ async function loadAllData() {
     api("/api/expenditure"),
     api("/api/rose/inventory"),
     api("/api/nahashon-accounts"),
+    api("/api/cess-accounts"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -3556,6 +3672,7 @@ async function loadAllData() {
   state.expenditureEntries = extras[11].status === "fulfilled" ? extras[11].value : [];
   state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
+  state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -3585,6 +3702,7 @@ async function loadAllData() {
   renderCalculatorTable();
   renderExpenditureTable();
   renderRoseTable();
+  renderCessAccountsTable();
   renderNahashonTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
@@ -3987,6 +4105,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
       const staffMayUseCalculator = page === "calculator" && staffMayAccessCalculatorTenant();
       if (!staffMayUseCalculator) return;
     }
+    if (page === "cess-accounts" && state.appInstance !== "amana") return;
     showPage(page);
   });
 });
@@ -4038,6 +4157,9 @@ if (calcDueDateDisplay && calcDueDate && calcDueOpenCalendarBtn) {
 }
 if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
   wireDatePicker(nahashonDateDisplay, nahashonDate, nahashonOpenCalendarBtn);
+}
+if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
+  wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
 }
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
@@ -4343,6 +4465,7 @@ document.getElementById("medClearBtn")?.addEventListener("click", resetMedicamen
 document.getElementById("gasClearBtn")?.addEventListener("click", resetGasForm);
 document.getElementById("expClearBtn")?.addEventListener("click", resetExpenditureForm);
 document.getElementById("roseClearBtn")?.addEventListener("click", resetRoseForm);
+document.getElementById("cessAccClearBtn")?.addEventListener("click", resetCessAccountsForm);
 document.getElementById("nahashonClearBtn")?.addEventListener("click", resetNahashonForm);
 
 fdForm?.addEventListener("submit", async (event) => {
@@ -4550,6 +4673,33 @@ roseForm?.addEventListener("submit", async (event) => {
       await api("/api/rose/inventory", { method: "POST", body: JSON.stringify(payload) });
     }
     resetRoseForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+cessAccountsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = cessAccDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("cessAccDescription")?.value || "").trim(),
+    quantity: Number(document.getElementById("cessAccQuantity")?.value || 0),
+    unit_price: Number(document.getElementById("cessAccUnitPrice")?.value || 0),
+    money_in: Number(document.getElementById("cessAccMoneyIn")?.value || 0),
+    money_out: Number(document.getElementById("cessAccMoneyOut")?.value || 0),
+    mortality: Number(document.getElementById("cessAccMortality")?.value || 0),
+    sale_via: String(document.getElementById("cessAccSaleVia")?.value || "Shop").trim(),
+  };
+  try {
+    if (state.editCessAccountsId) {
+      await api(`/api/cess-accounts/${state.editCessAccountsId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/cess-accounts", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetCessAccountsForm();
     await loadAllData();
   } catch (error) {
     alert(error.message);
@@ -4814,71 +4964,76 @@ salesBagsBody.addEventListener("click", async (event) => {
   }
 });
 
-document.getElementById("ufaray-bag-sales-body")?.addEventListener("click", async (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) return;
-  if (target.dataset.kind === "ufaray-edit") {
+function wireOwnerPassThroughBagSalesBodyListener(bodyId, kindPrefix) {
+  document.getElementById(bodyId)?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.dataset.kind === `${kindPrefix}-edit`) {
+      const id = Number(target.dataset.id);
+      if (!Number.isFinite(id) || id < 1) return;
+      const row = state.salesBags.find((r) => Number(r.id) === id);
+      if (!row) return;
+      state.editSalesBagId = row.id;
+      sbDate.value = toIsoDate(row.date);
+      sbDateDisplay.value = formatDateDMY(row.date);
+      sbBrand.value = row.brand;
+      populateSbFeedTypes(row.brand);
+      sbFeedType.value = row.feed_type;
+      sbBagSize.value = row.bag_size;
+      document.getElementById("sbBagsSold").value = row.bags_sold;
+      const st = document.getElementById("sbSaleType");
+      const tp = normalizeSaleVia(row.through_party);
+      if (st) {
+        fillBagSaleViaSelect(st, tp || (state.appInstance === "shop" ? "Shop" : ""));
+      }
+      applyEmployeeFeedSalePricingUi();
+      document.getElementById("sbPricePerBag").value = row.price_per_bag;
+      document.getElementById("sbSaveBtn").textContent = "Update sale";
+      showPage("sales-bags");
+      return;
+    }
+    if (target.dataset.kind === `${kindPrefix}-delete`) {
+      const id = Number(target.dataset.id);
+      if (!Number.isFinite(id) || id < 1) return;
+      if (!window.confirm("Delete this sale?")) return;
+      target.setAttribute("disabled", "disabled");
+      try {
+        await api(`/api/sales/bags/${id}`, { method: "DELETE" });
+        await loadAllData();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        target.removeAttribute("disabled");
+      }
+      return;
+    }
+    if (target.dataset.kind !== `${kindPrefix}-status-save`) return;
     const id = Number(target.dataset.id);
     if (!Number.isFinite(id) || id < 1) return;
     const row = state.salesBags.find((r) => Number(r.id) === id);
     if (!row) return;
-    state.editSalesBagId = row.id;
-    sbDate.value = toIsoDate(row.date);
-    sbDateDisplay.value = formatDateDMY(row.date);
-    sbBrand.value = row.brand;
-    populateSbFeedTypes(row.brand);
-    sbFeedType.value = row.feed_type;
-    sbBagSize.value = row.bag_size;
-    document.getElementById("sbBagsSold").value = row.bags_sold;
-    const st = document.getElementById("sbSaleType");
-    const tp = normalizeSaleVia(row.through_party);
-    if (st) {
-      fillBagSaleViaSelect(st, tp || (state.appInstance === "shop" ? "Shop" : ""));
-    }
-    applyEmployeeFeedSalePricingUi();
-    document.getElementById("sbPricePerBag").value = row.price_per_bag;
-    document.getElementById("sbSaveBtn").textContent = "Update sale";
-    showPage("sales-bags");
-    return;
-  }
-  if (target.dataset.kind === "ufaray-delete") {
-    const id = Number(target.dataset.id);
-    if (!Number.isFinite(id) || id < 1) return;
-    if (!window.confirm("Delete this sale?")) return;
+    const tr = target.closest("tr");
+    if (!(tr instanceof HTMLTableRowElement)) return;
+    const sel = tr.querySelector(`select[data-kind='${kindPrefix}-status']`);
+    if (!(sel instanceof HTMLSelectElement)) return;
+    const status = sel.value === "cleared" ? "cleared" : "pending";
     target.setAttribute("disabled", "disabled");
     try {
-      await api(`/api/sales/bags/${id}`, { method: "DELETE" });
+      await api(`/api/sales/bags/${id}/pass-through-status`, {
+        method: "PUT",
+        body: JSON.stringify({ status }),
+      });
       await loadAllData();
     } catch (error) {
       alert(error.message);
     } finally {
       target.removeAttribute("disabled");
     }
-    return;
-  }
-  if (target.dataset.kind !== "ufaray-status-save") return;
-  const id = Number(target.dataset.id);
-  if (!Number.isFinite(id) || id < 1) return;
-  const row = state.salesBags.find((r) => Number(r.id) === id);
-  if (!row) return;
-  const tr = target.closest("tr");
-  if (!(tr instanceof HTMLTableRowElement)) return;
-  const sel = tr.querySelector("select[data-kind='ufaray-status']");
-  if (!(sel instanceof HTMLSelectElement)) return;
-  const status = sel.value === "cleared" ? "cleared" : "pending";
-  target.setAttribute("disabled", "disabled");
-  try {
-    await api(`/api/sales/bags/${id}/pass-through-status`, {
-      method: "PUT",
-      body: JSON.stringify({ status }),
-    });
-    await loadAllData();
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    target.removeAttribute("disabled");
-  }
-});
+  });
+}
+
+wireOwnerPassThroughBagSalesBodyListener("ufaray-bag-sales-body", "ufaray");
+wireOwnerPassThroughBagSalesBodyListener("cess-bag-sales-body", "cess");
 
 function wireOwnerUfarayExtraTable(tableId, statusKind, statusSaveKind, saleKind, statusEndpointBase, saleEndpointBase) {
   document.getElementById(tableId)?.addEventListener("click", async (event) => {
@@ -5635,6 +5790,48 @@ roseBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/rose/inventory/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+cessAccountsBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "cess-acc") return;
+  const row = state.cessAccountsEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editCessAccountsId = row.id;
+    if (cessAccDate) cessAccDate.value = toIsoDate(row.date);
+    if (cessAccDateDisplay) cessAccDateDisplay.value = formatDateDMY(row.date);
+    const desc = document.getElementById("cessAccDescription");
+    const qty = document.getElementById("cessAccQuantity");
+    const unit = document.getElementById("cessAccUnitPrice");
+    const min = document.getElementById("cessAccMoneyIn");
+    const mout = document.getElementById("cessAccMoneyOut");
+    const mort = document.getElementById("cessAccMortality");
+    const via = document.getElementById("cessAccSaleVia");
+    if (desc) desc.value = row.description || "";
+    if (qty) qty.value = row.quantity ?? 0;
+    if (unit) unit.value = row.unit_price ?? 0;
+    if (min) min.value = row.money_in ?? 0;
+    if (mout) mout.value = row.money_out ?? 0;
+    if (mort) mort.value = row.mortality ?? 0;
+    if (via) via.value = row.sale_via || "Shop";
+    const saveBtn = document.getElementById("cessAccSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/cess-accounts/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
