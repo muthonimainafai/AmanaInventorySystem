@@ -1491,7 +1491,7 @@ function showLoggedIn() {
       shouldShow = true;
     }
     if (page === "cess-accounts") {
-      shouldShow = state.appInstance === "amana";
+      shouldShow = state.appInstance === "amana" && isOwner;
     }
     if (page === "nahashon-records") {
       shouldShow = state.appInstance === "terry";
@@ -3349,8 +3349,13 @@ function showPage(page) {
       return showPage("inventory");
     }
   }
-  if (page === "cess-accounts" && state.appInstance !== "amana") {
-    return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+  if (page === "cess-accounts") {
+    if (state.appInstance !== "amana") {
+      return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+    }
+    if (state.user?.role !== "owner") {
+      return showPage("sales-bags");
+    }
   }
   if (page === "nahashon-records" && state.appInstance !== "terry") {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
@@ -4119,7 +4124,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
       const staffMayUseCalculator = page === "calculator" && staffMayAccessCalculatorTenant();
       if (!staffMayUseCalculator) return;
     }
-    if (page === "cess-accounts" && state.appInstance !== "amana") return;
+    if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return;
     if (page === "nahashon-records" && state.appInstance !== "terry") return;
     showPage(page);
   });
