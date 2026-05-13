@@ -1839,7 +1839,24 @@ function sumBagOpenedForSkLine(dateStr, brand, feedType) {
   return sum;
 }
 
-/** Default bag opened: 0 if a bag is already open from a prior day or earlier today; otherwise 1 for the first open. */
+/** Sum kg_sold for this product on the selected date (excludes the row being edited). */
+function sumKgSoldForSkLine(dateStr, brand, feedType) {
+  if (!dateStr || !brand || !feedType) return 0;
+  const bk = resolveBrandKey(brand);
+  const ftWant = feedTypeCatalogValue(bk, feedType);
+  const dateNorm = normalizeInventoryDate(dateStr);
+  let sum = 0;
+  for (const r of state.salesKg || []) {
+    if (normalizeInventoryDate(r.date) !== dateNorm) continue;
+    if (resolveBrandKey(r.brand) !== bk) continue;
+    if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
+    if (state.editSalesKgId && String(r.id) === String(state.editSalesKgId)) continue;
+    sum += Number(r.kg_sold || 0);
+  }
+  return sum;
+}
+
+/** Default bag opened: 0 while remaining kg in the current open bag > 0; 1 once the bag is consumed. */
 function applyDefaultSkBagOpened() {
   if (state.editSalesKgId) return;
   const dateStr = skDateDisplay?.value?.trim();
@@ -1847,13 +1864,13 @@ function applyDefaultSkBagOpened() {
   if (!skBrand?.value || !skFeedType?.value) return;
   const el = document.getElementById("skBagOpened");
   if (!el) return;
-  const sum = sumBagOpenedForSkLine(dateStr, skBrand.value, skFeedType.value);
-  if (sum >= 1) {
-    el.value = "0";
-    return;
-  }
+  const bagSize = skEffectiveKgPerOpenedBagForSkRow(skBrand.value, skFeedType.value);
+  if (!bagSize || bagSize <= 0) { el.value = "1"; return; }
   const carry = skCarryoverKgBeforeSelectedDate(dateStr, skBrand.value, skFeedType.value);
-  el.value = carry > 1e-6 ? "0" : "1";
+  const bagsOpenedToday = sumBagOpenedForSkLine(dateStr, skBrand.value, skFeedType.value);
+  const kgSoldToday = sumKgSoldForSkLine(dateStr, skBrand.value, skFeedType.value);
+  const remaining = carry + (bagsOpenedToday * bagSize) - kgSoldToday;
+  el.value = remaining > 1e-6 ? "0" : "1";
 }
 
 /** Employee sales: selling price for this catalog line (newest inventory row by id). */

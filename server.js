@@ -4357,11 +4357,11 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
       );
       let incrementBag = bagOpened;
       if (incrementBag > 0) {
-        if (carriedBefore > 1e-6) incrementBag = 0;
-        else {
-          const openedTodayTotal = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
-          if (openedTodayTotal >= 1) incrementBag = 0;
-        }
+        const effBagSz = effectiveKgPerOpenedBagForDisplay(wmCoerce, brandKey, p.feed_type);
+        const openedTodayTotal = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
+        const kgSoldToday = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
+        const pool = carriedBefore + (openedTodayTotal * effBagSz) - kgSoldToday;
+        if (pool > 1e-6) incrementBag = 0;
       }
       let baseBagOpened = Number(existing.bag_opened || 0);
       if (carriedBefore > 1e-6 && baseBagOpened > 0) baseBagOpened = 0;
@@ -4413,11 +4413,11 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
       wmCoerce
     );
     if (insertBagOpened > 0) {
-      if (carriedBefore > 1e-6) insertBagOpened = 0;
-      else {
-        const openedToday = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
-        if (openedToday >= 1) insertBagOpened = 0;
-      }
+      const effBagSz = effectiveKgPerOpenedBagForDisplay(wmCoerce, brandKey, p.feed_type);
+      const openedToday = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
+      const kgSoldToday = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
+      const pool = carriedBefore + (openedToday * effBagSz) - kgSoldToday;
+      if (pool > 1e-6) insertBagOpened = 0;
     }
   }
 
@@ -4499,11 +4499,11 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
       wmPut
     );
     if (effectiveBagOpenedPut > 0) {
-      if (carriedPut > 1e-6) effectiveBagOpenedPut = 0;
-      else {
-        const openedOthersPut = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, idNum);
-        if (openedOthersPut >= 1) effectiveBagOpenedPut = 0;
-      }
+      const effBagSz = effectiveKgPerOpenedBagForDisplay(wmPut, brandKey, p.feed_type);
+      const openedOthersPut = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, idNum);
+      const kgSoldOthersPut = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
+      const pool = carriedPut + (openedOthersPut * effBagSz) - kgSoldOthersPut;
+      if (pool > 1e-6) effectiveBagOpenedPut = 0;
     }
   }
 
