@@ -4435,7 +4435,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   ry += 14;
   doc.text(`DATE: ${today}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`DUE DATE: ${dueForPdf}`, rightX, ry, { align: "right" });
+  doc.text(`${isProforma ? "VALID UNTIL" : "DUE DATE"}: ${dueForPdf}`, rightX, ry, { align: "right" });
   ry += 14;
   doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
 
@@ -4450,7 +4450,12 @@ function downloadCalculatorPdf(mode = "calculator") {
   });
 
   autoTableFn.call(doc, {
-    head: [["DESCRIPTION", "QTY", "RATE", "AMOUNT"]],
+    head: [[
+      "DESCRIPTION",
+      "QTY",
+      isProforma ? "UNIT COST" : "UNIT PRICE",
+      "AMOUNT",
+    ]],
     body: tableBody,
     startY: headerBottom,
     margin: { left: margin, right: margin },
@@ -4487,7 +4492,8 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.setFontSize(10);
   doc.setTextColor(...G.dark);
   doc.text(`TOTAL BAGS: ${totalBags}`, rightX, finalY + 22, { align: "right" });
-  doc.text("BALANCE DUE", rightX - 100, finalY + 40, { align: "right" });
+  const totalLabel = isProforma ? "ESTIMATED TOTAL" : "BALANCE DUE";
+  doc.text(totalLabel, rightX - 100, finalY + 40, { align: "right" });
   doc.setFontSize(13);
   doc.setTextColor(...G.accent);
   doc.text(`Ksh${formatKshPlainNumber(balanceDue)}`, rightX, finalY + 40, { align: "right" });
