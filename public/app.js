@@ -4380,28 +4380,55 @@ function downloadCalculatorPdf(mode = "calculator") {
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
   const rightX = pageW - margin;
-  let y = 40;
+  const centerX = pageW / 2;
+  const tableW = pageW - 2 * margin;
+  const colW = { desc: 250, qty: 65, rate: 100, amt: 100 };
+  if (colW.desc + colW.qty + colW.rate + colW.amt !== tableW) colW.desc = tableW - colW.qty - colW.rate - colW.amt;
 
+  const G = { dark: [14, 92, 58], accent: [39, 150, 99], mint: [234, 248, 240], edge: [186, 222, 198] };
+
+  doc.setFillColor(...G.accent);
+  doc.rect(0, 0, pageW, 12, "F");
+
+  let y = 34;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text(businessTitle, margin, y);
+  doc.setFontSize(17);
+  doc.setTextColor(...G.dark);
+  const hdr = isProforma ? "PRO-FORMA INVOICE" : "INVOICE";
+  doc.text(hdr, centerX, y, { align: "center" });
+  doc.setFontSize(11.5);
+  const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
+  doc.text(brandLine, rightX, y, { align: "right" });
+  doc.setTextColor(33, 33, 33);
+  doc.setFont("helvetica", "normal");
   y += 22;
-  doc.setFontSize(19);
-  doc.text(isProforma ? "PROFORMA INVOICE" : "INVOICE", margin, y);
-  y += 26;
+  doc.setDrawColor(...G.accent);
+  doc.setLineWidth(0.9);
+  doc.line(margin, y, rightX, y);
+  y += 20;
 
   const blockTop = y;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("BILL TO", margin, blockTop);
-  doc.setFont("helvetica", "normal");
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
-  doc.text(billLines, margin, blockTop + 14);
   const dueForPdf = getCalcDueDateForPdf();
-
   const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
   const terms = isProforma ? "Cost estimate — not a tax invoice" : "Due on receipt";
+  const leftBlockH = 14 + billLines.length * 12;
+  const rightBlockH = 14 * 4;
+  const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
+
+  doc.setFillColor(...G.mint);
+  doc.setDrawColor(...G.edge);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(margin, blockTop - 8, tableW, headerBottom - blockTop + 6, 5, 5, "FD");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...G.dark);
+  doc.text("BILL TO", margin, blockTop);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(33, 33, 33);
+  doc.text(billLines, margin, blockTop + 14);
   let ry = blockTop;
   doc.setFont("helvetica", "bold");
   doc.text(`${noLabel} ${docNo}`, rightX, ry, { align: "right" });
@@ -4411,10 +4438,6 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.text(`DUE DATE: ${dueForPdf}`, rightX, ry, { align: "right" });
   ry += 14;
   doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
-
-  const leftBlockH = 14 + billLines.length * 12;
-  const rightBlockH = 14 * 4;
-  const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
 
   const tableBody = exportRows.map((r) => {
     const rate = isProforma ? r.buyingNum : r.sellingNum;
@@ -4430,22 +4453,45 @@ function downloadCalculatorPdf(mode = "calculator") {
     head: [["DESCRIPTION", "QTY", "RATE", "AMOUNT"]],
     body: tableBody,
     startY: headerBottom,
-    styles: { font: "helvetica", fontSize: 10, cellPadding: 5 },
-    headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
-    columnStyles: {
-      1: { halign: "right", cellWidth: 44 },
-      2: { halign: "right", cellWidth: 86 },
-      3: { halign: "right", cellWidth: 86 },
+    margin: { left: margin, right: margin },
+    tableWidth: tableW,
+    styles: {
+      font: "helvetica",
+      fontSize: 10,
+      cellPadding: { top: 9, bottom: 9, left: 10, right: 10 },
+      valign: "middle",
+      lineColor: G.edge,
+      lineWidth: 0.2,
+      textColor: [33, 33, 33],
     },
+    headStyles: {
+      fillColor: G.dark,
+      textColor: 255,
+      fontStyle: "bold",
+      halign: "center",
+      valign: "middle",
+      fontSize: 9.5,
+    },
+    columnStyles: {
+      0: { halign: "left", cellWidth: colW.desc },
+      1: { halign: "right", cellWidth: colW.qty },
+      2: { halign: "right", cellWidth: colW.rate },
+      3: { halign: "right", cellWidth: colW.amt },
+    },
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
   });
 
   const finalY = doc.lastAutoTable?.finalY || headerBottom;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
+  doc.setTextColor(...G.dark);
   doc.text(`TOTAL BAGS: ${totalBags}`, rightX, finalY + 22, { align: "right" });
   doc.text("BALANCE DUE", rightX - 100, finalY + 40, { align: "right" });
   doc.setFontSize(13);
+  doc.setTextColor(...G.accent);
   doc.text(`Ksh${formatKshPlainNumber(balanceDue)}`, rightX, finalY + 40, { align: "right" });
+  doc.setTextColor(0, 0, 0);
 
   const safeMode = isProforma ? "proforma" : "invoice";
   doc.save(`${safeBusiness}-${safeMode}-${fileDate}.pdf`);
