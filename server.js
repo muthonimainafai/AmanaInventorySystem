@@ -3738,6 +3738,7 @@ app.post("/api/nahashon-accounts", auth, allowRoles("owner", "employee"), async 
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
   const saleVia = normalizeRoseSaleVia(p.sale_via);
+  if (!saleVia) return res.status(400).json({ error: "Sale via must be Terry, Cess, or Shop." });
   let quantity, unitPrice, moneyIn, moneyOut, mortality;
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
@@ -3769,6 +3770,7 @@ app.put("/api/nahashon-accounts/:id", auth, allowRoles("owner", "employee"), asy
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
   const saleVia = normalizeRoseSaleVia(p.sale_via);
+  if (!saleVia) return res.status(400).json({ error: "Sale via must be Terry, Cess, or Shop." });
   let quantity, unitPrice, moneyIn, moneyOut, mortality;
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");

@@ -76,6 +76,7 @@ const PAGE_HEADINGS = {
   medicaments: "Medicaments inventory",
   gas: "Gas Inventory",
   "rose-inventory": "Rose Inventory",
+  "nahashon-records": "Nahashon Records",
   "cess-accounts": "Cess Accounts",
   calculator: "Calculator",
   expenditure: "Expenditure",
@@ -133,6 +134,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "medicaments",
   "gas",
   "rose-inventory",
+  "nahashon-records",
   "cess-accounts",
   "calculator",
   "expenditure",
@@ -1074,17 +1076,28 @@ function fillBagSaleViaSelect(selectEl, selectedValue = "") {
 function fillSimpleSaleTypeSelect(selectEl, selectedValue = "") {
   if (!(selectEl instanceof HTMLSelectElement)) return;
   const normalizedSelected = normalizeSaleVia(selectedValue);
-  const options = state.appInstance === "ufaray" ? ["", "Amana"] : ["", "Ufaray"];
-  const labels =
-    state.appInstance === "ufaray"
-      ? {
-          "": "Shop sale (normal)",
-          Amana: "Via Amana",
-        }
-      : {
-          "": "Shop sale (normal)",
-          Ufaray: "By Ufaray",
-        };
+  let options;
+  let labels;
+  if (state.appInstance === "ufaray") {
+    options = ["", "Amana"];
+    labels = {
+      "": "Shop sale (normal)",
+      Amana: "Via Amana",
+    };
+  } else if (state.appInstance === "amana") {
+    options = ["", "Ufaray", "Cess"];
+    labels = {
+      "": "Shop sale (normal)",
+      Ufaray: "By Ufaray",
+      Cess: "By Cess",
+    };
+  } else {
+    options = ["", "Ufaray"];
+    labels = {
+      "": "Shop sale (normal)",
+      Ufaray: "By Ufaray",
+    };
+  }
   const frag = document.createDocumentFragment();
   for (const value of options) {
     const opt = document.createElement("option");
@@ -1458,7 +1471,7 @@ function showLoggedIn() {
     let shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : state.appInstance === "terry"
-      ? page === "rose-inventory" || page === "calculator"
+      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator"
       : state.appInstance === "cess" ||
           state.appInstance === "maina-faith-cess" ||
           state.appInstance === "terry-and-cess"
@@ -1479,6 +1492,9 @@ function showLoggedIn() {
     }
     if (page === "cess-accounts") {
       shouldShow = state.appInstance === "amana";
+    }
+    if (page === "nahashon-records") {
+      shouldShow = state.appInstance === "terry";
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -3336,7 +3352,10 @@ function showPage(page) {
   if (page === "cess-accounts" && state.appInstance !== "amana") {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
-  if (state.appInstance === "terry" && page !== "rose-inventory" && page !== "calculator") {
+  if (page === "nahashon-records" && state.appInstance !== "terry") {
+    return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+  }
+  if (state.appInstance === "terry" && page !== "rose-inventory" && page !== "nahashon-records" && page !== "calculator") {
     return showPage("rose-inventory");
   }
   if (
@@ -3403,6 +3422,7 @@ function showPage(page) {
     page === "chicken-inventory" ||
     page === "expenditure" ||
     page === "rose-inventory" ||
+    page === "nahashon-records" ||
     page === "cess-accounts"
   ) {
     applyEmployeeSalesDateRules();
@@ -3432,6 +3452,7 @@ function showPage(page) {
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
   if (page === "rose-inventory") renderRoseTable();
+  if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
   if (page === "calculator") renderCalculatorTable();
   if (page === "expenditure") renderExpenditureTable();
@@ -4099,6 +4120,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
       if (!staffMayUseCalculator) return;
     }
     if (page === "cess-accounts" && state.appInstance !== "amana") return;
+    if (page === "nahashon-records" && state.appInstance !== "terry") return;
     showPage(page);
   });
 });
