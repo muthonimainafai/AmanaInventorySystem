@@ -1856,21 +1856,27 @@ function sumKgSoldForSkLine(dateStr, brand, feedType) {
   return sum;
 }
 
-/** Default bag opened: 0 while remaining kg in the current open bag > 0; 1 once the bag is consumed. */
+/** Default bag opened: 0 while remaining kg in the current open bag > 0; 1 once the bag is consumed.
+ *  For employees the field is locked (readonly) — the system decides automatically. */
 function applyDefaultSkBagOpened() {
-  if (state.editSalesKgId) return;
+  const el = document.getElementById("skBagOpened");
+  if (!el) return;
+  const isEmployee = state.user?.role === "employee";
+  if (state.editSalesKgId) {
+    el.readOnly = isEmployee;
+    return;
+  }
   const dateStr = skDateDisplay?.value?.trim();
   if (!dateStr || !isValidDMY(dateStr)) return;
   if (!skBrand?.value || !skFeedType?.value) return;
-  const el = document.getElementById("skBagOpened");
-  if (!el) return;
   const bagSize = skEffectiveKgPerOpenedBagForSkRow(skBrand.value, skFeedType.value);
-  if (!bagSize || bagSize <= 0) { el.value = "1"; return; }
+  if (!bagSize || bagSize <= 0) { el.value = "1"; el.readOnly = isEmployee; return; }
   const carry = skCarryoverKgBeforeSelectedDate(dateStr, skBrand.value, skFeedType.value);
   const bagsOpenedToday = sumBagOpenedForSkLine(dateStr, skBrand.value, skFeedType.value);
   const kgSoldToday = sumKgSoldForSkLine(dateStr, skBrand.value, skFeedType.value);
   const remaining = carry + (bagsOpenedToday * bagSize) - kgSoldToday;
   el.value = remaining > 1e-6 ? "0" : "1";
+  el.readOnly = isEmployee;
 }
 
 /** Employee sales: selling price for this catalog line (newest inventory row by id). */
@@ -5321,7 +5327,9 @@ salesKgBody.addEventListener("click", async (event) => {
     skBrand.value = row.brand;
     populateSkFeedTypes(row.brand);
     skFeedType.value = row.feed_type;
-    document.getElementById("skBagOpened").value = row.bag_opened != null ? row.bag_opened : 0;
+    const skBagEl = document.getElementById("skBagOpened");
+    skBagEl.value = row.bag_opened != null ? row.bag_opened : 0;
+    skBagEl.readOnly = state.user?.role === "employee";
     document.getElementById("skKgSold").value = row.kg_sold;
     if (skSaleType) skSaleType.value = String(row.through_party || "").trim();
     if (state.user.role === "employee") applyEmployeeSalesKgPriceFromInventory();
