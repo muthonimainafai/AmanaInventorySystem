@@ -1844,10 +1844,9 @@ function sumKgSoldForSkLine(dateStr, brand, feedType) {
   if (!dateStr || !brand || !feedType) return 0;
   const bk = resolveBrandKey(brand);
   const ftWant = feedTypeCatalogValue(bk, feedType);
-  const dateNorm = normalizeInventoryDate(dateStr);
   let sum = 0;
   for (const r of state.salesKg || []) {
-    if (normalizeInventoryDate(r.date) !== dateNorm) continue;
+    if (String(r.date).trim() !== String(dateStr).trim()) continue;
     if (resolveBrandKey(r.brand) !== bk) continue;
     if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
     if (state.editSalesKgId && String(r.id) === String(state.editSalesKgId)) continue;
