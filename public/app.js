@@ -4306,9 +4306,9 @@ function downloadCalculatorPdf(mode = "calculator") {
     }
   }
   if (mode === "invoice") {
-    const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
+    const bad = exportRows.find((r) => !Number.isFinite(r.buyingNum) || r.buyingNum < 0);
     if (bad) {
-      alert("For an invoice, enter a valid selling price on every line that has bags.");
+      alert("For an invoice, enter a valid buying price on every line that has bags.");
       return;
     }
   }
@@ -4393,8 +4393,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   const docNo = isProforma ? `PF-${docSuffix}` : `INV-${docSuffix}`;
   const totalBags = exportRows.reduce((s, r) => s + r.bagsNum, 0);
   const balanceDue = exportRows.reduce((s, r) => {
-    const rate = isProforma ? r.buyingNum : r.sellingNum;
-    return s + r.bagsNum * rate;
+    return s + r.bagsNum * r.buyingNum;
   }, 0);
 
   const pageW = doc.internal.pageSize.getWidth();
@@ -4460,7 +4459,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
 
   const tableBody = exportRows.map((r) => {
-    const rate = isProforma ? r.buyingNum : r.sellingNum;
+    const rate = r.buyingNum;
     const amount = r.bagsNum * rate;
     const desc = `${r.brand} ${r.feedType} ${r.bagSize}kg`
       .replace(/\s+/g, " ")
@@ -4473,7 +4472,7 @@ function downloadCalculatorPdf(mode = "calculator") {
     head: [[
       "DESCRIPTION",
       "QTY",
-      isProforma ? "UNIT COST" : "UNIT PRICE",
+      "UNIT COST",
       "AMOUNT",
     ]],
     body: tableBody,
