@@ -1842,15 +1842,7 @@ async function resolveEmployeeChickenFeedBundle(req, res, p, existingRow = null)
         ? String(existingRow.feed_type).trim()
         : "";
   if (!brandRaw || !feedTypeRaw) {
-    const hadLegacyEmpty =
-      existingRow &&
-      (!existingRow.feed_brand || String(existingRow.feed_brand).trim() === "") &&
-      (!existingRow.feed_type || String(existingRow.feed_type).trim() === "");
-    if (hadLegacyEmpty) {
-      return { feed_brand: null, feed_type: null, feed_bag_qty: null, feed_line_total: null };
-    }
-    res.status(400).json({ error: "Select feed brand and feed type for this chick sale." });
-    return null;
+    return { feed_brand: null, feed_type: null, feed_bag_qty: null, feed_line_total: null };
   }
   let bagQtyRaw = p.feed_bag_qty;
   if (bagQtyRaw === undefined || bagQtyRaw === null || String(bagQtyRaw).trim() === "") {
