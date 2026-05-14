@@ -2286,7 +2286,7 @@ app.get("/api/inventory", auth, allowRoles("owner"), async (_req, res) => {
 /** Selling prices per inventory line (for employees to record sales at the owner’s prices). Ordered by id DESC to match stock lookup. */
 app.get("/api/inventory/selling-prices", auth, allowRoles("owner", "employee"), async (_req, res) => {
   const rows = await all(
-    "SELECT id, brand, feed_type, bag_size, selling_price FROM inventory ORDER BY id DESC"
+    "SELECT id, brand, feed_type, bag_size, buying_price, selling_price FROM inventory ORDER BY id DESC"
   );
   res.json(rows);
 });

@@ -648,17 +648,22 @@ function calculatorRowsFromCatalog() {
   return rows;
 }
 
-/** Latest owner buying price from Feed Inventory for this catalog line (newest row by id). */
+function calculatorInventoryRows() {
+  const recs = state.records || [];
+  return recs.length > 0 ? recs : state.inventoryPricing || [];
+}
+
+/** Latest buying price from Feed Inventory for this catalog line (newest row by id). */
 function findInventoryBuyingPriceForCalculator(brand, feedType, bagSize) {
-  const row = findLatestInventoryRowForCatalogLine(state.records, brand, feedType, bagSize);
+  const row = findLatestInventoryRowForCatalogLine(calculatorInventoryRows(), brand, feedType, bagSize);
   if (!row) return null;
   const bp = Number(row.buying_price);
   return Number.isFinite(bp) ? bp : null;
 }
 
-/** Latest owner selling price from Feed Inventory for this catalog line (newest row by id). */
+/** Latest selling price from Feed Inventory for this catalog line (newest row by id). */
 function findInventorySellingPriceForCalculator(brand, feedType, bagSize) {
-  const row = findLatestInventoryRowForCatalogLine(state.records, brand, feedType, bagSize);
+  const row = findLatestInventoryRowForCatalogLine(calculatorInventoryRows(), brand, feedType, bagSize);
   if (!row) return null;
   const sp = Number(row.selling_price);
   return Number.isFinite(sp) ? sp : null;
@@ -4958,18 +4963,14 @@ chickenForm.addEventListener("submit", async (event) => {
   if (state.user.role === "employee") {
     const fb = String(chFeedBrand?.value || "").trim();
     const ft = String(chFeedType?.value || "").trim();
-    if (!fb || !ft) {
-      alert("Select feed brand and feed type for this chick sale.");
-      return;
-    }
     const fbags = Math.floor(Number(chFeedBagQty?.value ?? 0));
-    if (!Number.isFinite(fbags) || fbags < 0) {
+    if (Number.isFinite(fbags) && fbags < 0) {
       alert("Feed quantity (bags) must be a whole number zero or greater.");
       return;
     }
-    payload.feed_brand = fb;
-    payload.feed_type = ft;
-    payload.feed_bag_qty = fbags;
+    payload.feed_brand = fb || "";
+    payload.feed_type = ft || "";
+    payload.feed_bag_qty = Number.isFinite(fbags) && fbags > 0 ? fbags : 0;
     const unitForLine = Number(payload.unit_price);
     const lineTotal = qty * unitForLine;
     const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
