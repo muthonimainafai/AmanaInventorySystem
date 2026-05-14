@@ -3751,14 +3751,7 @@ async function loadAllData() {
 
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(async () => {
-    if (!state.token) return;
-    try {
-      await loadAllData();
-    } catch (_error) {
-      // Ignore transient network errors during background refresh.
-    }
-  }, 5000);
+  refreshTimer = null;
 }
 
 function stopAutoRefresh() {
