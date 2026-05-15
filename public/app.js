@@ -4306,6 +4306,39 @@ function addAmanaLogoTopRight(doc, dataUrl, opts = {}) {
   return size;
 }
 
+/** Invoice / proforma header: large logo above the divider line, title on the left. Returns Y for content below the line. */
+function drawInvoicePdfHeaderBand(doc, { logoUrl, hdr, brandLine, margin, pageW, G }) {
+  const rightX = pageW - margin;
+  const logoTop = 14;
+  const logoSize = logoUrl ? 108 : 0;
+  const titleY = logoUrl ? logoTop + 42 : 36;
+  const lineY = logoUrl ? logoTop + logoSize + 14 : 58;
+
+  doc.setFillColor(...G.accent);
+  doc.rect(0, 0, pageW, 12, "F");
+
+  if (logoUrl) {
+    addAmanaLogoTopRight(doc, logoUrl, { top: logoTop, size: logoSize, margin });
+  } else if (brandLine) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...G.dark);
+    doc.text(brandLine, rightX, titleY, { align: "right" });
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(...G.dark);
+  doc.text(hdr, margin, titleY);
+  doc.setTextColor(33, 33, 33);
+  doc.setFont("helvetica", "normal");
+  doc.setDrawColor(...G.accent);
+  doc.setLineWidth(0.9);
+  doc.line(margin, lineY, rightX, lineY);
+
+  return lineY + 18;
+}
+
 function getCalcCustomerBillPdfText() {
   const nameEl = document.getElementById("calcCustomerName");
   const mobileEl = document.getElementById("calcCustomerMobile");
@@ -4409,16 +4442,19 @@ async function downloadCalculatorPdf(mode = "calculator") {
     const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
     const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
 
-    addAmanaLogoTopRight(doc, logoUrl, { top: 24, size: 56 });
+    const calcLogoSize = logoUrl ? 88 : 0;
+    const calcLogoTop = 18;
+    if (logoUrl) addAmanaLogoTopRight(doc, logoUrl, { top: calcLogoTop, size: calcLogoSize });
+    const calcTextTop = logoUrl ? calcLogoTop + calcLogoSize + 16 : 42;
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
-    doc.text(businessTitle, 40, 42);
+    doc.text(businessTitle, 40, calcTextTop);
     doc.setFontSize(13);
-    doc.text("Calculator", 40, 64);
+    doc.text("Calculator", 40, calcTextTop + 22);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
-    let metaY = 84;
+    let metaY = calcTextTop + 44;
     doc.text(`Date: ${today}`, 40, metaY);
     metaY += 14;
     const cn = document.getElementById("calcCustomerName");
@@ -4472,36 +4508,15 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
   const rightX = pageW - margin;
-  const centerX = pageW / 2;
   const tableW = pageW - 2 * margin;
   const colW = { desc: 250, qty: 65, rate: 100, amt: 100 };
   if (colW.desc + colW.qty + colW.rate + colW.amt !== tableW) colW.desc = tableW - colW.qty - colW.rate - colW.amt;
 
   const G = { dark: [14, 92, 58], accent: [39, 150, 99], mint: [234, 248, 240], edge: [186, 222, 198] };
 
-  doc.setFillColor(...G.accent);
-  doc.rect(0, 0, pageW, 12, "F");
-
-  addAmanaLogoTopRight(doc, logoUrl, { top: 16, size: 62 });
-
-  let y = 34;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.setTextColor(...G.dark);
   const hdr = isProforma ? "PRO-FORMA INVOICE" : "INVOICE";
-  doc.text(hdr, centerX, y, { align: "center" });
-  doc.setFontSize(11.5);
   const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
-  if (!logoUrl) doc.text(brandLine, rightX, y, { align: "right" });
-  doc.setTextColor(33, 33, 33);
-  doc.setFont("helvetica", "normal");
-  y += 22;
-  doc.setDrawColor(...G.accent);
-  doc.setLineWidth(0.9);
-  doc.line(margin, y, rightX, y);
-  y += 20;
-
-  const blockTop = y;
+  const blockTop = drawInvoicePdfHeaderBand(doc, { logoUrl, hdr, brandLine, margin, pageW, G });
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
   const dueForPdf = getCalcDueDateForPdf();
