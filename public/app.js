@@ -4270,56 +4270,79 @@ document.getElementById("calcPaidAmount")?.addEventListener("input", updateCalcu
 document.getElementById("calcCustomerForm")?.addEventListener("submit", (e) => e.preventDefault());
 
 const AMANA_LOGO_PATH = "/amana-kuku-logo.png";
-let amanaLogoDataUrlPromise = null;
+let amanaLogoForPdfPromise = null;
 
 function shouldShowAmanaLogoOnPdf() {
   return state.appInstance !== "ufaray";
 }
 
-function loadAmanaLogoDataUrl() {
+/** @returns {Promise<{ dataUrl: string, width: number, height: number } | null>} */
+function loadAmanaLogoForPdf() {
   if (!shouldShowAmanaLogoOnPdf()) return Promise.resolve(null);
-  if (!amanaLogoDataUrlPromise) {
-    amanaLogoDataUrlPromise = fetch(AMANA_LOGO_PATH)
+  if (!amanaLogoForPdfPromise) {
+    amanaLogoForPdfPromise = fetch(AMANA_LOGO_PATH)
       .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("logo missing"))))
       .then(
         (blob) =>
           new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
+            reader.onload = () => {
+              const dataUrl = reader.result;
+              const img = new Image();
+              img.onload = () =>
+                resolve({
+                  dataUrl,
+                  width: img.naturalWidth || 1,
+                  height: img.naturalHeight || 1,
+                });
+              img.onerror = () => resolve(null);
+              img.src = dataUrl;
+            };
             reader.onerror = () => reject(reader.error);
             reader.readAsDataURL(blob);
           })
       )
       .catch(() => null);
   }
-  return amanaLogoDataUrlPromise;
+  return amanaLogoForPdfPromise;
 }
 
-/** Logo at top-right of calculator / invoice / proforma PDFs; returns logo height in pt. */
-function addAmanaLogoTopRight(doc, dataUrl, opts = {}) {
-  if (!dataUrl) return 0;
+/** Logo at top-right; preserves aspect ratio. Returns drawn height in pt. */
+function addAmanaLogoTopRight(doc, logoMeta, opts = {}) {
+  if (!logoMeta?.dataUrl || !logoMeta.width || !logoMeta.height) return 0;
   const pageW = doc.internal.pageSize.getWidth();
   const margin = opts.margin ?? 40;
-  const size = opts.size ?? 58;
+  const maxW = opts.maxWidth ?? opts.size ?? 108;
+  const maxH = opts.maxHeight ?? maxW;
+  const aspect = logoMeta.width / logoMeta.height;
+  let drawW = maxW;
+  let drawH = drawW / aspect;
+  if (drawH > maxH) {
+    drawH = maxH;
+    drawW = drawH * aspect;
+  }
   const top = opts.top ?? 22;
-  doc.addImage(dataUrl, "PNG", pageW - margin - size, top, size, size);
-  return size;
+  const x = pageW - margin - drawW;
+  doc.addImage(logoMeta.dataUrl, "PNG", x, top, drawW, drawH);
+  return drawH;
 }
 
-/** Invoice / proforma header: large logo above the divider line, title on the left. Returns Y for content below the line. */
-function drawInvoicePdfHeaderBand(doc, { logoUrl, hdr, brandLine, margin, pageW, G }) {
+/** Invoice / proforma header: logo above the divider line, title on the left. Returns Y for content below the line. */
+function drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G }) {
   const rightX = pageW - margin;
   const logoTop = 14;
-  const logoSize = logoUrl ? 108 : 0;
-  const titleY = logoUrl ? logoTop + 42 : 36;
-  const lineY = logoUrl ? logoTop + logoSize + 14 : 58;
+  const titleY = logoMeta ? 52 : 36;
 
   doc.setFillColor(...G.accent);
   doc.rect(0, 0, pageW, 12, "F");
 
-  if (logoUrl) {
-    addAmanaLogoTopRight(doc, logoUrl, { top: logoTop, size: logoSize, margin });
-  } else if (brandLine) {
+  let logoDrawH = 0;
+  if (logoMeta) {
+    logoDrawH = addAmanaLogoTopRight(doc, logoMeta, { top: logoTop, maxWidth: 118, maxHeight: 118, margin });
+  }
+  const lineY = logoMeta ? logoTop + logoDrawH + 14 : 58;
+
+  if (!logoMeta && brandLine) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(...G.dark);
@@ -4420,7 +4443,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
   const fileDate = today.replace(/\//g, "-");
   const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  const logoUrl = await loadAmanaLogoDataUrl();
+  const logoMeta = await loadAmanaLogoForPdf();
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
   const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
@@ -4442,10 +4465,11 @@ async function downloadCalculatorPdf(mode = "calculator") {
     const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
     const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
 
-    const calcLogoSize = logoUrl ? 88 : 0;
     const calcLogoTop = 18;
-    if (logoUrl) addAmanaLogoTopRight(doc, logoUrl, { top: calcLogoTop, size: calcLogoSize });
-    const calcTextTop = logoUrl ? calcLogoTop + calcLogoSize + 16 : 42;
+    const calcLogoH = logoMeta
+      ? addAmanaLogoTopRight(doc, logoMeta, { top: calcLogoTop, maxWidth: 96, maxHeight: 96 })
+      : 0;
+    const calcTextTop = logoMeta ? calcLogoTop + calcLogoH + 16 : 42;
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
@@ -4516,7 +4540,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
 
   const hdr = isProforma ? "PRO-FORMA INVOICE" : "INVOICE";
   const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
-  const blockTop = drawInvoicePdfHeaderBand(doc, { logoUrl, hdr, brandLine, margin, pageW, G });
+  const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G });
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
   const dueForPdf = getCalcDueDateForPdf();
