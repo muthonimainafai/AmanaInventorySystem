@@ -1281,8 +1281,7 @@
             </p>
             <p class="field-hint">
               <strong>Download PDF</strong> exports the calculator as shown below.
-              <strong>Proforma invoice</strong> is a cost-based quotation (rates from buying prices; not a final tax invoice).
-              <strong>Invoice</strong> uses selling prices as the bill to the customer.
+              <strong>Proforma invoice</strong> and <strong>Invoice</strong> bill the customer at selling prices and include total, paid amount, and unpaid balance on the PDF.
             </p>
           </div>
           <div class="card">
@@ -1338,8 +1337,20 @@
                   </div>
                   <input type="date" id="calcDueDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
                 </label>
+                <label>
+                  Total amount
+                  <input type="text" id="calcSellingTotal" readonly tabindex="-1" title="Sum of bags × selling price for lines with bags" />
+                </label>
+                <label>
+                  Paid amount
+                  <input type="number" id="calcPaidAmount" min="0" step="0.01" value="0" title="Amount the customer has paid" />
+                </label>
+                <label>
+                  Unpaid balance
+                  <input type="text" id="calcUnpaidBalance" readonly tabindex="-1" title="Total amount minus paid amount" />
+                </label>
               </div>
-              <p class="field-hint">Printed on PDF downloads. Leave due date blank to use today on Proforma / Invoice.</p>
+              <p class="field-hint">Printed on PDF downloads. Leave due date blank to use today on Proforma / Invoice. Paid amount and balance appear on Proforma / Invoice PDFs.</p>
             </form>
             <div class="actions calc-pdf-actions">
               <button type="button" class="secondary" id="calcClearBtn">Clear calculator</button>

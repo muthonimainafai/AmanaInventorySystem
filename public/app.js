@@ -722,6 +722,42 @@ function updateCalculatorGrandTotalDisplay() {
   document.querySelectorAll(".js-calc-grand-total-meta").forEach((el) => {
     el.textContent = meta;
   });
+  updateCalculatorPaymentSummary();
+}
+
+function calculatorSellingGrandTotal() {
+  if (!calcBody) return 0;
+  let total = 0;
+  calcBody.querySelectorAll("tr").forEach((tr) => {
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const sellEl = tr.querySelector("input[data-kind='calc-selling']");
+    if (!(bagsEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement)) return;
+    const bags = Number(String(bagsEl.value || "").trim());
+    const selling = Number(String(sellEl.value || "").trim());
+    const safeBags = Math.max(0, Number.isFinite(bags) ? bags : 0);
+    const safeSell = Math.max(0, Number.isFinite(selling) ? selling : 0);
+    if (safeBags > 0) total += safeBags * safeSell;
+  });
+  return total;
+}
+
+function updateCalculatorPaymentSummary() {
+  const total = calculatorSellingGrandTotal();
+  const paidEl = document.getElementById("calcPaidAmount");
+  const paid = paidEl instanceof HTMLInputElement ? Number(paidEl.value || 0) : 0;
+  const safePaid = Number.isFinite(paid) && paid >= 0 ? paid : 0;
+  const balance = total - safePaid;
+  const totalEl = document.getElementById("calcSellingTotal");
+  const balanceEl = document.getElementById("calcUnpaidBalance");
+  if (totalEl instanceof HTMLInputElement) totalEl.value = currency(total);
+  if (balanceEl instanceof HTMLInputElement) balanceEl.value = currency(balance);
+}
+
+function getCalcPaidAmountForPdf() {
+  const el = document.getElementById("calcPaidAmount");
+  if (!(el instanceof HTMLInputElement)) return 0;
+  const n = Number(String(el.value || "").trim());
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 function updateGasProfitDisplay() {
@@ -4224,10 +4260,51 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   if (mobileEl instanceof HTMLInputElement) mobileEl.value = "";
   if (calcDueDateDisplay instanceof HTMLInputElement) calcDueDateDisplay.value = "";
   if (calcDueDate instanceof HTMLInputElement) calcDueDate.value = "";
+  const paidEl = document.getElementById("calcPaidAmount");
+  if (paidEl instanceof HTMLInputElement) paidEl.value = "0";
   updateCalculatorGrandTotalDisplay();
 });
 
+document.getElementById("calcPaidAmount")?.addEventListener("input", updateCalculatorPaymentSummary);
+
 document.getElementById("calcCustomerForm")?.addEventListener("submit", (e) => e.preventDefault());
+
+const AMANA_LOGO_PATH = "/amana-kuku-logo.png";
+let amanaLogoDataUrlPromise = null;
+
+function shouldShowAmanaLogoOnPdf() {
+  return state.appInstance !== "ufaray";
+}
+
+function loadAmanaLogoDataUrl() {
+  if (!shouldShowAmanaLogoOnPdf()) return Promise.resolve(null);
+  if (!amanaLogoDataUrlPromise) {
+    amanaLogoDataUrlPromise = fetch(AMANA_LOGO_PATH)
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("logo missing"))))
+      .then(
+        (blob) =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          })
+      )
+      .catch(() => null);
+  }
+  return amanaLogoDataUrlPromise;
+}
+
+/** Logo at top-right of calculator / invoice / proforma PDFs; returns logo height in pt. */
+function addAmanaLogoTopRight(doc, dataUrl, opts = {}) {
+  if (!dataUrl) return 0;
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = opts.margin ?? 40;
+  const size = opts.size ?? 58;
+  const top = opts.top ?? 22;
+  doc.addImage(dataUrl, "PNG", pageW - margin - size, top, size, size);
+  return size;
+}
 
 function getCalcCustomerBillPdfText() {
   const nameEl = document.getElementById("calcCustomerName");
@@ -4285,7 +4362,7 @@ function collectCalculatorRowsForPdfExport() {
 /**
  * @param {"calculator"|"proforma"|"invoice"} mode
  */
-function downloadCalculatorPdf(mode = "calculator") {
+async function downloadCalculatorPdf(mode = "calculator") {
   if (!calcBody) return;
   const jsPdfNs = window.jspdf;
   const JsPdfCtor = jsPdfNs?.jsPDF;
@@ -4298,17 +4375,10 @@ function downloadCalculatorPdf(mode = "calculator") {
     alert("Enter at least one calculator row with number of bags before downloading.");
     return;
   }
-  if (mode === "proforma") {
-    const bad = exportRows.find((r) => !Number.isFinite(r.buyingNum) || r.buyingNum < 0);
+  if (mode === "proforma" || mode === "invoice") {
+    const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
     if (bad) {
-      alert("For a proforma invoice, enter a valid buying price on every line that has bags.");
-      return;
-    }
-  }
-  if (mode === "invoice") {
-    const bad = exportRows.find((r) => !Number.isFinite(r.buyingNum) || r.buyingNum < 0);
-    if (bad) {
-      alert("For an invoice, enter a valid buying price on every line that has bags.");
+      alert(`For ${mode === "proforma" ? "a proforma invoice" : "an invoice"}, enter a valid selling price on every line that has bags.`);
       return;
     }
   }
@@ -4317,6 +4387,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
   const fileDate = today.replace(/\//g, "-");
   const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const logoUrl = await loadAmanaLogoDataUrl();
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
   const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
@@ -4337,6 +4408,8 @@ function downloadCalculatorPdf(mode = "calculator") {
     }));
     const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
     const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
+
+    addAmanaLogoTopRight(doc, logoUrl, { top: 24, size: 56 });
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
@@ -4392,9 +4465,9 @@ function downloadCalculatorPdf(mode = "calculator") {
   const docSuffix = String(Math.floor(10000 + Math.random() * 90000));
   const docNo = isProforma ? `PF-${docSuffix}` : `INV-${docSuffix}`;
   const totalBags = exportRows.reduce((s, r) => s + r.bagsNum, 0);
-  const balanceDue = exportRows.reduce((s, r) => {
-    return s + r.bagsNum * r.buyingNum;
-  }, 0);
+  const invoiceTotal = exportRows.reduce((s, r) => s + r.bagsNum * r.sellingNum, 0);
+  const paidAmount = getCalcPaidAmountForPdf();
+  const unpaidBalance = invoiceTotal - paidAmount;
 
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
@@ -4409,6 +4482,8 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.setFillColor(...G.accent);
   doc.rect(0, 0, pageW, 12, "F");
 
+  addAmanaLogoTopRight(doc, logoUrl, { top: 16, size: 62 });
+
   let y = 34;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(17);
@@ -4417,7 +4492,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.text(hdr, centerX, y, { align: "center" });
   doc.setFontSize(11.5);
   const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
-  doc.text(brandLine, rightX, y, { align: "right" });
+  if (!logoUrl) doc.text(brandLine, rightX, y, { align: "right" });
   doc.setTextColor(33, 33, 33);
   doc.setFont("helvetica", "normal");
   y += 22;
@@ -4459,7 +4534,7 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
 
   const tableBody = exportRows.map((r) => {
-    const rate = r.buyingNum;
+    const rate = r.sellingNum;
     const amount = r.bagsNum * rate;
     const desc = `${r.brand} ${r.feedType} ${r.bagSize}kg`
       .replace(/\s+/g, " ")
@@ -4472,7 +4547,7 @@ function downloadCalculatorPdf(mode = "calculator") {
     head: [[
       "DESCRIPTION",
       "QTY",
-      "UNIT COST",
+      "UNIT PRICE",
       "AMOUNT",
     ]],
     body: tableBody,
@@ -4511,11 +4586,23 @@ function downloadCalculatorPdf(mode = "calculator") {
   doc.setFontSize(10);
   doc.setTextColor(...G.dark);
   doc.text(`TOTAL BAGS: ${totalBags}`, rightX, finalY + 22, { align: "right" });
-  const totalLabel = isProforma ? "ESTIMATED TOTAL" : "BALANCE DUE";
-  doc.text(totalLabel, rightX - 100, finalY + 40, { align: "right" });
-  doc.setFontSize(13);
-  doc.setTextColor(...G.accent);
-  doc.text(`Ksh${formatKshPlainNumber(balanceDue)}`, rightX, finalY + 40, { align: "right" });
+  const summaryRows = [
+    { label: "TOTAL AMOUNT", value: invoiceTotal, emphasize: true },
+    { label: "PAID AMOUNT", value: paidAmount, emphasize: false },
+    { label: "UNPAID BALANCE", value: unpaidBalance, emphasize: true },
+  ];
+  let summaryY = finalY + 40;
+  summaryRows.forEach((row) => {
+    doc.setFontSize(row.emphasize ? 11 : 10);
+    doc.setTextColor(...G.dark);
+    doc.text(row.label, rightX - 110, summaryY, { align: "right" });
+    if (row.emphasize) {
+      doc.setFontSize(12);
+      doc.setTextColor(...G.accent);
+    }
+    doc.text(`Ksh${formatKshPlainNumber(row.value)}`, rightX, summaryY, { align: "right" });
+    summaryY += 18;
+  });
   doc.setTextColor(0, 0, 0);
 
   const safeMode = isProforma ? "proforma" : "invoice";
