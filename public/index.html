@@ -1288,6 +1288,7 @@
             <h3 class="card-title">Chicken price calculator</h3>
             <p class="field-hint">
               <strong>Price per chick</strong> is filled from <strong>Chicken Sales Inventory</strong> (owner selling price for the breed). Total = number of chicks × price per chick.
+              <strong>Download Proforma invoice</strong> exports this chicken line only (customer details and payment summary come from the form below the feed table).
             </p>
             <form id="calcChickenForm" class="calc-chicken-form">
               <div class="grid">
@@ -1325,6 +1326,7 @@
               </div>
               <div class="actions" style="margin-top: 0.5rem">
                 <button type="button" class="secondary" id="calcChClearBtn">Clear chicken calculator</button>
+                <button type="button" id="calcChDownloadProformaBtn">Download Proforma invoice</button>
               </div>
             </form>
           </div>

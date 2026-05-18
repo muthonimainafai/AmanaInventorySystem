@@ -4379,6 +4379,7 @@ calcChBreed?.addEventListener("change", () => {
 });
 calcChQuantity?.addEventListener("input", updateCalcChickenTotalDisplay);
 document.getElementById("calcChClearBtn")?.addEventListener("click", resetCalcChickenForm);
+document.getElementById("calcChDownloadProformaBtn")?.addEventListener("click", () => downloadCalcChickenProformaPdf());
 
 const AMANA_LOGO_PATH = "/amana-kuku-logo.png";
 let amanaLogoForPdfPromise = null;
@@ -4490,6 +4491,165 @@ function getCalcDueDateForPdf() {
   const t = el instanceof HTMLInputElement ? el.value.trim() : "";
   if (t && isValidDMY(t)) return t;
   return state.shopToday || clientShopTodayDMY();
+}
+
+/** Sale date from chicken calculator form, else shop today. */
+function getCalcChickenDateForPdf() {
+  const t = calcChDateDisplay instanceof HTMLInputElement ? calcChDateDisplay.value.trim() : "";
+  if (t && isValidDMY(t)) return t;
+  return state.shopToday || clientShopTodayDMY();
+}
+
+/** Current chicken calculator line for PDF export, or null if incomplete. */
+function collectCalcChickenRowForPdfExport() {
+  if (!calcChBreed || !calcChQuantity) return null;
+  const breed = calcChBreed.value.trim();
+  const qtyNum = Number(String(calcChQuantity.value || "").trim());
+  if (!breed || !Number.isFinite(qtyNum) || qtyNum <= 0) return null;
+  const unitPrice = findChickenSellingPriceForCalculator(breed);
+  if (unitPrice == null || !Number.isFinite(unitPrice) || unitPrice < 0) return null;
+  return {
+    breed,
+    dateStr: getCalcChickenDateForPdf(),
+    qtyNum,
+    unitPrice,
+    lineTotal: qtyNum * unitPrice,
+  };
+}
+
+/** Proforma PDF for chicken calculator only (logo + customer form below feed table). */
+async function downloadCalcChickenProformaPdf() {
+  const row = collectCalcChickenRowForPdfExport();
+  if (!row) {
+    alert("Select a breed, enter the number of chicks, and ensure a selling price is set in Chicken Sales Inventory.");
+    return;
+  }
+
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return;
+  }
+  const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  const fileDate = row.dateStr.replace(/\//g, "-");
+  const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const logoMeta = await loadAmanaLogoForPdf();
+
+  const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
+  if (typeof autoTableFn !== "function") {
+    alert("PDF table helper is not loaded. Refresh and try again.");
+    return;
+  }
+  const docSuffix = String(Math.floor(10000 + Math.random() * 90000));
+  const docNo = `PF-${docSuffix}`;
+  const invoiceTotal = row.lineTotal;
+  const paidAmount = getCalcPaidAmountForPdf();
+  const unpaidBalance = invoiceTotal - paidAmount;
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const rightX = pageW - margin;
+  const tableW = pageW - 2 * margin;
+  const colW = { desc: 250, qty: 65, rate: 100, amt: 100 };
+  if (colW.desc + colW.qty + colW.rate + colW.amt !== tableW) colW.desc = tableW - colW.qty - colW.rate - colW.amt;
+
+  const G = { dark: [14, 92, 58], accent: [39, 150, 99], mint: [234, 248, 240], edge: [186, 222, 198] };
+
+  const hdr = "PRO-FORMA INVOICE";
+  const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
+  const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G });
+  const billRaw = getCalcCustomerBillPdfText();
+  const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
+  const dueForPdf = getCalcDueDateForPdf();
+  const leftBlockH = 14 + billLines.length * 12;
+  const rightBlockH = 14 * 4;
+  const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
+
+  doc.setFillColor(...G.mint);
+  doc.setDrawColor(...G.edge);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(margin, blockTop - 8, tableW, headerBottom - blockTop + 6, 5, 5, "FD");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...G.dark);
+  doc.text("BILL TO", margin, blockTop);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(33, 33, 33);
+  doc.text(billLines, margin, blockTop + 14);
+  let ry = blockTop;
+  doc.setFont("helvetica", "bold");
+  doc.text(`PROFORMA NO. ${docNo}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text(`DATE: ${row.dateStr}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text(`VALID UNTIL: ${dueForPdf}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text("NOTE: Cost estimate — not a tax invoice", rightX, ry, { align: "right" });
+
+  const desc = `${row.breed} DAY-OLD CHICKS`.replace(/\s+/g, " ").trim().toUpperCase();
+  const tableBody = [[desc, String(row.qtyNum), `Ksh${formatKshPlainNumber(row.unitPrice)}`, `Ksh${formatKshPlainNumber(row.lineTotal)}`]];
+
+  autoTableFn.call(doc, {
+    head: [["DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]],
+    body: tableBody,
+    startY: headerBottom,
+    margin: { left: margin, right: margin },
+    tableWidth: tableW,
+    styles: {
+      font: "helvetica",
+      fontSize: 10,
+      cellPadding: { top: 9, bottom: 9, left: 10, right: 10 },
+      valign: "middle",
+      lineColor: G.edge,
+      lineWidth: 0.2,
+      textColor: [33, 33, 33],
+    },
+    headStyles: {
+      fillColor: G.dark,
+      textColor: 255,
+      fontStyle: "bold",
+      halign: "center",
+      valign: "middle",
+      fontSize: 9.5,
+    },
+    columnStyles: {
+      0: { halign: "left", cellWidth: colW.desc },
+      1: { halign: "right", cellWidth: colW.qty },
+      2: { halign: "right", cellWidth: colW.rate },
+      3: { halign: "right", cellWidth: colW.amt },
+    },
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
+  });
+
+  const finalY = doc.lastAutoTable?.finalY || headerBottom;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...G.dark);
+  doc.text(`TOTAL CHICKS: ${row.qtyNum}`, rightX, finalY + 22, { align: "right" });
+  const summaryRows = [
+    { label: "TOTAL AMOUNT", value: invoiceTotal, emphasize: true },
+    { label: "PAID AMOUNT", value: paidAmount, emphasize: false },
+    { label: "UNPAID BALANCE", value: unpaidBalance, emphasize: true },
+  ];
+  let summaryY = finalY + 40;
+  summaryRows.forEach((summaryRow) => {
+    doc.setFontSize(summaryRow.emphasize ? 11 : 10);
+    doc.setTextColor(...G.dark);
+    doc.text(summaryRow.label, rightX - 110, summaryY, { align: "right" });
+    if (summaryRow.emphasize) {
+      doc.setFontSize(12);
+      doc.setTextColor(...G.accent);
+    }
+    doc.text(`Ksh${formatKshPlainNumber(summaryRow.value)}`, rightX, summaryY, { align: "right" });
+    summaryY += 18;
+  });
+  doc.setTextColor(0, 0, 0);
+
+  doc.save(`${safeBusiness}-chicken-proforma-${fileDate}.pdf`);
 }
 
 /** Rows with bags > 0 plus parsed prices for PDF exports. */
