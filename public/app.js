@@ -303,6 +303,13 @@ const calcBody = document.getElementById("calc-body");
 const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
 const calcDueDate = document.getElementById("calcDueDate");
 const calcDueOpenCalendarBtn = document.getElementById("calcDueOpenCalendarBtn");
+const calcChDateDisplay = document.getElementById("calcChDateDisplay");
+const calcChDate = document.getElementById("calcChDate");
+const calcChOpenCalendarBtn = document.getElementById("calcChOpenCalendarBtn");
+const calcChBreed = document.getElementById("calcChBreed");
+const calcChQuantity = document.getElementById("calcChQuantity");
+const calcChPricePerChick = document.getElementById("calcChPricePerChick");
+const calcChTotal = document.getElementById("calcChTotal");
 
 let refreshTimer = null;
 let catalogInitialized = false;
@@ -661,6 +668,69 @@ function findInventoryBuyingPriceForCalculator(brand, feedType, bagSize) {
   return Number.isFinite(bp) ? bp : null;
 }
 
+/** Selling price per chick from Chicken Sales Inventory (chicken_breeds). */
+function findChickenSellingPriceForCalculator(breed) {
+  const name = String(breed || "").trim();
+  if (!name) return null;
+  const row = getChickenBreedsRows().find((r) => r.breed === name);
+  if (!row) return null;
+  const sp = Number(row.selling_price);
+  return Number.isFinite(sp) && sp >= 0 ? sp : null;
+}
+
+function populateCalcChickenBreedSelect() {
+  if (!calcChBreed) return;
+  const cur = calcChBreed.value;
+  calcChBreed.innerHTML = '<option value="">Select breed</option>';
+  for (const r of getChickenBreedsRows()) {
+    if (!r.breed) continue;
+    const opt = document.createElement("option");
+    opt.value = r.breed;
+    opt.textContent = r.breed;
+    calcChBreed.appendChild(opt);
+  }
+  if (cur && [...calcChBreed.options].some((o) => o.value === cur)) calcChBreed.value = cur;
+}
+
+function applyCalcChickenPriceFromBreed() {
+  if (!calcChBreed || !calcChPricePerChick) return;
+  const sp = findChickenSellingPriceForCalculator(calcChBreed.value);
+  calcChPricePerChick.value = sp != null ? currency(sp) : "";
+}
+
+function updateCalcChickenTotalDisplay() {
+  if (!calcChQuantity || !calcChTotal) return;
+  const qty = Number(String(calcChQuantity.value || "").trim());
+  const unit = findChickenSellingPriceForCalculator(calcChBreed?.value);
+  const safeQty = Math.max(0, Number.isFinite(qty) ? qty : 0);
+  const safeUnit = unit != null && Number.isFinite(unit) ? unit : 0;
+  if (safeQty > 0 && calcChBreed?.value && unit != null) {
+    calcChTotal.value = currency(safeQty * safeUnit);
+  } else {
+    calcChTotal.value = "";
+  }
+}
+
+function initCalcChickenFormDefaults() {
+  if (calcChDateDisplay && !calcChDateDisplay.value.trim()) {
+    const todayStr = state.shopToday || clientShopTodayDMY();
+    calcChDateDisplay.value = todayStr;
+    if (calcChDate) calcChDate.value = toIsoDate(todayStr);
+  }
+}
+
+function resetCalcChickenForm() {
+  if (calcChDateDisplay) calcChDateDisplay.value = "";
+  if (calcChDate) calcChDate.value = "";
+  if (calcChBreed) calcChBreed.value = "";
+  if (calcChQuantity) calcChQuantity.value = "";
+  if (calcChPricePerChick) calcChPricePerChick.value = "";
+  if (calcChTotal) calcChTotal.value = "";
+  initCalcChickenFormDefaults();
+  applyCalcChickenPriceFromBreed();
+  updateCalcChickenTotalDisplay();
+}
+
 /** Latest selling price from Feed Inventory for this catalog line (newest row by id). */
 function findInventorySellingPriceForCalculator(brand, feedType, bagSize) {
   const row = findLatestInventoryRowForCatalogLine(calculatorInventoryRows(), brand, feedType, bagSize);
@@ -722,9 +792,27 @@ function updateCalculatorGrandTotalDisplay() {
   document.querySelectorAll(".js-calc-grand-total-meta").forEach((el) => {
     el.textContent = meta;
   });
-  updateCalculatorPaymentSummary();
+  updateCalculatorInvoicePaymentSummary();
 }
 
+/** Sum of bags × buying price (calculator PDF and purchase-cost totals). */
+function calculatorBuyingGrandTotal() {
+  if (!calcBody) return 0;
+  let total = 0;
+  calcBody.querySelectorAll("tr").forEach((tr) => {
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement)) return;
+    const bags = Number(String(bagsEl.value || "").trim());
+    const buying = Number(String(buyEl.value || "").trim());
+    const safeBags = Math.max(0, Number.isFinite(bags) ? bags : 0);
+    const safeBuy = Math.max(0, Number.isFinite(buying) ? buying : 0);
+    if (safeBags > 0) total += safeBags * safeBuy;
+  });
+  return total;
+}
+
+/** Sum of bags × selling price (invoice / proforma only). */
 function calculatorSellingGrandTotal() {
   if (!calcBody) return 0;
   let total = 0;
@@ -741,7 +829,7 @@ function calculatorSellingGrandTotal() {
   return total;
 }
 
-function updateCalculatorPaymentSummary() {
+function updateCalculatorInvoicePaymentSummary() {
   const total = calculatorSellingGrandTotal();
   const paidEl = document.getElementById("calcPaidAmount");
   const paid = paidEl instanceof HTMLInputElement ? Number(paidEl.value || 0) : 0;
@@ -3522,7 +3610,13 @@ function showPage(page) {
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
-  if (page === "calculator") renderCalculatorTable();
+  if (page === "calculator") {
+    populateCalcChickenBreedSelect();
+    initCalcChickenFormDefaults();
+    applyCalcChickenPriceFromBreed();
+    updateCalcChickenTotalDisplay();
+    renderCalculatorTable();
+  }
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
   updateOwnerCombinedProfitDockVisibility();
@@ -3765,6 +3859,12 @@ async function loadAllData() {
   updateOwnerCombinedProfitDisplay();
   updateBalanceBanner();
   populateChickenBreedSelect();
+  populateCalcChickenBreedSelect();
+  if (state.currentPage === "calculator") {
+    initCalcChickenFormDefaults();
+    applyCalcChickenPriceFromBreed();
+    updateCalcChickenTotalDisplay();
+  }
   populateFeedersDrinkersItems();
   populateMedicamentsItems();
   populateGasSizes();
@@ -4231,6 +4331,9 @@ if (roseDateDisplay && roseDate && roseOpenCalendarBtn) wireDatePicker(roseDateD
 if (calcDueDateDisplay && calcDueDate && calcDueOpenCalendarBtn) {
   wireDatePicker(calcDueDateDisplay, calcDueDate, calcDueOpenCalendarBtn);
 }
+if (calcChDateDisplay && calcChDate && calcChOpenCalendarBtn) {
+  wireDatePicker(calcChDateDisplay, calcChDate, calcChOpenCalendarBtn);
+}
 if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
   wireDatePicker(nahashonDateDisplay, nahashonDate, nahashonOpenCalendarBtn);
 }
@@ -4265,9 +4368,17 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   updateCalculatorGrandTotalDisplay();
 });
 
-document.getElementById("calcPaidAmount")?.addEventListener("input", updateCalculatorPaymentSummary);
+document.getElementById("calcPaidAmount")?.addEventListener("input", updateCalculatorInvoicePaymentSummary);
 
 document.getElementById("calcCustomerForm")?.addEventListener("submit", (e) => e.preventDefault());
+
+document.getElementById("calcChickenForm")?.addEventListener("submit", (e) => e.preventDefault());
+calcChBreed?.addEventListener("change", () => {
+  applyCalcChickenPriceFromBreed();
+  updateCalcChickenTotalDisplay();
+});
+calcChQuantity?.addEventListener("input", updateCalcChickenTotalDisplay);
+document.getElementById("calcChClearBtn")?.addEventListener("click", resetCalcChickenForm);
 
 const AMANA_LOGO_PATH = "/amana-kuku-logo.png";
 let amanaLogoForPdfPromise = null;
@@ -4431,6 +4542,13 @@ async function downloadCalculatorPdf(mode = "calculator") {
     alert("Enter at least one calculator row with number of bags before downloading.");
     return;
   }
+  if (mode === "calculator") {
+    const badBuy = exportRows.find((r) => !Number.isFinite(r.buyingNum) || r.buyingNum < 0);
+    if (badBuy) {
+      alert("For the calculator PDF, enter a valid buying price on every line that has bags.");
+      return;
+    }
+  }
   if (mode === "proforma" || mode === "invoice") {
     const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
     if (bad) {
@@ -4453,17 +4571,22 @@ async function downloadCalculatorPdf(mode = "calculator") {
   }
 
   if (mode === "calculator") {
-    const filledRows = exportRows.map((r) => ({
-      brand: r.brand,
-      feedType: r.feedType,
-      bagSize: r.bagSize,
-      bags: r.bagsStr,
-      buying: r.buyingStr,
-      selling: r.sellingStr,
-      total: r.totalCellText,
-    }));
+    const filledRows = exportRows.map((r) => {
+      const lineTotal = r.bagsNum * Math.max(0, Number.isFinite(r.buyingNum) ? r.buyingNum : 0);
+      return {
+        brand: r.brand,
+        feedType: r.feedType,
+        bagSize: r.bagSize,
+        bags: r.bagsStr,
+        buying: r.buyingStr,
+        total: currency(lineTotal),
+      };
+    });
     const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
-    const grand = filledRows.reduce((s, r) => s + (Number(String(r.total).replace(/[^0-9.-]/g, "")) || 0), 0);
+    const grand = exportRows.reduce(
+      (s, r) => s + r.bagsNum * Math.max(0, Number.isFinite(r.buyingNum) ? r.buyingNum : 0),
+      0
+    );
 
     const calcLogoTop = 18;
     const calcLogoH = logoMeta
@@ -4501,8 +4624,8 @@ async function downloadCalculatorPdf(mode = "calculator") {
       metaY += 14;
     }
 
-    const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Selling price (per bag)", "Total"]];
-    const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.selling, r.total]);
+    const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Total (purchase cost)"]];
+    const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.total]);
 
     autoTableFn.call(doc, {
       head,
@@ -4516,7 +4639,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.text(`Total bags: ${totalBags}`, 40, finalY + 24);
-    doc.text(`Grand total: ${currency(grand)}`, 40, finalY + 42);
+    doc.text(`Grand total (purchase cost): ${currency(grand)}`, 40, finalY + 42);
     doc.save(`${safeBusiness}-calculator-${fileDate}.pdf`);
     return;
   }
