@@ -313,6 +313,8 @@ const calcChTotal = document.getElementById("calcChTotal");
 
 let refreshTimer = null;
 let catalogInitialized = false;
+/** Owner typed buying/selling on Feed Inventory — skip auto price fill until brand/feed changes. */
+let inventoryPricesDirty = false;
 
 function persistAppInstance() {
   const normalized = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "terry-and-cess", "maina-faith-cess", "shop"].includes(
@@ -1761,6 +1763,7 @@ async function loadVehicleKaxData() {
 }
 
 function populateBrandSelect(selectEl) {
+  const prev = selectEl instanceof HTMLSelectElement ? selectEl.value : "";
   selectEl.innerHTML = '<option value="">Select brand</option>';
   Object.keys(state.catalog).forEach((brand) => {
     const option = document.createElement("option");
@@ -1768,18 +1771,22 @@ function populateBrandSelect(selectEl) {
     option.textContent = displayBrand(brand);
     selectEl.appendChild(option);
   });
+  if (prev && [...selectEl.options].some((o) => o.value === prev)) {
+    selectEl.value = prev;
+  }
 }
 
 function populateBrands() {
   populateBrandSelect(brandSelect);
 }
 
-function populateFeedTypes(brand) {
+function populateFeedTypes(brand, preferredFeedType = "") {
   const brandKey = resolveBrandKey(brand);
+  const prevFeed = preferredFeedType || feedTypeSelect.value;
   feedTypeSelect.innerHTML = '<option value="">Select feed type</option>';
-  bagSizeInput.value = "";
   if (!brandKey || !state.catalog[brandKey]) {
     feedTypeSelect.disabled = true;
+    bagSizeInput.value = "";
     return;
   }
 
@@ -1790,6 +1797,13 @@ function populateFeedTypes(brand) {
     feedTypeSelect.appendChild(option);
   });
   feedTypeSelect.disabled = false;
+  const canonPrev = prevFeed ? feedTypeCatalogValue(brandKey, prevFeed) : "";
+  if (canonPrev && [...feedTypeSelect.options].some((o) => o.value === canonPrev)) {
+    feedTypeSelect.value = canonPrev;
+    bagSizeInput.value = bagSizeFor(brandKey, canonPrev);
+  } else {
+    bagSizeInput.value = "";
+  }
 }
 
 function populateSbFeedTypes(brand) {
@@ -2202,23 +2216,21 @@ function updateInventoryStockFieldsMode() {
   if (quantityInput) {
     quantityInput.readOnly = !editing;
     quantityInput.required = editing;
-    if (!editing) quantityInput.value = "";
   }
   const accBagsEl = document.getElementById("accumulatedBags");
   if (accBagsEl instanceof HTMLInputElement) {
     accBagsEl.readOnly = !editing;
-    if (!editing) accBagsEl.value = "";
   }
   if (bagsBoughtInput) {
     bagsBoughtInput.readOnly = false;
     bagsBoughtInput.required = !editing;
-    if (!editing) bagsBoughtInput.value = "";
   }
 }
 
 function resetForm() {
   form.reset();
   state.editId = null;
+  inventoryPricesDirty = false;
   dateDisplayInput.value = "";
   feedTypeSelect.innerHTML = '<option value="">Select feed type</option>';
   feedTypeSelect.disabled = true;
@@ -2230,9 +2242,78 @@ function resetForm() {
   document.getElementById("accumulatedProfit").value = "0";
   document.getElementById("accumulatedBags").value = "";
   if (bagsBoughtInput) bagsBoughtInput.value = "";
+  if (quantityInput) quantityInput.value = "";
   setInventoryPriceEditMode(true);
   document.getElementById("saveBtn").textContent = "Save Record";
   updateInventoryStockFieldsMode();
+}
+
+/** Keep Feed Inventory form values when background data refresh runs while the owner is typing. */
+function captureInventoryFormDraft() {
+  if (state.user?.role !== "owner" || state.currentPage !== "inventory" || !form) return null;
+  const editing = state.editId != null && Number(state.editId) > 0;
+  const brand = brandSelect?.value || "";
+  const bagsRaw = bagsBoughtInput?.value != null ? String(bagsBoughtInput.value).trim() : "";
+  const buyingRaw = buyingPriceInput?.value != null ? String(buyingPriceInput.value).trim() : "";
+  const hasDraft =
+    editing ||
+    brand ||
+    bagsRaw !== "" ||
+    (buyingRaw !== "" && buyingRaw !== "0" && buyingRaw !== "0.00");
+  if (!hasDraft) return null;
+  const accEl = document.getElementById("accumulatedBags");
+  return {
+    editId: state.editId,
+    dateDisplay: dateDisplayInput?.value ?? "",
+    dateIso: dateInput?.value ?? "",
+    brand,
+    feedType: feedTypeSelect?.value ?? "",
+    bagSize: bagSizeInput?.value ?? "",
+    bagsBought: bagsBoughtInput?.value ?? "",
+    quantity: quantityInput?.value ?? "",
+    accumulatedBags: accEl instanceof HTMLInputElement ? accEl.value : "",
+    buying: buyingPriceInput?.value ?? "",
+    selling: sellingPriceInput?.value ?? "",
+    reorder: reorderLevelInput?.value ?? "",
+    accumulatedProfit: document.getElementById("accumulatedProfit")?.value ?? "",
+    pricesDirty: inventoryPricesDirty,
+    saveBtnText: document.getElementById("saveBtn")?.textContent || "Save Record",
+  };
+}
+
+function restoreInventoryFormDraft(draft) {
+  if (!draft) return;
+  state.editId = draft.editId;
+  inventoryPricesDirty = !!draft.pricesDirty;
+  if (dateDisplayInput) dateDisplayInput.value = draft.dateDisplay;
+  if (dateInput) dateInput.value = draft.dateIso;
+  if (brandSelect && draft.brand) {
+    brandSelect.value = draft.brand;
+    populateFeedTypes(draft.brand, draft.feedType);
+    if (feedTypeSelect && draft.feedType) {
+      const brandKey = resolveBrandKey(draft.brand);
+      const canon = feedTypeCatalogValue(brandKey, draft.feedType);
+      if ([...feedTypeSelect.options].some((o) => o.value === canon)) feedTypeSelect.value = canon;
+    }
+  }
+  if (bagSizeInput) {
+    bagSizeInput.value =
+      draft.bagSize ||
+      (draft.brand && draft.feedType ? String(bagSizeFor(draft.brand, draft.feedType) || "") : "");
+  }
+  if (bagsBoughtInput) bagsBoughtInput.value = draft.bagsBought;
+  if (quantityInput) quantityInput.value = draft.quantity;
+  const accEl = document.getElementById("accumulatedBags");
+  if (accEl instanceof HTMLInputElement) accEl.value = draft.accumulatedBags;
+  if (buyingPriceInput) buyingPriceInput.value = draft.buying;
+  if (sellingPriceInput) sellingPriceInput.value = draft.selling;
+  if (reorderLevelInput) reorderLevelInput.value = draft.reorder;
+  const accProfitEl = document.getElementById("accumulatedProfit");
+  if (accProfitEl instanceof HTMLInputElement) accProfitEl.value = draft.accumulatedProfit;
+  const saveBtn = document.getElementById("saveBtn");
+  if (saveBtn) saveBtn.textContent = draft.saveBtnText;
+  updateInventoryStockFieldsMode();
+  syncInventoryProfitMarginFromPrices();
 }
 
 /** Profit margin from buying vs selling (two decimal places). */
@@ -2324,6 +2405,7 @@ function findLatestInventoryPriceLine(brand, feedType, bagSize) {
 function applyInventoryPriceDefaults(force = false) {
   if (state.user?.role !== "owner") return;
   if (!force && state.editId != null) return;
+  if (!force && inventoryPricesDirty) return;
   const brand = brandSelect.value;
   const feedType = feedTypeSelect.value;
   const bagSize = Number(bagSizeInput.value || 0);
@@ -3658,11 +3740,12 @@ function showPage(page) {
 function populateForm(row) {
   const id = Number(row.id);
   state.editId = Number.isFinite(id) ? id : null;
+  inventoryPricesDirty = false;
   dateInput.value = toIsoDate(row.date);
   dateDisplayInput.value = formatDateDMY(row.date);
   const brandKey = resolveBrandKey(row.brand);
   brandSelect.value = brandKey;
-  populateFeedTypes(brandKey);
+  populateFeedTypes(brandKey, row.feed_type);
   feedTypeSelect.value = feedTypeCatalogValue(brandKey, row.feed_type);
   bagSizeInput.value = row.bag_size;
   quantityInput.value = row.quantity_in_stock;
@@ -3746,16 +3829,12 @@ async function loadCatalogFromServer() {
 }
 
 async function loadAllData() {
+  const inventoryDraft = captureInventoryFormDraft();
   state.catalog = await loadCatalogFromServer();
 
   const mustFillBrandDropdowns =
-    !catalogInitialized ||
-    brandSelect.options.length <= 1 ||
-    sbBrand.options.length <= 1 ||
-    skBrand.options.length <= 1 ||
-    (rfBrand && rfBrand.options.length <= 1) ||
-    (chFeedBrand && chFeedBrand.options.length <= 1);
-  if (mustFillBrandDropdowns && Object.keys(state.catalog || {}).length > 0) {
+    !catalogInitialized && Object.keys(state.catalog || {}).length > 0;
+  if (mustFillBrandDropdowns) {
     populateBrands();
     populateBrandSelect(sbBrand);
     populateBrandSelect(skBrand);
@@ -3921,6 +4000,7 @@ async function loadAllData() {
   renderNahashonTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
+  restoreInventoryFormDraft(inventoryDraft);
 }
 
 function startAutoRefresh() {
@@ -4164,17 +4244,25 @@ vehicleLogoutBtn?.addEventListener("click", () => {
 });
 
 brandSelect.addEventListener("change", () => {
+  inventoryPricesDirty = false;
   populateFeedTypes(brandSelect.value);
   applyInventoryPriceDefaults();
 });
 
 feedTypeSelect.addEventListener("change", () => {
+  inventoryPricesDirty = false;
   bagSizeInput.value = bagSizeFor(brandSelect.value, feedTypeSelect.value);
   applyInventoryPriceDefaults();
 });
 
-buyingPriceInput?.addEventListener("input", syncInventoryProfitMarginFromPrices);
-sellingPriceInput?.addEventListener("input", syncInventoryProfitMarginFromPrices);
+buyingPriceInput?.addEventListener("input", () => {
+  inventoryPricesDirty = true;
+  syncInventoryProfitMarginFromPrices();
+});
+sellingPriceInput?.addEventListener("input", () => {
+  inventoryPricesDirty = true;
+  syncInventoryProfitMarginFromPrices();
+});
 editPricesBtn?.addEventListener("click", () => {
   if (state.user?.role !== "owner") return;
   const isLocked = buyingPriceInput?.readOnly && sellingPriceInput?.readOnly;
