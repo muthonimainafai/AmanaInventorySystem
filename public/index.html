@@ -870,7 +870,7 @@
                 <strong>Total Kgs</strong> is the kg left from opened bags for that product that day (starts at the owner’s weight per bag when set under Retail
                 Feed Inventory, otherwise the catalog bag size, e.g. 50 kg, and goes down as you record sales). Each time you save,
                 <strong>Kg sold (this sale)</strong> is added onto the same row for that product/day (no duplicate rows). <strong>Bags sold</strong> counts
-                full bags sold that day for that product (each 50 kg or your set kg per bag counts as one bag). The column <strong>Accumulated kg sold</strong> is kg sold from the <em>current</em> open bag only (returns to 0 when a full bag is used; a new bag is opened automatically).
+                full bags <em>completed</em> through this line (counts 1 only when accumulated kg in the current bag reaches the full bag size, e.g. 50 kg; a new bag is then opened automatically). <strong>Accumulated kg sold</strong> is kg sold from the <em>current</em> open bag only (returns to 0 when that bag is finished).
               </p>
               <div class="actions">
                 <button type="submit" id="skSaveBtn">Save sale</button>
@@ -888,7 +888,7 @@
                     <th>Feed Type</th>
                     <th title="Shows 1 once any bag is opened for this product that day.">Bag opened</th>
                     <th title="Kg remaining from opened bags after this line (catalog bag size × bags opened − kg sold so far).">Total(kgs) remaining</th>
-                    <th title="Full bags equivalent of total kg sold today for this product (from catalog bag size).">Bags sold</th>
+                    <th title="Full bags completed through this line (1 per bag when accumulated kg in the current bag reaches bag size, e.g. 50 kg).">Bags sold</th>
                     <th title="Kg sold from the current open bag (0 after a full bag is used; resets when the next bag opens).">Accumulated kg sold (current bag)</th>
                     <th>Price/kg</th>
                     <th title="Cumulative line total: total kg on this line × price per kg.">Total</th>

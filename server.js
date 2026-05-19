@@ -1425,38 +1425,69 @@ function requiredBagOpenedOnRow(poolBefore, bagSize, kgSold) {
   return Math.ceil((sold - poolBefore) / bagSize);
 }
 
+/** Kg still available to sell from the current open bag given pool (kg remaining). */
+function kgLeftInCurrentOpenBag(pool, bagSize) {
+  const p = Number(pool) || 0;
+  if (p <= 1e-6) return bagSize;
+  const mod = p % bagSize;
+  return mod === 0 ? bagSize : mod;
+}
+
+/**
+ * Full bags completed on one line (accumulated kg in current bag reached bag size).
+ * Matches applySalesKgPoolStep but counts only finished bags, not every bag opened.
+ */
+function countBagsCompletedInRow(poolBefore, bagSize, bagOpened, kgSold) {
+  let p = Number(poolBefore) || 0;
+  let completed = 0;
+  const explicitOpens = Math.max(0, Math.floor(Number(bagOpened || 0)));
+  p += explicitOpens * bagSize;
+  let sold = Number(kgSold || 0);
+
+  while (sold > 1e-6) {
+    if (p <= 1e-6) {
+      p = bagSize;
+    }
+    const left = kgLeftInCurrentOpenBag(p, bagSize);
+    const take = Math.min(sold, left);
+    sold -= take;
+    p -= take;
+    if (p < 0) p = 0;
+    if (take >= left - 1e-6) {
+      completed += 1;
+      p = 0;
+    }
+  }
+  return completed;
+}
+
 /**
  * Per-row Sales Per Kg display metrics from chronological pool walk (all staff on product).
  */
 function enrichSalesKgPoolMetrics(sortedRows, bagSize) {
   const byId = new Map();
-  const bagsCompletedByDay = new Map();
   let pool = 0;
-  let bagsConsumedTotal = 0;
+  let bagsCompletedCumulative = 0;
   for (const r of sortedRows) {
     const poolBefore = pool;
+    const completedThisRow = countBagsCompletedInRow(
+      poolBefore,
+      bagSize,
+      r.bag_opened,
+      r.kg_sold
+    );
     const step = applySalesKgPoolStep(pool, bagSize, r.bag_opened, r.kg_sold);
     pool = step.pool;
-    bagsConsumedTotal += step.bagsAdded;
-    const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
-    bagsCompletedByDay.set(d, bagsConsumedTotal);
-    const sold = Number(r.kg_sold || 0);
-    const bagOpenedDisplay =
-      step.explicitOpens > 0 || step.autoOpens > 0 || (sold > 0 && poolBefore <= 1e-6) ? 1 : 0;
+    bagsCompletedCumulative += completedThisRow;
+    const hasOpenBag = pool > 1e-6 || step.kgInCurrentBag > 1e-6;
+    const bagOpenedDisplay = hasOpenBag ? 1 : 0;
     byId.set(Number(r.id), {
       total_kgs_remaining: pool,
       accumulated_kg_sold: step.kgInCurrentBag,
-      bags_sold_cumulative: bagsConsumedTotal,
+      bags_sold_cumulative: bagsCompletedCumulative,
       bag_opened_display: bagOpenedDisplay,
-      bags_sold_row_delta: step.bagsAdded,
+      bags_sold_row_delta: completedThisRow,
     });
-  }
-  for (const [id, meta] of byId) {
-    const row = sortedRows.find((r) => Number(r.id) === id);
-    if (row) {
-      const d = normalizeInventoryDate(row.date) || String(row.date || "").trim();
-      meta.bags_sold_cumulative = bagsCompletedByDay.get(d) ?? meta.bags_sold_cumulative;
-    }
   }
   return byId;
 }

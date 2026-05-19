@@ -2642,7 +2642,7 @@ function renderSalesKgTable() {
         <td>${displayFeedType(row.feed_type)}</td>
         <td title="1 once at least one bag is opened for this product on this date.">${bagOpenedCell}</td>
         <td title="Kg left after this sale: running pool across calendar days (bag opens add kg per bag; kg sold subtracts per row).">${rem}</td>
-        <td title="Full bags represented by total kg sold this day for this product (bag size from catalog).">${bagsFromKg}</td>
+        <td title="Full bags completed through this line (increases by 1 only when accumulated kg in the current bag reaches the full bag size, e.g. 50 kg).">${bagsFromKg}</td>
         <td title="Kg on this row for this day (after merges): ${Number(row.kg_sold ?? 0)}. Kg sold from the current open bag (resets to 0 when a full bag of ${skEffectiveKgPerOpenedBagForSkRow(row.brand, row.feed_type) || "—"} kg is used): ${Number(row.accumulated_kg_sold ?? 0)}.">${row.accumulated_kg_sold != null ? row.accumulated_kg_sold : "—"}</td>
         <td>${currency(row.price_per_kg)}</td>
         <td>${currency(saleLineTotalKg(row))}</td>
