@@ -3685,6 +3685,7 @@ function formPayload() {
 
 async function loadCatalogFromServer() {
   const restrictForTerryCess = (catalog) => {
+    if (state.user?.role === "owner") return catalog;
     if (
       !(
         state.appInstance === "terry" ||
@@ -5729,7 +5730,9 @@ salesKgBody.addEventListener("click", async (event) => {
     skDateDisplay.value = formatDateDMY(row.date);
     skBrand.value = row.brand;
     populateSkFeedTypes(row.brand);
-    skFeedType.value = row.feed_type;
+    const skFtCanon = feedTypeCatalogValue(resolveBrandKey(row.brand), row.feed_type);
+    if ([...skFeedType.options].some((o) => o.value === skFtCanon)) skFeedType.value = skFtCanon;
+    else if ([...skFeedType.options].some((o) => o.value === row.feed_type)) skFeedType.value = row.feed_type;
     const skBagEl = document.getElementById("skBagOpened");
     skBagEl.value = row.bag_opened != null ? row.bag_opened : 0;
     skBagEl.readOnly = state.user?.role === "employee";

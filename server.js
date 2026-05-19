@@ -4892,6 +4892,32 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   res.json({ ok: true });
 });
 
+app.post("/api/admin/sales/kg/reassign-brand", auth, allowRoles("owner"), async (req, res) => {
+  const idNum = Number(req.body?.id);
+  const toBrand = req.body?.brand;
+  if (!Number.isFinite(idNum) || idNum < 1) {
+    return res.status(400).json({ error: "Valid sale id is required." });
+  }
+  if (!toBrand || !String(toBrand).trim()) {
+    return res.status(400).json({ error: "Target brand is required." });
+  }
+  try {
+    await run("BEGIN TRANSACTION");
+    const result = await reassignSalesKgRowBrand(idNum, toBrand, {
+      feedType: req.body?.feed_type,
+    });
+    await run("COMMIT");
+    res.json(result);
+  } catch (err) {
+    try {
+      await run("ROLLBACK");
+    } catch (_e) {
+      // ignore
+    }
+    return res.status(400).json({ error: err.message || "Could not reassign brand." });
+  }
+});
+
 app.delete("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const current = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(req.params.id)]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
@@ -5720,7 +5746,211 @@ async function stopServer() {
   httpServer = null;
 }
 
-module.exports = { startServer, stopServer, runWipeAllSalesDataCli, runDeleteFeedBagSaleCli };
+/**
+ * Change brand (and canonical feed type) on one Sales Per Kg row; adjusts Feed Inventory like PUT with a brand change.
+ */
+async function reassignSalesKgRowBrand(idNum, newBrandRaw, options = {}) {
+  const current = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(idNum)]);
+  if (!current) {
+    throw new Error(`No kg sale found with id ${idNum}.`);
+  }
+  const brandKey = resolveBrandKey(newBrandRaw);
+  const items = feedCatalog[brandKey];
+  const newFeedType =
+    options.feedType != null && String(options.feedType).trim() !== ""
+      ? feedCatalogTypeValue(brandKey, options.feedType)
+      : feedCatalogTypeValue(brandKey, current.feed_type);
+  if (!items || !items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(newFeedType))) {
+    throw new Error(`Invalid brand/feed type for ${brandKey}: ${newFeedType}`);
+  }
+  const catalogBagSize = catalogBagSizeForFeed(brandKey, newFeedType);
+  const currentBrandKey = resolveBrandKey(current.brand);
+  const currentBagSize = catalogBagSizeForFeed(currentBrandKey, current.feed_type);
+  if (
+    currentBrandKey === brandKey &&
+    normalizeFeedType(current.feed_type) === normalizeFeedType(newFeedType)
+  ) {
+    return { ok: true, unchanged: true, row: current };
+  }
+
+  const isThrough = normalizeThroughParty(current.through_party) != null;
+  const weightMap = await getRetailWeightKgByKeyMap();
+  const dateCanon = normalizeInventoryDate(current.date) || String(current.date || "").trim();
+  const kgSold = Number(current.kg_sold);
+  const pricePerKg = Number(current.price_per_kg);
+  const bagOpened = Math.max(0, Math.floor(Number(current.bag_opened ?? 0)));
+  const totalAmount = kgSold * pricePerKg;
+  const effBagSizeNew = effectiveKgPerOpenedBagForDisplay(weightMap, brandKey, newFeedType);
+
+  const rfNew = await getRetailFeedLine(brandKey, newFeedType);
+  const newRetailSnap = rfNew ? Number(rf.profit_margin_per_kg) || 0 : null;
+  if (current.retail_margin_per_kg != null && Number(current.retail_margin_per_kg) !== 0) {
+    await adjustRetailAccumulatedProfit(
+      currentBrandKey,
+      current.feed_type,
+      -Number(current.kg_sold) * Number(current.retail_margin_per_kg)
+    );
+  }
+  if (newRetailSnap != null) {
+    await adjustRetailAccumulatedProfit(brandKey, newFeedType, kgSold * newRetailSnap);
+  }
+
+  const productKeys = [
+    { brandKey: currentBrandKey, feedType: current.feed_type, catalogBagSize: currentBagSize },
+    { brandKey, feedType: newFeedType, catalogBagSize },
+  ];
+
+  const rowsAfterNewSim = (await getSalesKgRowsForProduct(brandKey, newFeedType))
+    .filter((r) => Number(r.id) !== Number(idNum))
+    .concat([
+      {
+        ...current,
+        id: Number(idNum),
+        date: dateCanon,
+        brand: brandKey,
+        feed_type: newFeedType,
+        kg_sold: kgSold,
+        bag_opened: bagOpened,
+      },
+    ]);
+  const putMetrics = enrichSalesKgPoolMetrics(
+    sortSalesKgRowsChronological(rowsAfterNewSim),
+    effBagSizeNew
+  );
+  const incrementalStored = putMetrics.get(Number(idNum))?.bags_sold_row_delta ?? Number(current.bags_sold || 0);
+
+  for (const prod of productKeys) {
+    const rowsBefore = await getSalesKgRowsForProduct(prod.brandKey, prod.feedType);
+    const before = totalBagsCompletedFromKgSalesChronological(rowsBefore, weightMap);
+    let rowsAfter;
+    if (
+      prod.brandKey === currentBrandKey &&
+      normalizeFeedType(prod.feedType) === normalizeFeedType(current.feed_type)
+    ) {
+      rowsAfter = rowsBefore.filter((r) => Number(r.id) !== Number(idNum));
+    } else if (
+      prod.brandKey === brandKey &&
+      normalizeFeedType(prod.feedType) === normalizeFeedType(newFeedType)
+    ) {
+      rowsAfter = rowsAfterNewSim;
+    } else {
+      continue;
+    }
+    const after = totalBagsCompletedFromKgSalesChronological(rowsAfter, weightMap);
+    const invDelta = after - before;
+    if (invDelta === 0) continue;
+    await adjustInventoryBags({
+      brand: prod.brandKey,
+      feedType: prod.feedType,
+      bagSize: prod.catalogBagSize,
+      deltaBags: -invDelta,
+      recordProfit: !isThrough,
+    });
+  }
+
+  const nowIso = new Date().toISOString();
+  await run(
+    `UPDATE sales_kg SET brand=?, feed_type=?, bags_sold=?, total_amount=?, retail_margin_per_kg=?, updated_at=? WHERE id=?`,
+    [brandKey, newFeedType, incrementalStored, totalAmount, newRetailSnap, nowIso, Number(idNum)]
+  );
+  const updated = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(idNum)]);
+  return {
+    ok: true,
+    id: Number(idNum),
+    from: { brand: current.brand, feed_type: current.feed_type },
+    to: { brand: brandKey, feed_type: newFeedType },
+    row: updated,
+  };
+}
+
+async function findSalesKgRowsMatchingCriteria({ dateStr, brand, feedType, createdBy }) {
+  const day = normalizeInventoryDate(dateStr);
+  if (!day) {
+    throw new Error(`Invalid date "${dateStr}". Use DD/MM/YYYY.`);
+  }
+  const rows = await all("SELECT * FROM sales_kg ORDER BY id DESC");
+  return rows.filter((r) => {
+    if (normalizeInventoryDate(r.date) !== day) return false;
+    if (brand && normalizeBrand(r.brand) !== normalizeBrand(brand)) return false;
+    if (feedType && normalizeFeedType(r.feed_type) !== normalizeFeedType(feedType)) return false;
+    if (createdBy && String(r.created_by || "").trim() !== String(createdBy).trim()) return false;
+    return true;
+  });
+}
+
+async function runReassignSalesKgBrandCli() {
+  await ensureTenantInitialized("amana");
+  const dryRun = argvHasFlag("--dry-run");
+  const idRaw = argvFlagValue("--id");
+  const toBrand = argvFlagValue("--to-brand");
+  if (!toBrand) {
+    throw new Error(
+      'Usage: node scripts/reassign-sales-kg-brand.js --id <n> --to-brand "Isinya Feeds" [--dry-run]\n' +
+        '   or: node scripts/reassign-sales-kg-brand.js --date DD/MM/YYYY --from-brand Sigma --feed Starter --to-brand "Isinya Feeds" [--created-by user] [--dry-run]'
+    );
+  }
+
+  let matches = [];
+  if (idRaw != null) {
+    const idNum = Number(idRaw);
+    if (!Number.isFinite(idNum) || idNum < 1) throw new Error("Invalid --id.");
+    const row = await get("SELECT * FROM sales_kg WHERE id = ?", [idNum]);
+    if (!row) throw new Error(`No kg sale found with id ${idNum}.`);
+    matches = [row];
+  } else {
+    const dateStr = argvFlagValue("--date");
+    const fromBrand = argvFlagValue("--from-brand");
+    const feedType = argvFlagValue("--feed");
+    const createdBy = argvFlagValue("--created-by");
+    if (!dateStr || !fromBrand) {
+      throw new Error("Provide --date and --from-brand, or use --id.");
+    }
+    matches = await findSalesKgRowsMatchingCriteria({ dateStr, brand: fromBrand, feedType, createdBy });
+  }
+
+  if (!matches.length) {
+    throw new Error("No matching Sales Per Kg rows.");
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Multiple rows match (${matches.length}). Use --id or narrow with --feed / --created-by.\n` +
+        matches.map((r) => `  id=${r.id}  ${r.date}  ${r.brand}  ${r.feed_type}  kg=${r.kg_sold}  by=${r.created_by}`).join("\n")
+    );
+  }
+
+  const row = matches[0];
+  if (dryRun) {
+    return {
+      dryRun: true,
+      wouldReassign: { id: row.id, from: row.brand, feed_type: row.feed_type, toBrand: resolveBrandKey(toBrand) },
+    };
+  }
+
+  await run("BEGIN TRANSACTION");
+  try {
+    const result = await reassignSalesKgRowBrand(row.id, toBrand, {
+      feedType: argvFlagValue("--to-feed") || undefined,
+    });
+    await run("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      await run("ROLLBACK");
+    } catch (_e) {
+      // ignore
+    }
+    throw err;
+  }
+}
+
+module.exports = {
+  startServer,
+  stopServer,
+  runWipeAllSalesDataCli,
+  runDeleteFeedBagSaleCli,
+  runReassignSalesKgBrandCli,
+  reassignSalesKgRowBrand,
+};
 
 if (require.main === module) {
   startServer().catch((error) => {

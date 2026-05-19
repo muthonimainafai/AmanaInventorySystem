@@ -7,6 +7,7 @@
     "start": "node server.js",
     "wipe-sales": "node scripts/wipe-all-sales.js",
     "delete-bag-sale": "node scripts/delete-feed-bag-sale.js",
+    "reassign-kg-brand": "node scripts/reassign-sales-kg-brand.js",
     "desktop": "electron .",
     "desktop:remote": "set AMANA_SERVER_URL=http://localhost:3000&& electron .",
     "dist": "electron-builder --win nsis"
