@@ -1923,10 +1923,14 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
   const ftWant = feedTypeCatalogValue(bk, feedType);
   const bagSize = skEffectiveKgPerOpenedBagForSkRow(brand, feedType);
   if (!bagSize || bagSize <= 0) return 0;
+  const staffUser =
+    state.editSalesKgId != null
+      ? String(state.salesKg.find((r) => String(r.id) === String(state.editSalesKgId))?.created_by ?? "").trim()
+      : String(state.user?.username ?? "").trim();
   const filtered = [];
   for (const r of state.salesKg || []) {
-    if (resolveBrandKey(r.brand) !== bk) continue;
-    if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
+    if (feedTypeCatalogValue(resolveBrandKey(r.brand), r.feed_type) !== ftWant) continue;
+    if (staffUser && String(r.created_by ?? "").trim() !== staffUser) continue;
     const rd = parseDMYParts(r.date);
     if (!rd) continue;
     if (compareDMYParts(rd, sel) >= 0) continue;
@@ -1941,8 +1945,9 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
   });
   let pool = 0;
   for (const r of filtered) {
-    const explicitOpens = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
-    pool += explicitOpens * bagSize;
+    let bagOpenedStep = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
+    if (pool > 1e-6 && bagOpenedStep > 0) bagOpenedStep = 0;
+    pool += bagOpenedStep * bagSize;
     const sold = Number(r.kg_sold || 0);
     if (sold > pool) {
       const autoOpen = Math.ceil((sold - pool) / bagSize);
