@@ -1373,6 +1373,94 @@ function sortSalesKgRowsChronological(rows) {
   });
 }
 
+/** Kg sold from the currently open bag after a pool step (0 once a full bag is used up). */
+function kgSoldInCurrentBagFromPool(pool, bagSize) {
+  if (pool <= 1e-6) return 0;
+  const mod = pool % bagSize;
+  const remaining = mod === 0 ? bagSize : mod;
+  return bagSize - remaining;
+}
+
+/**
+ * One Sales Per Kg line: apply bag_opened, auto-open when kg sold exceeds pool, subtract sold kg.
+ */
+function applySalesKgPoolStep(pool, bagSize, bagOpened, kgSold) {
+  let p = Number(pool) || 0;
+  let bagsAdded = 0;
+  const explicitOpens = Math.max(0, Math.floor(Number(bagOpened || 0)));
+  p += explicitOpens * bagSize;
+  bagsAdded += explicitOpens;
+  const sold = Number(kgSold || 0);
+  let autoOpens = 0;
+  if (sold > p) {
+    autoOpens = Math.ceil((sold - p) / bagSize);
+    p += autoOpens * bagSize;
+    bagsAdded += autoOpens;
+  }
+  p -= sold;
+  if (p < 0) p = 0;
+  return {
+    pool: p,
+    bagsAdded,
+    autoOpens,
+    explicitOpens,
+    kgInCurrentBag: kgSoldInCurrentBagFromPool(p, bagSize),
+  };
+}
+
+/** Pool (kg remaining) immediately before a row in chronological order. */
+function poolBeforeSalesKgRow(sortedRows, rowId, bagSize) {
+  let pool = 0;
+  for (const r of sortedRows) {
+    if (Number(r.id) === Number(rowId)) return pool;
+    pool = applySalesKgPoolStep(pool, bagSize, r.bag_opened, r.kg_sold).pool;
+  }
+  return pool;
+}
+
+/** bag_opened count needed on this row so kg_sold fits (includes auto-opens when kg exceeds pool). */
+function requiredBagOpenedOnRow(poolBefore, bagSize, kgSold) {
+  const sold = Number(kgSold || 0);
+  if (sold <= poolBefore + 1e-6) return 0;
+  return Math.ceil((sold - poolBefore) / bagSize);
+}
+
+/**
+ * Per-row Sales Per Kg display metrics from chronological pool walk (all staff on product).
+ */
+function enrichSalesKgPoolMetrics(sortedRows, bagSize) {
+  const byId = new Map();
+  const bagsCompletedByDay = new Map();
+  let pool = 0;
+  let bagsConsumedTotal = 0;
+  for (const r of sortedRows) {
+    const poolBefore = pool;
+    const step = applySalesKgPoolStep(pool, bagSize, r.bag_opened, r.kg_sold);
+    pool = step.pool;
+    bagsConsumedTotal += step.bagsAdded;
+    const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
+    bagsCompletedByDay.set(d, bagsConsumedTotal);
+    const sold = Number(r.kg_sold || 0);
+    const bagOpenedDisplay =
+      step.explicitOpens > 0 || step.autoOpens > 0 || (sold > 0 && poolBefore <= 1e-6) ? 1 : 0;
+    byId.set(Number(r.id), {
+      total_kgs_remaining: pool,
+      accumulated_kg_sold: step.kgInCurrentBag,
+      bags_sold_cumulative: bagsConsumedTotal,
+      bag_opened_display: bagOpenedDisplay,
+      bags_sold_row_delta: step.bagsAdded,
+    });
+  }
+  for (const [id, meta] of byId) {
+    const row = sortedRows.find((r) => Number(r.id) === id);
+    if (row) {
+      const d = normalizeInventoryDate(row.date) || String(row.date || "").trim();
+      meta.bags_sold_cumulative = bagsCompletedByDay.get(d) ?? meta.bags_sold_cumulative;
+    }
+  }
+  return byId;
+}
+
 /**
  * Bags taken from Feed Inventory for kg sales: explicit bag_opened plus auto-opens when
  * kg sold exceeds the remaining pool (same rules as Sales Per Kg carryover / Total Kgs).
@@ -1386,17 +1474,9 @@ function totalBagsConsumedFromKgSalesChronological(productRows, weightMap) {
   let pool = 0;
   let bagsFromInventory = 0;
   for (const r of sorted) {
-    const explicitOpens = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
-    pool += explicitOpens * bagSize;
-    bagsFromInventory += explicitOpens;
-    const sold = Number(r.kg_sold || 0);
-    if (sold > pool) {
-      const autoOpen = Math.ceil((sold - pool) / bagSize);
-      pool += autoOpen * bagSize;
-      bagsFromInventory += autoOpen;
-    }
-    pool -= sold;
-    if (pool < 0) pool = 0;
+    const step = applySalesKgPoolStep(pool, bagSize, r.bag_opened, r.kg_sold);
+    pool = step.pool;
+    bagsFromInventory += step.bagsAdded;
   }
   return bagsFromInventory;
 }
@@ -1477,13 +1557,7 @@ function remainingKgCarryoverBeforeSaleDateWithMap(dateCanonNorm, brandKey, rawF
   });
   let pool = 0;
   for (const r of filtered) {
-    const sold = Number(r.kg_sold || 0);
-    if (sold > pool) {
-      const autoOpen = Math.ceil((sold - pool) / bagSize);
-      pool += autoOpen * bagSize;
-    }
-    pool -= sold;
-    if (pool < 0) pool = 0;
+    pool = applySalesKgPoolStep(pool, bagSize, r.bag_opened, r.kg_sold).pool;
   }
   return pool;
 }
@@ -1504,35 +1578,6 @@ async function sumBagOpenedTodayForProduct(brandKey, rawFeedType, dateCanonNorm,
 
 function enrichSalesKgRowsWithCumulative(rows, weightMap) {
   const wm = weightMap || new Map();
-
-  /** Per staff + product: running sum of each row's `kg_sold` (daily line total), ordered by calendar date then id. */
-  const idToAccumulatedKgSold = new Map();
-  const byCreatorProduct = new Map();
-  for (const r of rows) {
-    const bk = resolveBrandKey(r.brand);
-    const creator = String(r.created_by ?? "").trim();
-    const key = `${bk}|${normalizeFeedType(r.feed_type)}|${creator}`;
-    if (!byCreatorProduct.has(key)) byCreatorProduct.set(key, []);
-    byCreatorProduct.get(key).push(r);
-  }
-  for (const [, groupRows] of byCreatorProduct) {
-    const sorted = [...groupRows].sort((a, b) => {
-      const da = parseSaleDateDMY(String(a.date || "").trim());
-      const db = parseSaleDateDMY(String(b.date || "").trim());
-      if (da && db) {
-        const c = compareCalendarDates(da, db);
-        if (c !== 0) return c;
-      } else if (da && !db) return -1;
-      else if (!da && db) return 1;
-      return Number(a.id) - Number(b.id);
-    });
-    let accKg = 0;
-    for (const r of sorted) {
-      accKg += Number(r.kg_sold || 0);
-      idToAccumulatedKgSold.set(Number(r.id), accKg);
-    }
-  }
-
   const byProduct = new Map();
   for (const r of rows) {
     const bk = resolveBrandKey(r.brand);
@@ -1544,49 +1589,12 @@ function enrichSalesKgRowsWithCumulative(rows, weightMap) {
   const idToExtra = new Map();
 
   for (const [, productRows] of byProduct) {
-    const sortedChrono = [...productRows].sort((a, b) => {
-      const da = parseSaleDateDMY(String(a.date || "").trim());
-      const db = parseSaleDateDMY(String(b.date || "").trim());
-      if (da && db) {
-        const c = compareCalendarDates(da, db);
-        if (c !== 0) return c;
-      } else if (da && !db) return -1;
-      else if (!da && db) return 1;
-      return Number(a.id) - Number(b.id);
-    });
-
+    const sortedChrono = sortSalesKgRowsChronological(productRows);
     const bk0 = resolveBrandKey(sortedChrono[0].brand);
     const bagSize = effectiveKgPerOpenedBagForDisplay(wm, bk0, sortedChrono[0].feed_type);
-
-    const byDay = new Map();
-    for (const r of productRows) {
-      const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
-      if (!byDay.has(d)) byDay.set(d, []);
-      byDay.get(d).push(r);
-    }
-
-    let pool = 0;
-    for (const r of sortedChrono) {
-      const sold = Number(r.kg_sold || 0);
-      if (sold > pool) {
-        const autoOpen = Math.ceil((sold - pool) / bagSize);
-        pool += autoOpen * bagSize;
-      }
-      pool -= sold;
-      if (pool < 0) pool = 0;
-
-      const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
-      const dayRows = [...(byDay.get(d) || [])].sort((a, b) => Number(a.id) - Number(b.id));
-      const totalKgForDay = dayRows.reduce((s, row) => s + Number(row.kg_sold || 0), 0);
-      const bagsSoldCumGroup = bagsFromTotalKg(totalKgForDay, bagSize);
-      const totalBagsOpenedSumDay = dayRows.reduce((s, row) => s + Number(row.bag_opened || 0), 0);
-      const bagOpenedDisplay = totalBagsOpenedSumDay >= 1 ? 1 : 0;
-
-      idToExtra.set(Number(r.id), {
-        bags_sold_cumulative: bagsSoldCumGroup,
-        bag_opened_display: bagOpenedDisplay,
-        total_kgs_remaining: pool,
-      });
+    const metrics = enrichSalesKgPoolMetrics(sortedChrono, bagSize);
+    for (const [id, meta] of metrics) {
+      idToExtra.set(id, meta);
     }
   }
 
@@ -1595,10 +1603,9 @@ function enrichSalesKgRowsWithCumulative(rows, weightMap) {
       bags_sold_cumulative: 0,
       bag_opened_display: 0,
       total_kgs_remaining: 0,
+      accumulated_kg_sold: 0,
     };
-    const accumulatedKg =
-      idToAccumulatedKgSold.get(Number(r.id)) ?? Number(r.kg_sold || 0);
-    return { ...r, ...extra, accumulated_kg_sold: accumulatedKg };
+    return { ...r, ...extra };
   });
 }
 
@@ -4242,12 +4249,17 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
        ORDER BY sk.id DESC`
     );
     const detailEnriched = enrichSalesKgRowsWithCumulative(detailRows, weightMap);
-    /** Per calendar day × product: sum of each employee row's accumulated kg sold (matches Sales Per Kg “Accumulated kg sold”). */
+    /** Per calendar day × product: sum of each employee row's daily kg_sold line totals. */
     const employeeAccumSumByDayProduct = new Map();
+    const bagsSoldFromKgByDayProduct = new Map();
     for (const dRow of detailEnriched) {
-      if (String(dRow.user_role || "").trim().toLowerCase() !== "employee") continue;
       const ek = keyForDayProduct(dRow.date, dRow.brand, dRow.feed_type);
-      const add = Number(dRow.accumulated_kg_sold) || 0;
+      const bagsCum = Number(dRow.bags_sold_cumulative) || 0;
+      if (bagsCum > (bagsSoldFromKgByDayProduct.get(ek) || 0)) {
+        bagsSoldFromKgByDayProduct.set(ek, bagsCum);
+      }
+      if (String(dRow.user_role || "").trim().toLowerCase() !== "employee") continue;
+      const add = Number(dRow.kg_sold) || 0;
       employeeAccumSumByDayProduct.set(ek, (employeeAccumSumByDayProduct.get(ek) || 0) + add);
     }
     const remainingByDayProduct = new Map();
@@ -4279,7 +4291,7 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
         employee_kg_sold: Number(employeeAccumSumByDayProduct.get(key)) || 0,
         // Display as a simple flag: once any bag is open for that day/product, show 1.
         bags_opened: hadOpenedBag ? 1 : 0,
-        bags_sold_from_kg: bagsFromTotalKg(totalKg, bagSize),
+        bags_sold_from_kg: bagsSoldFromKgByDayProduct.get(key) ?? bagsFromTotalKg(totalKg, bagSize),
       };
     });
     res.json(enriched);
@@ -4465,16 +4477,24 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
       if (carriedBefore > 1e-6 && baseBagOpened > 0) baseBagOpened = 0;
 
       const newKgSold = Number(existing.kg_sold) + addKg;
-      const newBagOpened = baseBagOpened + incrementBag;
-      const others = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, existing.id);
-      const newCum = others + newKgSold;
+      let newBagOpened = baseBagOpened + incrementBag;
+      const effBagSzMerge = effectiveKgPerOpenedBagForDisplay(wmCoerce, brandKey, p.feed_type);
       const productRowsBefore = await getSalesKgRowsForProduct(brandKey, p.feed_type);
-      const consumedBefore = totalBagsConsumedFromKgSalesChronological(productRowsBefore, weightMapForKg);
+      const sortedBeforeMerge = sortSalesKgRowsChronological(productRowsBefore);
+      const poolBeforeMergeRow = poolBeforeSalesKgRow(sortedBeforeMerge, existing.id, effBagSzMerge);
+      const minOpensMerge = requiredBagOpenedOnRow(poolBeforeMergeRow, effBagSzMerge, newKgSold);
+      newBagOpened = Math.max(newBagOpened, minOpensMerge);
       const productRowsAfter = productRowsBefore.map((r) =>
         Number(r.id) === Number(existing.id)
           ? { ...r, kg_sold: newKgSold, bag_opened: newBagOpened }
           : r
       );
+      const mergeMetrics = enrichSalesKgPoolMetrics(
+        sortSalesKgRowsChronological(productRowsAfter),
+        effBagSzMerge
+      );
+      const rowMetrics = mergeMetrics.get(Number(existing.id));
+      const consumedBefore = totalBagsConsumedFromKgSalesChronological(productRowsBefore, weightMapForKg);
       const consumedAfter = totalBagsConsumedFromKgSalesChronological(productRowsAfter, weightMapForKg);
       const invDelta = consumedAfter - consumedBefore;
       if (invDelta !== 0) {
@@ -4500,8 +4520,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
       if (retailMarginSnap != null && Number(retailMarginSnap) !== 0) {
         await adjustRetailAccumulatedProfit(brandKey, p.feed_type, addKg * retailMarginSnap);
       }
-      const bagsSoldCol =
-        bagsFromTotalKg(newCum, effBagSizeKg) - bagsFromTotalKg(others, effBagSizeKg);
+      const bagsSoldCol = rowMetrics?.bags_sold_row_delta ?? 0;
       const totalAmount = newKgSold * Number(existing.price_per_kg);
       await run(
         `UPDATE sales_kg SET bags_sold=?, kg_sold=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, through_party=?, updated_at=? WHERE id=?`,
@@ -4529,11 +4548,20 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     }
   }
 
-  const totalAmount = kgSold * pricePerKg;
-  const prevKg = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
-  const incrementalBags =
-    bagsFromTotalKg(prevKg + kgSold, effBagSizeKg) - bagsFromTotalKg(prevKg, effBagSizeKg);
   const productRowsBeforeInsert = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+  let poolBeforeInsert = 0;
+  for (const r of sortSalesKgRowsChronological(productRowsBeforeInsert)) {
+    poolBeforeInsert = applySalesKgPoolStep(
+      poolBeforeInsert,
+      effBagSizeKg,
+      r.bag_opened,
+      r.kg_sold
+    ).pool;
+  }
+  const minOpensInsert = requiredBagOpenedOnRow(poolBeforeInsert, effBagSizeKg, kgSold);
+  insertBagOpened = Math.max(insertBagOpened, minOpensInsert);
+
+  const totalAmount = kgSold * pricePerKg;
   const consumedBeforeInsert = totalBagsConsumedFromKgSalesChronological(
     productRowsBeforeInsert,
     weightMapForKg
@@ -4546,6 +4574,9 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     kg_sold: kgSold,
     bag_opened: insertBagOpened,
   };
+  const insertSorted = sortSalesKgRowsChronological([...productRowsBeforeInsert, simulatedInsertRow]);
+  const insertMetrics = enrichSalesKgPoolMetrics(insertSorted, effBagSizeKg);
+  const incrementalBags = insertMetrics.get(Number.MAX_SAFE_INTEGER)?.bags_sold_row_delta ?? 0;
   const consumedAfterInsert = totalBagsConsumedFromKgSalesChronological(
     [...productRowsBeforeInsert, simulatedInsertRow],
     weightMapForKg
@@ -4665,9 +4696,35 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
     await adjustRetailAccumulatedProfit(brandKey, p.feed_type, kgSold * newRetailSnap);
   }
 
-  const othersAfter = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
-  const incrementalStored =
-    bagsFromTotalKg(othersAfter + kgSold, effBagSizePut) - bagsFromTotalKg(othersAfter, effBagSizePut);
+  if (sameItem) {
+    const rowsPut = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+    const sortedPut = sortSalesKgRowsChronological(rowsPut);
+    const poolBeforePut = poolBeforeSalesKgRow(sortedPut, idNum, effBagSizePut);
+    effectiveBagOpenedPut = Math.max(
+      effectiveBagOpenedPut,
+      requiredBagOpenedOnRow(poolBeforePut, effBagSizePut, kgSold)
+    );
+  }
+
+  const rowsForPutMetrics = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+  const rowsAfterPutSim = rowsForPutMetrics
+    .filter((r) => Number(r.id) !== idNum)
+    .concat([
+      {
+        ...(rowsForPutMetrics.find((r) => Number(r.id) === idNum) || {}),
+        id: idNum,
+        date: dateCanon,
+        brand: brandKey,
+        feed_type: p.feed_type,
+        kg_sold: kgSold,
+        bag_opened: effectiveBagOpenedPut,
+      },
+    ]);
+  const putMetrics = enrichSalesKgPoolMetrics(
+    sortSalesKgRowsChronological(rowsAfterPutSim),
+    effBagSizePut
+  );
+  const incrementalStored = putMetrics.get(idNum)?.bags_sold_row_delta ?? 0;
 
   try {
     for (const prod of productKeysForPut) {

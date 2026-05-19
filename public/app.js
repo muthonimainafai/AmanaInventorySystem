@@ -1941,6 +1941,8 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
   });
   let pool = 0;
   for (const r of filtered) {
+    const explicitOpens = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
+    pool += explicitOpens * bagSize;
     const sold = Number(r.kg_sold || 0);
     if (sold > pool) {
       const autoOpen = Math.ceil((sold - pool) / bagSize);
@@ -2641,7 +2643,7 @@ function renderSalesKgTable() {
         <td title="1 once at least one bag is opened for this product on this date.">${bagOpenedCell}</td>
         <td title="Kg left after this sale: running pool across calendar days (bag opens add kg per bag; kg sold subtracts per row).">${rem}</td>
         <td title="Full bags represented by total kg sold this day for this product (bag size from catalog).">${bagsFromKg}</td>
-        <td title="Kg on this row for this day (after merges): ${Number(row.kg_sold ?? 0)}. Running total through this date for you and this product: ${Number(row.accumulated_kg_sold ?? row.kg_sold ?? 0)}.">${row.accumulated_kg_sold != null ? row.accumulated_kg_sold : row.kg_sold}</td>
+        <td title="Kg on this row for this day (after merges): ${Number(row.kg_sold ?? 0)}. Kg sold from the current open bag (resets to 0 when a full bag of ${skEffectiveKgPerOpenedBagForSkRow(row.brand, row.feed_type) || "—"} kg is used): ${Number(row.accumulated_kg_sold ?? 0)}.">${row.accumulated_kg_sold != null ? row.accumulated_kg_sold : "—"}</td>
         <td>${currency(row.price_per_kg)}</td>
         <td>${currency(saleLineTotalKg(row))}</td>
         <td>${viaCell}</td>
