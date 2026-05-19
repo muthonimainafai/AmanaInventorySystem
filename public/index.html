@@ -1288,7 +1288,7 @@
             <h3 class="card-title">Chicken price calculator</h3>
             <p class="field-hint">
               <strong>Price per chick</strong> is filled from <strong>Chicken Sales Inventory</strong> (owner selling price for the breed). Total = number of chicks × price per chick.
-              <strong>Download Proforma invoice</strong> exports this chicken line only (customer details and payment summary come from the form below the feed table).
+              <strong>Download Chicks Proforma Invoice</strong> exports this chicken line only (customer details and payment summary come from the form below the feed table).
             </p>
             <form id="calcChickenForm" class="calc-chicken-form">
               <div class="grid">
@@ -1326,7 +1326,7 @@
               </div>
               <div class="actions" style="margin-top: 0.5rem">
                 <button type="button" class="secondary" id="calcChClearBtn">Clear chicken calculator</button>
-                <button type="button" id="calcChDownloadProformaBtn">Download Proforma invoice</button>
+                <button type="button" id="calcChDownloadProformaBtn">Download Chicks Proforma Invoice</button>
               </div>
             </form>
           </div>
@@ -1385,7 +1385,7 @@
                 </label>
                 <label>
                   Invoice total (selling)
-                  <input type="text" id="calcSellingTotal" readonly tabindex="-1" title="Sum of bags × selling price — used on Proforma and Invoice PDFs only" />
+                  <input type="text" id="calcSellingTotal" readonly tabindex="-1" title="Feed (bags × selling price) plus chicken calculator total — used on Proforma and Invoice PDFs only" />
                 </label>
                 <label>
                   Paid amount
@@ -1397,7 +1397,7 @@
                 </label>
               </div>
               <p class="field-hint">
-                Purchase cost above uses <strong>buying</strong> prices. Invoice total, paid amount, and unpaid balance use <strong>selling</strong> prices and appear on Proforma / Invoice PDFs only.
+                Purchase cost above uses <strong>buying</strong> prices. Invoice total, paid amount, and unpaid balance use <strong>selling</strong> prices (feed table + chicken calculator when filled) and appear on Proforma / Invoice PDFs only.
                 Leave due date blank to use today on Proforma / Invoice.
               </p>
             </form>

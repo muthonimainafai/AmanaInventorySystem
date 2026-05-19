@@ -709,6 +709,7 @@ function updateCalcChickenTotalDisplay() {
   } else {
     calcChTotal.value = "";
   }
+  updateCalculatorInvoicePaymentSummary();
 }
 
 function initCalcChickenFormDefaults() {
@@ -812,8 +813,8 @@ function calculatorBuyingGrandTotal() {
   return total;
 }
 
-/** Sum of bags × selling price (invoice / proforma only). */
-function calculatorSellingGrandTotal() {
+/** Sum of bags × selling price (feed lines only). */
+function calculatorFeedSellingGrandTotal() {
   if (!calcBody) return 0;
   let total = 0;
   calcBody.querySelectorAll("tr").forEach((tr) => {
@@ -827,6 +828,30 @@ function calculatorSellingGrandTotal() {
     if (safeBags > 0) total += safeBags * safeSell;
   });
   return total;
+}
+
+/** Chicken calculator selling total (invoice / proforma). */
+function calcChickenSellingLineTotal() {
+  const ch = collectCalcChickenRowForPdfExport();
+  return ch ? ch.lineTotal : 0;
+}
+
+/** Feed selling + chicken calculator (invoice / proforma only). */
+function calculatorSellingGrandTotal() {
+  return calculatorFeedSellingGrandTotal() + calcChickenSellingLineTotal();
+}
+
+/** Add chicken line to invoice-style PDF table body when the form is complete. */
+function appendChickenRowToPdfTableBody(tableBody) {
+  const ch = collectCalcChickenRowForPdfExport();
+  if (!ch) return;
+  const desc = `${ch.breed} DAY-OLD CHICKS`.replace(/\s+/g, " ").trim().toUpperCase();
+  tableBody.push([
+    desc,
+    String(ch.qtyNum),
+    `Ksh${formatKshPlainNumber(ch.unitPrice)}`,
+    `Ksh${formatKshPlainNumber(ch.lineTotal)}`,
+  ]);
 }
 
 function updateCalculatorInvoicePaymentSummary() {
@@ -4706,11 +4731,12 @@ async function downloadCalculatorPdf(mode = "calculator") {
     return;
   }
   const exportRows = collectCalculatorRowsForPdfExport();
-  if (!exportRows.length) {
-    alert("Enter at least one calculator row with number of bags before downloading.");
+  const chickenRow = collectCalcChickenRowForPdfExport();
+  if (!exportRows.length && !chickenRow) {
+    alert("Enter at least one calculator row with number of bags and/or complete the chicken calculator before downloading.");
     return;
   }
-  if (mode === "calculator") {
+  if (mode === "calculator" && exportRows.length) {
     const badBuy = exportRows.find((r) => !Number.isFinite(r.buyingNum) || r.buyingNum < 0);
     if (badBuy) {
       alert("For the calculator PDF, enter a valid buying price on every line that has bags.");
@@ -4718,9 +4744,15 @@ async function downloadCalculatorPdf(mode = "calculator") {
     }
   }
   if (mode === "proforma" || mode === "invoice") {
-    const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
-    if (bad) {
-      alert(`For ${mode === "proforma" ? "a proforma invoice" : "an invoice"}, enter a valid selling price on every line that has bags.`);
+    if (exportRows.length) {
+      const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
+      if (bad) {
+        alert(`For ${mode === "proforma" ? "a proforma invoice" : "an invoice"}, enter a valid selling price on every line that has bags.`);
+        return;
+      }
+    }
+    if (chickenRow && (!Number.isFinite(chickenRow.unitPrice) || chickenRow.unitPrice < 0)) {
+      alert("For this PDF, ensure the chicken breed has a valid selling price in Chicken Sales Inventory.");
       return;
     }
   }
@@ -4751,10 +4783,11 @@ async function downloadCalculatorPdf(mode = "calculator") {
       };
     });
     const totalBags = filledRows.reduce((s, r) => s + (Number(r.bags) || 0), 0);
-    const grand = exportRows.reduce(
+    let grand = exportRows.reduce(
       (s, r) => s + r.bagsNum * Math.max(0, Number.isFinite(r.buyingNum) ? r.buyingNum : 0),
       0
     );
+    if (chickenRow) grand += chickenRow.lineTotal;
 
     const calcLogoTop = 18;
     const calcLogoH = logoMeta
@@ -4792,22 +4825,54 @@ async function downloadCalculatorPdf(mode = "calculator") {
       metaY += 14;
     }
 
-    const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Total (purchase cost)"]];
-    const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.total]);
+    let tableStartY = metaY + 10;
+    if (filledRows.length) {
+      const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Total (purchase cost)"]];
+      const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.total]);
+      autoTableFn.call(doc, {
+        head,
+        body,
+        startY: tableStartY,
+        styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
+      });
+      tableStartY = (doc.lastAutoTable?.finalY || tableStartY) + 20;
+    }
 
-    autoTableFn.call(doc, {
-      head,
-      body,
-      startY: metaY + 10,
-      styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
-      headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
-    });
+    if (chickenRow) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Chicken", 40, tableStartY);
+      const chHead = [["Breed", "Date", "Number of chicks", "Price per chick", "Total"]];
+      const chBody = [[
+        chickenRow.breed,
+        chickenRow.dateStr,
+        String(chickenRow.qtyNum),
+        currency(chickenRow.unitPrice),
+        currency(chickenRow.lineTotal),
+      ]];
+      autoTableFn.call(doc, {
+        head: chHead,
+        body: chBody,
+        startY: tableStartY + 8,
+        styles: { font: "helvetica", fontSize: 10, cellPadding: 4 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [20, 20, 20] },
+      });
+    }
 
     const finalY = doc.lastAutoTable?.finalY || 98;
+    let footY = finalY + 24;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text(`Total bags: ${totalBags}`, 40, finalY + 24);
-    doc.text(`Grand total (purchase cost): ${currency(grand)}`, 40, finalY + 42);
+    if (totalBags > 0) {
+      doc.text(`Total bags: ${totalBags}`, 40, footY);
+      footY += 18;
+    }
+    if (chickenRow) {
+      doc.text(`Total chicks: ${chickenRow.qtyNum}`, 40, footY);
+      footY += 18;
+    }
+    doc.text(`Grand total: ${currency(grand)}`, 40, footY);
     doc.save(`${safeBusiness}-calculator-${fileDate}.pdf`);
     return;
   }
@@ -4816,7 +4881,8 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const docSuffix = String(Math.floor(10000 + Math.random() * 90000));
   const docNo = isProforma ? `PF-${docSuffix}` : `INV-${docSuffix}`;
   const totalBags = exportRows.reduce((s, r) => s + r.bagsNum, 0);
-  const invoiceTotal = exportRows.reduce((s, r) => s + r.bagsNum * r.sellingNum, 0);
+  const feedInvoiceTotal = exportRows.reduce((s, r) => s + r.bagsNum * r.sellingNum, 0);
+  const invoiceTotal = feedInvoiceTotal + (chickenRow ? chickenRow.lineTotal : 0);
   const paidAmount = getCalcPaidAmountForPdf();
   const unpaidBalance = invoiceTotal - paidAmount;
 
@@ -4872,6 +4938,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
       .toUpperCase();
     return [desc, String(r.bagsNum), `Ksh${formatKshPlainNumber(rate)}`, `Ksh${formatKshPlainNumber(amount)}`];
   });
+  appendChickenRowToPdfTableBody(tableBody);
 
   autoTableFn.call(doc, {
     head: [[
@@ -4915,13 +4982,21 @@ async function downloadCalculatorPdf(mode = "calculator") {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(...G.dark);
-  doc.text(`TOTAL BAGS: ${totalBags}`, rightX, finalY + 22, { align: "right" });
+  let totalsY = finalY + 22;
+  if (totalBags > 0) {
+    doc.text(`TOTAL BAGS: ${totalBags}`, rightX, totalsY, { align: "right" });
+    totalsY += 16;
+  }
+  if (chickenRow) {
+    doc.text(`TOTAL CHICKS: ${chickenRow.qtyNum}`, rightX, totalsY, { align: "right" });
+    totalsY += 16;
+  }
   const summaryRows = [
     { label: "TOTAL AMOUNT", value: invoiceTotal, emphasize: true },
     { label: "PAID AMOUNT", value: paidAmount, emphasize: false },
     { label: "UNPAID BALANCE", value: unpaidBalance, emphasize: true },
   ];
-  let summaryY = finalY + 40;
+  let summaryY = totalsY + 14;
   summaryRows.forEach((row) => {
     doc.setFontSize(row.emphasize ? 11 : 10);
     doc.setTextColor(...G.dark);
