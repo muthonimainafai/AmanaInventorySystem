@@ -943,6 +943,42 @@ async function initDb() {
     await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["ufaray_stock_fix_v1", "1"]);
   }
 
+  const salesKgStockFixV2 = await get("SELECT value FROM app_meta WHERE key = ?", ["sales_kg_stock_fix_v2"]);
+  if (!salesKgStockFixV2 || salesKgStockFixV2.value !== "1") {
+    const wmFix = await getRetailWeightKgByKeyMap();
+    const allSkFix = await all("SELECT * FROM sales_kg");
+    const groupsFix = new Map();
+    for (const r of allSkFix) {
+      const bk = resolveBrandKey(r.brand);
+      const key = `${bk}|${normalizeFeedType(r.feed_type)}`;
+      if (!groupsFix.has(key)) groupsFix.set(key, []);
+      groupsFix.get(key).push(r);
+    }
+    for (const [, productRows] of groupsFix) {
+      if (!productRows.length) continue;
+      const bk = resolveBrandKey(productRows[0].brand);
+      const feedType = productRows[0].feed_type;
+      const catalogSize = catalogBagSizeForFeed(bk, feedType);
+      const expected = totalBagsConsumedFromKgSalesChronological(productRows, wmFix);
+      const legacy = totalBagsDeductedLegacyDailyFloor(productRows, catalogSize);
+      const missing = expected - legacy;
+      if (missing > 0) {
+        try {
+          await adjustInventoryBags({
+            brand: bk,
+            feedType,
+            bagSize: catalogSize,
+            deltaBags: -missing,
+            recordProfit: false,
+          });
+        } catch (_err) {
+          // skip if no matching inventory
+        }
+      }
+    }
+    await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["sales_kg_stock_fix_v2", "1"]);
+  }
+
   const dolaLayersRenamed = await get("SELECT value FROM app_meta WHERE key = ?", ["dola_layers_feed_types_v1"]);
   if (!dolaLayersRenamed || dolaLayersRenamed.value !== "1") {
     const dolaBrand = "Dola Feeds";
@@ -1322,6 +1358,74 @@ function effectiveKgPerOpenedBagForDisplay(weightMap, brandKey, feedType) {
   const catalog = catalogBagSizeForFeed(brandKey, feedType);
   if (w != null && w > 0) return w;
   return catalog;
+}
+
+function sortSalesKgRowsChronological(rows) {
+  return [...rows].sort((a, b) => {
+    const da = parseSaleDateDMY(String(a.date || "").trim());
+    const db = parseSaleDateDMY(String(b.date || "").trim());
+    if (da && db) {
+      const c = compareCalendarDates(da, db);
+      if (c !== 0) return c;
+    } else if (da && !db) return -1;
+    else if (!da && db) return 1;
+    return Number(a.id) - Number(b.id);
+  });
+}
+
+/**
+ * Bags taken from Feed Inventory for kg sales: explicit bag_opened plus auto-opens when
+ * kg sold exceeds the remaining pool (same rules as Sales Per Kg carryover / Total Kgs).
+ */
+function totalBagsConsumedFromKgSalesChronological(productRows, weightMap) {
+  if (!productRows.length) return 0;
+  const sorted = sortSalesKgRowsChronological(productRows);
+  const bk0 = resolveBrandKey(sorted[0].brand);
+  const bagSize = effectiveKgPerOpenedBagForDisplay(weightMap, bk0, sorted[0].feed_type);
+  if (!Number.isFinite(bagSize) || bagSize <= 0) return 0;
+  let pool = 0;
+  let bagsFromInventory = 0;
+  for (const r of sorted) {
+    const explicitOpens = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
+    pool += explicitOpens * bagSize;
+    bagsFromInventory += explicitOpens;
+    const sold = Number(r.kg_sold || 0);
+    if (sold > pool) {
+      const autoOpen = Math.ceil((sold - pool) / bagSize);
+      pool += autoOpen * bagSize;
+      bagsFromInventory += autoOpen;
+    }
+    pool -= sold;
+    if (pool < 0) pool = 0;
+  }
+  return bagsFromInventory;
+}
+
+/** Previous per-calendar-day floor logic (used only to backfill missed stock deductions). */
+function totalBagsDeductedLegacyDailyFloor(productRows, bagSize) {
+  const byDay = new Map();
+  for (const r of productRows) {
+    const d = normalizeInventoryDate(r.date) || String(r.date || "").trim();
+    byDay.set(d, (byDay.get(d) || 0) + Number(r.kg_sold || 0));
+  }
+  let total = 0;
+  for (const kg of byDay.values()) {
+    total += bagsFromTotalKg(kg, bagSize);
+  }
+  return total;
+}
+
+async function getSalesKgRowsForProduct(brandKey, rawFeedType) {
+  const bk = resolveBrandKey(brandKey);
+  const ftN = normalizeFeedType(rawFeedType);
+  const rows = await all("SELECT * FROM sales_kg WHERE brand = ?", [bk]);
+  return rows.filter((r) => normalizeFeedType(r.feed_type) === ftN);
+}
+
+async function countBagsConsumedForKgProduct(brandKey, rawFeedType) {
+  const wm = await getRetailWeightKgByKeyMap();
+  const rows = await getSalesKgRowsForProduct(brandKey, rawFeedType);
+  return totalBagsConsumedFromKgSalesChronological(rows, wm);
 }
 
 /** Sum of kg_sold for the same calendar line (date + brand + feed), optionally excluding one row. */
@@ -4318,13 +4422,15 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
   if (!(await assertEmployeeFeedSalePrices(req, res, "kg", p))) return;
   const defaultBagSize = catalogBagSizeForFeed(brandKey, p.feed_type);
+  const isThrough = throughParty != null;
   const nowIso = new Date().toISOString();
+  const weightMapForKg = await getRetailWeightKgByKeyMap();
+  const effBagSizeKg = effectiveKgPerOpenedBagForDisplay(weightMapForKg, brandKey, p.feed_type);
 
   let allSkBrand = [];
-  let wmCoerce = new Map();
+  let wmCoerce = weightMapForKg;
   if (req.user.role === "employee") {
     allSkBrand = await all("SELECT * FROM sales_kg WHERE brand = ?", [brandKey]);
-    wmCoerce = await getRetailWeightKgByKeyMap();
   }
 
   /** Employees: kg_sold in the request is only this sale’s kg; merge into the same day’s row for this product. */
@@ -4361,18 +4467,28 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
       const newKgSold = Number(existing.kg_sold) + addKg;
       const newBagOpened = baseBagOpened + incrementBag;
       const others = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, existing.id);
-      const oldCum = others + Number(existing.kg_sold);
       const newCum = others + newKgSold;
-      const invDelta = bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(oldCum, defaultBagSize);
-      try {
-        await adjustInventoryBags({
-          brand: brandKey,
-          feedType: p.feed_type,
-          bagSize: defaultBagSize,
-          deltaBags: -invDelta,
-        });
-      } catch (error) {
-        return res.status(400).json({ error: error.message });
+      const productRowsBefore = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+      const consumedBefore = totalBagsConsumedFromKgSalesChronological(productRowsBefore, weightMapForKg);
+      const productRowsAfter = productRowsBefore.map((r) =>
+        Number(r.id) === Number(existing.id)
+          ? { ...r, kg_sold: newKgSold, bag_opened: newBagOpened }
+          : r
+      );
+      const consumedAfter = totalBagsConsumedFromKgSalesChronological(productRowsAfter, weightMapForKg);
+      const invDelta = consumedAfter - consumedBefore;
+      if (invDelta !== 0) {
+        try {
+          await adjustInventoryBags({
+            brand: brandKey,
+            feedType: p.feed_type,
+            bagSize: defaultBagSize,
+            deltaBags: -invDelta,
+            recordProfit: !isThrough,
+          });
+        } catch (error) {
+          return res.status(400).json({ error: error.message });
+        }
       }
       const rf = await getRetailFeedLine(brandKey, p.feed_type);
       const retailMarginSnap =
@@ -4385,7 +4501,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
         await adjustRetailAccumulatedProfit(brandKey, p.feed_type, addKg * retailMarginSnap);
       }
       const bagsSoldCol =
-        bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(others, defaultBagSize);
+        bagsFromTotalKg(newCum, effBagSizeKg) - bagsFromTotalKg(others, effBagSizeKg);
       const totalAmount = newKgSold * Number(existing.price_per_kg);
       await run(
         `UPDATE sales_kg SET bags_sold=?, kg_sold=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, through_party=?, updated_at=? WHERE id=?`,
@@ -4415,16 +4531,38 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
 
   const totalAmount = kgSold * pricePerKg;
   const prevKg = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
-  const incrementalBags = bagsFromTotalKg(prevKg + kgSold, defaultBagSize) - bagsFromTotalKg(prevKg, defaultBagSize);
-  try {
-    await adjustInventoryBags({
-      brand: brandKey,
-      feedType: p.feed_type,
-      bagSize: defaultBagSize,
-      deltaBags: -incrementalBags,
-    });
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
+  const incrementalBags =
+    bagsFromTotalKg(prevKg + kgSold, effBagSizeKg) - bagsFromTotalKg(prevKg, effBagSizeKg);
+  const productRowsBeforeInsert = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+  const consumedBeforeInsert = totalBagsConsumedFromKgSalesChronological(
+    productRowsBeforeInsert,
+    weightMapForKg
+  );
+  const simulatedInsertRow = {
+    id: Number.MAX_SAFE_INTEGER,
+    date: dateCanon,
+    brand: brandKey,
+    feed_type: p.feed_type,
+    kg_sold: kgSold,
+    bag_opened: insertBagOpened,
+  };
+  const consumedAfterInsert = totalBagsConsumedFromKgSalesChronological(
+    [...productRowsBeforeInsert, simulatedInsertRow],
+    weightMapForKg
+  );
+  const invDeltaInsert = consumedAfterInsert - consumedBeforeInsert;
+  if (invDeltaInsert !== 0) {
+    try {
+      await adjustInventoryBags({
+        brand: brandKey,
+        feedType: p.feed_type,
+        bagSize: defaultBagSize,
+        deltaBags: -invDeltaInsert,
+        recordProfit: !isThrough,
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
   }
   const rf = await getRetailFeedLine(brandKey, p.feed_type);
   let retailMarginSnap = null;
@@ -4476,8 +4614,11 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   const defaultBagSize = catalogBagSizeForFeed(brandKey, p.feed_type);
   const currentBrandKey = resolveBrandKey(current.brand);
   const currentBagSize = catalogBagSizeForFeed(currentBrandKey, current.feed_type);
+  const isThrough = throughParty != null;
   const idNum = Number(req.params.id);
   const dateCanonCurrent = normalizeInventoryDate(current.date) || String(current.date || "").trim();
+  const weightMapPut = await getRetailWeightKgByKeyMap();
+  const effBagSizePut = effectiveKgPerOpenedBagForDisplay(weightMapPut, brandKey, p.feed_type);
 
   let effectiveBagOpenedPut = bagOpened;
   if (req.user.role === "employee") {
@@ -4499,47 +4640,17 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
     }
   }
 
-  try {
-    const sameItem =
-      dateCanonCurrent === dateCanon &&
-      currentBrandKey === brandKey &&
-      normalizeFeedType(current.feed_type) === normalizeFeedType(p.feed_type);
+  const sameItem =
+    dateCanonCurrent === dateCanon &&
+    currentBrandKey === brandKey &&
+    normalizeFeedType(current.feed_type) === normalizeFeedType(p.feed_type);
 
-    if (sameItem) {
-      const others = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
-      const oldCum = others + Number(current.kg_sold);
-      const newCum = others + kgSold;
-      const invDelta = bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(oldCum, defaultBagSize);
-      await adjustInventoryBags({
-        brand: brandKey,
-        feedType: p.feed_type,
-        bagSize: defaultBagSize,
-        deltaBags: -invDelta,
-      });
-    } else {
-      const othersOld = await sumKgSoldForSalesKgLine(dateCanonCurrent, currentBrandKey, current.feed_type, idNum);
-      const oldCum = othersOld + Number(current.kg_sold);
-      const revertDelta = bagsFromTotalKg(oldCum, currentBagSize) - bagsFromTotalKg(othersOld, currentBagSize);
-      await adjustInventoryBags({
-        brand: current.brand,
-        feedType: current.feed_type,
-        bagSize: currentBagSize,
-        deltaBags: revertDelta,
-      });
-
-      const othersNew = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
-      const newCum = othersNew + kgSold;
-      const applyDelta = bagsFromTotalKg(newCum, defaultBagSize) - bagsFromTotalKg(othersNew, defaultBagSize);
-      await adjustInventoryBags({
-        brand: brandKey,
-        feedType: p.feed_type,
-        bagSize: defaultBagSize,
-        deltaBags: -applyDelta,
-      });
-    }
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
+  const productKeysForPut = sameItem
+    ? [{ brandKey, feedType: p.feed_type, catalogBagSize: defaultBagSize }]
+    : [
+        { brandKey: currentBrandKey, feedType: current.feed_type, catalogBagSize: currentBagSize },
+        { brandKey, feedType: p.feed_type, catalogBagSize: defaultBagSize },
+      ];
 
   const rfNew = await getRetailFeedLine(brandKey, p.feed_type);
   const newRetailSnap = rfNew ? Number(rfNew.profit_margin_per_kg) || 0 : null;
@@ -4556,7 +4667,66 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
 
   const othersAfter = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, idNum);
   const incrementalStored =
-    bagsFromTotalKg(othersAfter + kgSold, defaultBagSize) - bagsFromTotalKg(othersAfter, defaultBagSize);
+    bagsFromTotalKg(othersAfter + kgSold, effBagSizePut) - bagsFromTotalKg(othersAfter, effBagSizePut);
+
+  try {
+    for (const prod of productKeysForPut) {
+      const key = `${prod.brandKey}|${normalizeFeedType(prod.feedType)}`;
+      const rowsBefore = await getSalesKgRowsForProduct(prod.brandKey, prod.feedType);
+      const before = totalBagsConsumedFromKgSalesChronological(rowsBefore, weightMapPut);
+      let rowsAfter;
+      if (sameItem && prod.brandKey === brandKey && normalizeFeedType(prod.feedType) === normalizeFeedType(p.feed_type)) {
+        rowsAfter = rowsBefore.map((r) =>
+          Number(r.id) === idNum
+            ? {
+                ...r,
+                date: dateCanon,
+                brand: brandKey,
+                feed_type: p.feed_type,
+                kg_sold: kgSold,
+                bag_opened: effectiveBagOpenedPut,
+              }
+            : r
+        );
+      } else if (
+        !sameItem &&
+        prod.brandKey === currentBrandKey &&
+        normalizeFeedType(prod.feedType) === normalizeFeedType(current.feed_type)
+      ) {
+        rowsAfter = rowsBefore.filter((r) => Number(r.id) !== idNum);
+      } else if (
+        !sameItem &&
+        prod.brandKey === brandKey &&
+        normalizeFeedType(prod.feedType) === normalizeFeedType(p.feed_type)
+      ) {
+        rowsAfter = [
+          ...rowsBefore,
+          {
+            id: idNum,
+            date: dateCanon,
+            brand: brandKey,
+            feed_type: p.feed_type,
+            kg_sold: kgSold,
+            bag_opened: effectiveBagOpenedPut,
+          },
+        ];
+      } else {
+        continue;
+      }
+      const after = totalBagsConsumedFromKgSalesChronological(rowsAfter, weightMapPut);
+      const invDelta = after - before;
+      if (invDelta === 0) continue;
+      await adjustInventoryBags({
+        brand: prod.brandKey,
+        feedType: prod.feedType,
+        bagSize: prod.catalogBagSize,
+        deltaBags: -invDelta,
+        recordProfit: !isThrough,
+      });
+    }
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 
   await run(
     `UPDATE sales_kg SET date=?, brand=?, feed_type=?, bags_sold=?, kg_sold=?, price_per_kg=?, total_amount=?, bag_opened=?, retail_margin_per_kg=?, through_party=?, updated_at=? WHERE id=?`,
@@ -4589,17 +4759,24 @@ app.delete("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (re
   }
   const currentBrandKey = resolveBrandKey(current.brand);
   const defaultBagSize = catalogBagSizeForFeed(currentBrandKey, current.feed_type);
+  const isThroughDelete = normalizeThroughParty(current.through_party) != null;
   const idNum = Number(req.params.id);
   try {
-    const others = await sumKgSoldForSalesKgLine(current.date, currentBrandKey, current.feed_type, idNum);
-    const oldCum = others + Number(current.kg_sold);
-    const revertDelta = bagsFromTotalKg(oldCum, defaultBagSize) - bagsFromTotalKg(others, defaultBagSize);
-    await adjustInventoryBags({
-      brand: current.brand,
-      feedType: current.feed_type,
-      bagSize: defaultBagSize,
-      deltaBags: revertDelta,
-    });
+    const weightMapDel = await getRetailWeightKgByKeyMap();
+    const rowsBeforeDelete = await getSalesKgRowsForProduct(currentBrandKey, current.feed_type);
+    const beforeDelete = totalBagsConsumedFromKgSalesChronological(rowsBeforeDelete, weightMapDel);
+    const rowsAfterDelete = rowsBeforeDelete.filter((r) => Number(r.id) !== idNum);
+    const afterDelete = totalBagsConsumedFromKgSalesChronological(rowsAfterDelete, weightMapDel);
+    const invDeltaDelete = afterDelete - beforeDelete;
+    if (invDeltaDelete !== 0) {
+      await adjustInventoryBags({
+        brand: current.brand,
+        feedType: current.feed_type,
+        bagSize: defaultBagSize,
+        deltaBags: -invDeltaDelete,
+        recordProfit: !isThroughDelete,
+      });
+    }
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
@@ -4985,6 +5162,18 @@ async function reverseAndDeleteFeedSalesForCreator(creator) {
   }
 
   const skRowsToClear = await all("SELECT * FROM sales_kg WHERE created_by = ?", [creator]);
+  const kgProductsAffected = new Map();
+  for (const row of skRowsToClear) {
+    const brandKey = resolveBrandKey(row.brand);
+    const key = `${brandKey}|${normalizeFeedType(row.feed_type)}`;
+    if (!kgProductsAffected.has(key)) {
+      kgProductsAffected.set(key, { brandKey, feedType: row.feed_type });
+    }
+  }
+  const kgConsumedBeforeDelete = new Map();
+  for (const [key, prod] of kgProductsAffected) {
+    kgConsumedBeforeDelete.set(key, await countBagsConsumedForKgProduct(prod.brandKey, prod.feedType));
+  }
   for (const row of skRowsToClear) {
     if (row.retail_margin_per_kg != null && Number(row.retail_margin_per_kg) !== 0) {
       try {
@@ -4999,27 +5188,27 @@ async function reverseAndDeleteFeedSalesForCreator(creator) {
     }
   }
 
-  const skGroups = await all(
-    `SELECT brand, feed_type, SUM(kg_sold) AS total_kg
-     FROM sales_kg
-     WHERE created_by = ?
-     GROUP BY brand, feed_type`,
-    [creator]
-  );
-
-  for (const g of skGroups) {
-    const totalKg = Number(g.total_kg) || 0;
-    if (totalKg <= 0) continue;
-    const brandKey = resolveBrandKey(g.brand);
-    const bagSize = catalogBagSizeForFeed(brandKey, g.feed_type);
-    const sold = bagsFromTotalKg(totalKg, bagSize);
-    if (!sold) continue;
+  for (const [key, prod] of kgProductsAffected) {
+    const before = kgConsumedBeforeDelete.get(key) || 0;
+    const bagSize = catalogBagSizeForFeed(prod.brandKey, prod.feedType);
+    const creatorRows = skRowsToClear.filter(
+      (r) =>
+        resolveBrandKey(r.brand) === prod.brandKey &&
+        normalizeFeedType(r.feed_type) === normalizeFeedType(prod.feedType)
+    );
+    const allProductRows = await getSalesKgRowsForProduct(prod.brandKey, prod.feedType);
+    const remainingRows = allProductRows.filter((r) => !creatorRows.some((c) => Number(c.id) === Number(r.id)));
+    const wm = await getRetailWeightKgByKeyMap();
+    const after = totalBagsConsumedFromKgSalesChronological(remainingRows, wm);
+    const restore = before - after;
+    if (restore <= 0) continue;
     try {
       await adjustInventoryBags({
-        brand: brandKey,
-        feedType: g.feed_type,
+        brand: prod.brandKey,
+        feedType: prod.feedType,
         bagSize,
-        deltaBags: sold,
+        deltaBags: restore,
+        recordProfit: false,
       });
     } catch (_err) {
       // skip if no matching inventory
