@@ -230,17 +230,17 @@
 
               <label>
                 Buying Price (per bag)
-                <input type="number" id="buyingPrice" min="0" step="0.01" required />
+                <input type="text" id="buyingPrice" inputmode="decimal" autocomplete="off" required />
               </label>
 
               <label>
                 Selling Price (per bag)
-                <input type="number" id="sellingPrice" min="0" step="0.01" required />
+                <input type="text" id="sellingPrice" inputmode="decimal" autocomplete="off" required />
               </label>
 
               <label>
                 Profit Margin Per Bag
-                <input type="number" id="profitMarginPerBag" step="0.01" required readonly />
+                <input type="text" id="profitMarginPerBag" inputmode="decimal" required readonly />
               </label>
 
               <label>
@@ -851,7 +851,7 @@
                 </label>
                 <label>
                   Kg sold (this sale)
-                  <input type="number" id="skKgSold" min="0.01" step="0.01" required />
+                  <input type="text" id="skKgSold" inputmode="decimal" autocomplete="off" required />
                 </label>
                 <label>
                   Sale recorded for
@@ -862,7 +862,7 @@
                 </label>
                 <label>
                   Price per kg
-                  <input type="number" id="skPricePerKg" min="0" step="0.01" required />
+                  <input type="text" id="skPricePerKg" inputmode="decimal" autocomplete="off" required />
                 </label>
               </div>
               <p id="skOwnerWeightHint" class="field-hint hidden" style="margin-top: 0.5rem" role="status"></p>

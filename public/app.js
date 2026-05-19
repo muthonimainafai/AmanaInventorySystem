@@ -536,8 +536,59 @@ function currency(value) {
 
 /** Plain numeric string with grouping (no currency symbol) for invoice-style PDF columns. */
 function formatKshPlainNumber(value) {
-  const n = Number(value) || 0;
+  const n = roundMoney(value) || 0;
   return new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+/** Round to 2 decimal places (half-up) — avoids float drift like 4299.999999 → 4299.99 in inputs. */
+function roundMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return NaN;
+  return Math.round(n * 100) / 100;
+}
+
+/** Value for a money text input (from DB or calculation). */
+function formatMoneyForInput(value) {
+  const r = roundMoney(value);
+  if (!Number.isFinite(r)) return "";
+  return r.toFixed(2);
+}
+
+/** Parse money from a form field; empty string → NaN. */
+function parseMoneyFromInput(raw) {
+  const s = String(raw ?? "")
+    .trim()
+    .replace(/,/g, "");
+  if (s === "") return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? roundMoney(n) : NaN;
+}
+
+/** Optional blur: normalize display without changing the numeric value the user intended. */
+function normalizeMoneyInputOnBlur(el) {
+  if (!(el instanceof HTMLInputElement)) return;
+  const parsed = parseMoneyFromInput(el.value);
+  if (Number.isFinite(parsed)) el.value = formatMoneyForInput(parsed);
+}
+
+function wireMoneyInputBlur(el) {
+  if (!(el instanceof HTMLInputElement)) return;
+  el.addEventListener("blur", () => normalizeMoneyInputOnBlur(el));
+}
+
+/** Stop scroll-wheel from nudging focused number inputs by one step (e.g. 4300 → 4299.99). */
+function preventWheelOnNumberInputs(root = document) {
+  root.querySelectorAll("input[type='number']").forEach((el) => {
+    if (el.dataset.wheelGuard === "1") return;
+    el.dataset.wheelGuard = "1";
+    el.addEventListener(
+      "wheel",
+      (e) => {
+        if (document.activeElement === el) e.preventDefault();
+      },
+      { passive: false }
+    );
+  });
 }
 
 /** Match server default AMANA_TZ for date fields before the first API response. */
@@ -1823,8 +1874,9 @@ function populateSbFeedTypes(brand) {
   sbFeedType.disabled = false;
 }
 
-function populateSkFeedTypes(brand) {
+function populateSkFeedTypes(brand, preferredFeedType = "") {
   const brandKey = resolveBrandKey(brand);
+  const prevFeed = preferredFeedType || skFeedType.value;
   skFeedType.innerHTML = '<option value="">Select feed type</option>';
   if (!brandKey || !state.catalog[brandKey]) {
     skFeedType.disabled = true;
@@ -1837,6 +1889,10 @@ function populateSkFeedTypes(brand) {
     skFeedType.appendChild(option);
   });
   skFeedType.disabled = false;
+  const canonPrev = prevFeed ? feedTypeCatalogValue(brandKey, prevFeed) : "";
+  if (canonPrev && [...skFeedType.options].some((o) => o.value === canonPrev)) {
+    skFeedType.value = canonPrev;
+  }
 }
 
 function populateRfFeedTypes(brand) {
@@ -2119,15 +2175,15 @@ function applyEmployeeSalesKgPriceFromInventory() {
   const el = document.getElementById("skPricePerKg");
   const rp = findRetailPricePerKg(skBrand.value, skFeedType.value);
   if (rp != null) {
-    el.value = rp.toFixed(2);
+    el.value = formatMoneyForInput(rp);
     updateSalesKgOwnerWeightHint();
     return;
   }
   const bagKg = bagSizeFor(skBrand.value, skFeedType.value);
   const sp = findInventorySellingPrice(skBrand.value, skFeedType.value, bagKg);
   if (sp != null && bagKg > 0) {
-    const perKg = sp / bagKg;
-    el.value = Number.isFinite(perKg) ? perKg.toFixed(2) : "";
+    const perKg = roundMoney(sp / bagKg);
+    el.value = Number.isFinite(perKg) ? formatMoneyForInput(perKg) : "";
   } else el.value = "";
   updateSalesKgOwnerWeightHint();
 }
@@ -2281,6 +2337,51 @@ function captureInventoryFormDraft() {
   };
 }
 
+/** Keep Sales Per Kg form values when background data refresh runs while the user is typing. */
+function captureSalesKgFormDraft() {
+  if (state.currentPage !== "sales-kg" || !salesKgForm) return null;
+  const priceEl = document.getElementById("skPricePerKg");
+  const kgEl = document.getElementById("skKgSold");
+  const brand = skBrand?.value || "";
+  const kgRaw = kgEl instanceof HTMLInputElement ? String(kgEl.value).trim() : "";
+  const priceRaw = priceEl instanceof HTMLInputElement ? String(priceEl.value).trim() : "";
+  const editing = state.editSalesKgId != null;
+  if (!editing && !brand && !kgRaw && !priceRaw) return null;
+  const bagEl = document.getElementById("skBagOpened");
+  return {
+    editSalesKgId: state.editSalesKgId,
+    dateDisplay: skDateDisplay?.value ?? "",
+    dateIso: skDate?.value ?? "",
+    brand,
+    feedType: skFeedType?.value ?? "",
+    bagOpened: bagEl instanceof HTMLInputElement ? bagEl.value : "",
+    kgSold: kgRaw,
+    pricePerKg: priceRaw,
+    saleType: skSaleType?.value ?? "",
+    saveBtnText: document.getElementById("skSaveBtn")?.textContent || "Save sale",
+  };
+}
+
+function restoreSalesKgFormDraft(draft) {
+  if (!draft) return;
+  state.editSalesKgId = draft.editSalesKgId;
+  if (skDateDisplay) skDateDisplay.value = draft.dateDisplay;
+  if (skDate) skDate.value = draft.dateIso;
+  if (skBrand && draft.brand) {
+    skBrand.value = draft.brand;
+    populateSkFeedTypes(draft.brand, draft.feedType);
+  }
+  const bagEl = document.getElementById("skBagOpened");
+  if (bagEl instanceof HTMLInputElement) bagEl.value = draft.bagOpened;
+  const kgEl = document.getElementById("skKgSold");
+  if (kgEl instanceof HTMLInputElement) kgEl.value = draft.kgSold;
+  const priceEl = document.getElementById("skPricePerKg");
+  if (priceEl instanceof HTMLInputElement) priceEl.value = draft.pricePerKg;
+  if (skSaleType) skSaleType.value = draft.saleType;
+  const saveBtn = document.getElementById("skSaveBtn");
+  if (saveBtn) saveBtn.textContent = draft.saveBtnText;
+}
+
 function restoreInventoryFormDraft(draft) {
   if (!draft) return;
   state.editId = draft.editId;
@@ -2330,7 +2431,7 @@ function syncOwnerLineProfitMargin(buyInputId, sellInputId, marginInputId) {
   const marginEl = document.getElementById(marginInputId);
   if (!(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement) || !(marginEl instanceof HTMLInputElement)) return;
   const m = computeMarginFromBuySell(buyEl.value, sellEl.value);
-  marginEl.value = m != null ? m.toFixed(2) : "0.00";
+  marginEl.value = m != null ? formatMoneyForInput(m) : "0.00";
 }
 
 /** Retail margin per kg = retail price per kg − (Feed Inventory buying price per bag ÷ bag kg). */
@@ -2357,17 +2458,17 @@ function syncRetailFeedMarginFromPrices() {
     marginEl.value = Number.isFinite(retail) && String(priceEl.value || "").trim() !== "" ? "0.00" : "";
     return;
   }
-  const costPerKg = Number(buyPerBag) / bagKg;
-  const m = Number.isFinite(retail) ? retail - costPerKg : NaN;
-  marginEl.value = Number.isFinite(m) ? m.toFixed(2) : "0.00";
+  const costPerKg = roundMoney(Number(buyPerBag) / bagKg);
+  const m = Number.isFinite(retail) ? roundMoney(retail - costPerKg) : NaN;
+  marginEl.value = Number.isFinite(m) ? formatMoneyForInput(m) : "0.00";
 }
 
 function syncInventoryProfitMarginFromPrices() {
-  const buying = Number(buyingPriceInput?.value || 0);
-  const selling = Number(sellingPriceInput?.value || 0);
+  const buying = parseMoneyFromInput(buyingPriceInput?.value);
+  const selling = parseMoneyFromInput(sellingPriceInput?.value);
   const margin = computeMarginFromBuySell(buying, selling);
   if (!profitMarginPerBagInput) return;
-  profitMarginPerBagInput.value = margin != null ? margin.toFixed(2) : "0.00";
+  profitMarginPerBagInput.value = margin != null ? formatMoneyForInput(margin) : "0.00";
 }
 
 function setInventoryPriceEditMode(editable) {
@@ -2421,8 +2522,8 @@ function applyInventoryPriceDefaults(force = false) {
   }
   const latest = findLatestInventoryPriceLine(brand, feedType, bagSize);
   if (latest) {
-    buyingPriceInput.value = Number(latest.buying_price || 0).toFixed(2);
-    sellingPriceInput.value = Number(latest.selling_price || 0).toFixed(2);
+    buyingPriceInput.value = formatMoneyForInput(latest.buying_price || 0);
+    sellingPriceInput.value = formatMoneyForInput(latest.selling_price || 0);
     if (reorderLevelInput) reorderLevelInput.value = String(Number(latest.reorder_level || 0));
   } else if (state.editId == null) {
     buyingPriceInput.value = "0.00";
@@ -3752,8 +3853,8 @@ function populateForm(row) {
   if (bagsBoughtInput) bagsBoughtInput.value = row.bags_bought != null ? String(row.bags_bought) : "0";
   document.getElementById("accumulatedBags").value =
     row.accumulated_bags != null ? row.accumulated_bags : row.quantity_in_stock;
-  buyingPriceInput.value = Number(row.buying_price || 0).toFixed(2);
-  sellingPriceInput.value = Number(row.selling_price || 0).toFixed(2);
+  buyingPriceInput.value = formatMoneyForInput(row.buying_price || 0);
+  sellingPriceInput.value = formatMoneyForInput(row.selling_price || 0);
   syncInventoryProfitMarginFromPrices();
   if (!Number.isFinite(Number(row.profit_margin_per_bag))) {
     profitMarginPerBagInput.value = "0.00";
@@ -3779,6 +3880,9 @@ function formPayload() {
   const accEl = document.getElementById("accumulatedBags");
   const accRaw = accEl instanceof HTMLInputElement ? String(accEl.value || "").trim() : "";
   const accNum = accRaw === "" ? NaN : Number(accRaw);
+  const buyParsed = parseMoneyFromInput(buyingPriceInput.value);
+  const sellParsed = parseMoneyFromInput(sellingPriceInput.value);
+  const marginParsed = parseMoneyFromInput(profitMarginPerBagInput.value);
 
   return {
     date: dateCanon,
@@ -3789,9 +3893,9 @@ function formPayload() {
     bags_bought: Number.isFinite(bagsBoughtNum) ? Math.max(0, Math.floor(bagsBoughtNum)) : null,
     accumulated_bags:
       editing && Number.isFinite(accNum) && accNum >= 0 ? Math.max(0, Math.floor(accNum)) : null,
-    buying_price: Number(buyingPriceInput.value || 0),
-    selling_price: Number(sellingPriceInput.value || 0),
-    profit_margin_per_bag: Number(profitMarginPerBagInput.value || 0),
+    buying_price: Number.isFinite(buyParsed) ? buyParsed : 0,
+    selling_price: Number.isFinite(sellParsed) ? sellParsed : 0,
+    profit_margin_per_bag: Number.isFinite(marginParsed) ? marginParsed : 0,
     reorder_level: Number(document.getElementById("reorderLevel").value || 0),
   };
 }
@@ -3830,6 +3934,7 @@ async function loadCatalogFromServer() {
 
 async function loadAllData() {
   const inventoryDraft = captureInventoryFormDraft();
+  const salesKgDraft = captureSalesKgFormDraft();
   state.catalog = await loadCatalogFromServer();
 
   const mustFillBrandDropdowns =
@@ -4001,6 +4106,7 @@ async function loadAllData() {
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
   restoreInventoryFormDraft(inventoryDraft);
+  restoreSalesKgFormDraft(salesKgDraft);
 }
 
 function startAutoRefresh() {
@@ -4255,6 +4361,8 @@ feedTypeSelect.addEventListener("change", () => {
   applyInventoryPriceDefaults();
 });
 
+wireMoneyInputBlur(buyingPriceInput);
+wireMoneyInputBlur(sellingPriceInput);
 buyingPriceInput?.addEventListener("input", () => {
   inventoryPricesDirty = true;
   syncInventoryProfitMarginFromPrices();
@@ -4437,6 +4545,8 @@ skDateDisplay.addEventListener("input", () => {
 });
 skDate.addEventListener("change", () => applyDefaultSkBagOpened());
 wireDatePicker(skDateDisplay, skDate, skOpenCalendarBtn);
+wireMoneyInputBlur(document.getElementById("skKgSold"));
+wireMoneyInputBlur(document.getElementById("skPricePerKg"));
 
 wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
 chFeedBrand?.addEventListener("change", () => {
@@ -5474,13 +5584,23 @@ salesKgForm.addEventListener("submit", async (event) => {
     alert("Date must be in DD/MM/YYYY format.");
     return;
   }
+  const kgVal = parseMoneyFromInput(document.getElementById("skKgSold")?.value);
+  const priceVal = parseMoneyFromInput(document.getElementById("skPricePerKg")?.value);
+  if (!Number.isFinite(kgVal) || kgVal <= 0) {
+    alert("Kg sold must be greater than zero.");
+    return;
+  }
+  if (!Number.isFinite(priceVal) || priceVal < 0) {
+    alert("Enter a valid price per kg.");
+    return;
+  }
   const payload = {
     date: dateValue,
     brand: resolveBrandKey(skBrand.value),
     feed_type: skFeedType.value,
     bag_opened: Number(document.getElementById("skBagOpened").value || 0),
-    kg_sold: Number(document.getElementById("skKgSold").value || 0),
-    price_per_kg: Number(document.getElementById("skPricePerKg").value || 0),
+    kg_sold: kgVal,
+    price_per_kg: priceVal,
     through_party: String(skSaleType?.value || "").trim() || null,
   };
   const saveBtn = document.getElementById("skSaveBtn");
@@ -5934,10 +6054,10 @@ salesKgBody.addEventListener("click", async (event) => {
     const skBagEl = document.getElementById("skBagOpened");
     skBagEl.value = row.bag_opened != null ? row.bag_opened : 0;
     skBagEl.readOnly = state.user?.role === "employee";
-    document.getElementById("skKgSold").value = row.kg_sold;
+    document.getElementById("skKgSold").value = formatMoneyForInput(row.kg_sold);
     if (skSaleType) skSaleType.value = String(row.through_party || "").trim();
     if (state.user.role === "employee") applyEmployeeSalesKgPriceFromInventory();
-    else document.getElementById("skPricePerKg").value = row.price_per_kg;
+    else document.getElementById("skPricePerKg").value = formatMoneyForInput(row.price_per_kg);
     document.getElementById("skSaveBtn").textContent = "Update sale";
     return;
   }
@@ -6579,4 +6699,5 @@ nahashonBody?.addEventListener("click", async (event) => {
   }
 });
 
+preventWheelOnNumberInputs();
 boot();

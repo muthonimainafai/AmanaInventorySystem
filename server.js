@@ -1951,6 +1951,13 @@ async function findInventoryRowsSameDayProduct(dateStr, brand, feedType, bagSize
 
 const PRICE_MATCH_EPS = 0.015;
 
+/** Store money as 2 dp to avoid SQLite REAL drift (e.g. 4299.999999 in the DB). */
+function roundMoney(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return NaN;
+  return Math.round(x * 100) / 100;
+}
+
 function salePriceMatchesInventory(expected, submitted) {
   const e = Number(expected);
   const s = Number(submitted);
@@ -2543,6 +2550,16 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       return res.status(400).json({ error: "Bags bought must be at least 1 when adding stock (or legacy quantity in stock)." });
     }
 
+    payload.buying_price = roundMoney(payload.buying_price);
+    payload.selling_price = roundMoney(payload.selling_price);
+    payload.profit_margin_per_bag = roundMoney(payload.profit_margin_per_bag);
+    if (!Number.isFinite(payload.buying_price) || payload.buying_price < 0) {
+      return res.status(400).json({ error: "Invalid buying price." });
+    }
+    if (!Number.isFinite(payload.selling_price) || payload.selling_price < 0) {
+      return res.status(400).json({ error: "Invalid selling price." });
+    }
+
     const margin = Number(payload.profit_margin_per_bag);
     const brandCanon = resolveBrandKey(payload.brand);
     const feedCanon =
@@ -2727,6 +2744,16 @@ app.put("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => {
 
     if (!validateFeed(payload.brand, payload.feed_type, bagSize)) {
       return res.status(400).json({ error: "Invalid brand/feed type/bag size combination." });
+    }
+
+    payload.buying_price = roundMoney(payload.buying_price);
+    payload.selling_price = roundMoney(payload.selling_price);
+    payload.profit_margin_per_bag = roundMoney(payload.profit_margin_per_bag);
+    if (!Number.isFinite(payload.buying_price) || payload.buying_price < 0) {
+      return res.status(400).json({ error: "Invalid buying price." });
+    }
+    if (!Number.isFinite(payload.selling_price) || payload.selling_price < 0) {
+      return res.status(400).json({ error: "Invalid selling price." });
     }
 
     const existing = await get(
@@ -4482,13 +4509,13 @@ app.post("/api/retail-feed-pricing", auth, allowRoles("owner"), async (req, res)
   if (!validateFeed(p.brand, canonFeed, bagSize)) {
     return res.status(400).json({ error: "Invalid brand/feed type combination." });
   }
-  const price = Number(p.price_per_kg);
-  const margin = Number(p.profit_margin_per_kg);
+  const price = roundMoney(p.price_per_kg);
+  const margin = roundMoney(p.profit_margin_per_kg);
   if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Invalid price per kg." });
   if (!Number.isFinite(margin)) return res.status(400).json({ error: "Invalid profit margin per kg." });
   let weightKg = null;
   if (p.weight_kg !== undefined && p.weight_kg !== null && String(p.weight_kg).trim() !== "") {
-    const w = Number(p.weight_kg);
+    const w = roundMoney(p.weight_kg);
     if (!Number.isFinite(w) || w < 0) return res.status(400).json({ error: "Invalid weight (kg)." });
     weightKg = w > 0 ? w : null;
   }
@@ -4550,12 +4577,18 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
   const brandKey = resolveBrandKey(p.brand);
-  const kgSold = Number(p.kg_sold);
-  const pricePerKg = Number(p.price_per_kg);
+  const kgSold = roundMoney(p.kg_sold);
+  const pricePerKg = roundMoney(p.price_per_kg);
   const bagOpened = Math.max(0, Math.floor(Number(p.bag_opened ?? 0)));
   const items = feedCatalog[brandKey];
   if (!items || !items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(p.feed_type))) {
     return res.status(400).json({ error: "Invalid brand/feed type combination." });
+  }
+  if (!Number.isFinite(kgSold) || kgSold <= 0) {
+    return res.status(400).json({ error: "Kg sold must be greater than zero." });
+  }
+  if (!Number.isFinite(pricePerKg) || pricePerKg < 0) {
+    return res.status(400).json({ error: "Invalid price per kg." });
   }
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -4780,16 +4813,22 @@ app.put("/api/sales/kg/:id", auth, allowRoles("owner", "employee"), async (req, 
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
   const brandKey = resolveBrandKey(p.brand);
-  const kgSold = Number(p.kg_sold);
-  const pricePerKg = Number(p.price_per_kg);
+  const kgSold = roundMoney(p.kg_sold);
+  const pricePerKg = roundMoney(p.price_per_kg);
   const bagOpened = Math.max(0, Math.floor(Number(p.bag_opened ?? 0)));
   const items = feedCatalog[brandKey];
   if (!items || !items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(p.feed_type))) {
     return res.status(400).json({ error: "Invalid brand/feed type combination." });
   }
+  if (!Number.isFinite(kgSold) || kgSold <= 0) {
+    return res.status(400).json({ error: "Kg sold must be greater than zero." });
+  }
+  if (!Number.isFinite(pricePerKg) || pricePerKg < 0) {
+    return res.status(400).json({ error: "Invalid price per kg." });
+  }
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  const totalAmount = kgSold * pricePerKg;
+  const totalAmount = roundMoney(kgSold * pricePerKg);
   const current = await get("SELECT * FROM sales_kg WHERE id = ?", [Number(req.params.id)]);
   if (!current) return res.status(404).json({ error: "Sale not found." });
   if (!assertEmployeeSaleEditAllowed(req, res, current)) return;
