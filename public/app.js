@@ -4503,21 +4503,25 @@ document.getElementById("calcChClearBtn")?.addEventListener("click", resetCalcCh
 document.getElementById("calcChDownloadProformaBtn")?.addEventListener("click", () => downloadCalcChickenProformaPdf());
 
 const AMANA_LOGO_PATH = "/amana-kuku-logo.png";
-let amanaLogoForPdfPromise = null;
+const UFARAY_LOGO_PATH = "/ufaray-logo.jpeg";
+/** @type {Map<string, Promise<{ dataUrl: string, width: number, height: number, format: string } | null>>} */
+const pdfLogoCache = new Map();
 
-function shouldShowAmanaLogoOnPdf() {
-  return state.appInstance !== "ufaray";
+function pdfImageFormatForPath(path, blobType = "") {
+  if (/\.jpe?g$/i.test(path) || blobType === "image/jpeg") return "JPEG";
+  return "PNG";
 }
 
-/** @returns {Promise<{ dataUrl: string, width: number, height: number } | null>} */
-function loadAmanaLogoForPdf() {
-  if (!shouldShowAmanaLogoOnPdf()) return Promise.resolve(null);
-  if (!amanaLogoForPdfPromise) {
-    amanaLogoForPdfPromise = fetch(AMANA_LOGO_PATH)
+/** @returns {Promise<{ dataUrl: string, width: number, height: number, format: string } | null>} */
+function loadLogoAssetForPdf(path) {
+  if (!path) return Promise.resolve(null);
+  if (!pdfLogoCache.has(path)) {
+    const promise = fetch(path)
       .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("logo missing"))))
       .then(
         (blob) =>
           new Promise((resolve, reject) => {
+            const format = pdfImageFormatForPath(path, blob.type);
             const reader = new FileReader();
             reader.onload = () => {
               const dataUrl = reader.result;
@@ -4527,6 +4531,7 @@ function loadAmanaLogoForPdf() {
                   dataUrl,
                   width: img.naturalWidth || 1,
                   height: img.naturalHeight || 1,
+                  format,
                 });
               img.onerror = () => resolve(null);
               img.src = dataUrl;
@@ -4536,12 +4541,36 @@ function loadAmanaLogoForPdf() {
           })
       )
       .catch(() => null);
+    pdfLogoCache.set(path, promise);
   }
-  return amanaLogoForPdfPromise;
+  return pdfLogoCache.get(path);
+}
+
+function loadAmanaLogoForPdf() {
+  return loadLogoAssetForPdf(AMANA_LOGO_PATH);
+}
+
+function loadUfarayLogoForPdf() {
+  return loadLogoAssetForPdf(UFARAY_LOGO_PATH);
+}
+
+/**
+ * Calculator PDFs: Ufaray logo on invoice/proforma only; Amana logo on Amana (never Ufaray on Amana).
+ * @param {"calculator"|"proforma"|"invoice"} mode
+ */
+async function loadCalculatorPdfLogo(mode) {
+  if (mode === "proforma" || mode === "invoice") {
+    if (state.appInstance === "ufaray") return loadUfarayLogoForPdf();
+    return loadAmanaLogoForPdf();
+  }
+  if (mode === "calculator" && state.appInstance !== "ufaray") {
+    return loadAmanaLogoForPdf();
+  }
+  return null;
 }
 
 /** Logo at top-right; preserves aspect ratio. Returns drawn height in pt. */
-function addAmanaLogoTopRight(doc, logoMeta, opts = {}) {
+function addPdfLogoTopRight(doc, logoMeta, opts = {}) {
   if (!logoMeta?.dataUrl || !logoMeta.width || !logoMeta.height) return 0;
   const pageW = doc.internal.pageSize.getWidth();
   const margin = opts.margin ?? 40;
@@ -4556,7 +4585,8 @@ function addAmanaLogoTopRight(doc, logoMeta, opts = {}) {
   }
   const top = opts.top ?? 22;
   const x = pageW - margin - drawW;
-  doc.addImage(logoMeta.dataUrl, "PNG", x, top, drawW, drawH);
+  const format = logoMeta.format || "PNG";
+  doc.addImage(logoMeta.dataUrl, format, x, top, drawW, drawH);
   return drawH;
 }
 
@@ -4571,7 +4601,7 @@ function drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW
 
   let logoDrawH = 0;
   if (logoMeta) {
-    logoDrawH = addAmanaLogoTopRight(doc, logoMeta, { top: logoTop, maxWidth: 118, maxHeight: 118, margin });
+    logoDrawH = addPdfLogoTopRight(doc, logoMeta, { top: logoTop, maxWidth: 118, maxHeight: 118, margin });
   }
   const lineY = logoMeta ? logoTop + logoDrawH + 14 : 58;
 
@@ -4655,7 +4685,7 @@ async function downloadCalcChickenProformaPdf() {
   const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
   const fileDate = row.dateStr.replace(/\//g, "-");
   const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  const logoMeta = await loadAmanaLogoForPdf();
+  const logoMeta = await loadCalculatorPdfLogo("proforma");
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
   const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
@@ -4849,7 +4879,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
   const fileDate = today.replace(/\//g, "-");
   const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  const logoMeta = await loadAmanaLogoForPdf();
+  const logoMeta = await loadCalculatorPdfLogo(mode);
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
   const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
@@ -4879,7 +4909,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
 
     const calcLogoTop = 18;
     const calcLogoH = logoMeta
-      ? addAmanaLogoTopRight(doc, logoMeta, { top: calcLogoTop, maxWidth: 96, maxHeight: 96 })
+      ? addPdfLogoTopRight(doc, logoMeta, { top: calcLogoTop, maxWidth: 96, maxHeight: 96 })
       : 0;
     const calcTextTop = logoMeta ? calcLogoTop + calcLogoH + 16 : 42;
 
