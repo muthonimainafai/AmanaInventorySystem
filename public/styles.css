@@ -689,3 +689,71 @@ tr.table-date-separator td {
   text-align: center;
   margin-left: -22px;
 }
+
+/* M-Pesa-style payment card on Calculator (Amana) */
+.mpesa-payment-card {
+  margin: 1rem 0 0.5rem;
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(165deg, #008f47 0%, #00a651 42%, #00c25e 100%);
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(0, 143, 71, 0.38), 0 2px 6px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  max-width: 360px;
+}
+.mpesa-payment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 10px;
+  background: rgba(0, 0, 0, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+}
+.mpesa-payment-brand {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
+}
+.mpesa-payment-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+}
+.mpesa-payment-label {
+  margin: 14px 16px 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.88;
+}
+.mpesa-payment-type {
+  margin: 0 16px 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.mpesa-payment-till-label {
+  margin: 0 16px 2px;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+.mpesa-payment-till {
+  margin: 0 16px 8px;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+.mpesa-payment-payee {
+  margin: 0 16px 16px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.35);
+}

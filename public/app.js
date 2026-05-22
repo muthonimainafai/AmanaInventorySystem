@@ -2196,6 +2196,9 @@ function showLoggedIn() {
   document.querySelectorAll(".amana-only-bag-pigs-block").forEach((el) => {
     el.classList.toggle("hidden", !isOwner || state.appInstance !== "amana");
   });
+  document.querySelectorAll(".amana-only-calc-mpesa-block").forEach((el) => {
+    el.classList.toggle("hidden", state.appInstance !== "amana");
+  });
   document.querySelectorAll(".employee-only-action").forEach((el) => {
     el.classList.toggle("hidden", state.user.role !== "employee");
   });
@@ -5348,6 +5351,76 @@ function addPdfLogoTopRight(doc, logoMeta, opts = {}) {
   return drawH;
 }
 
+/** M-Pesa Buy Goods payment details shown on Calculator (Amana) and included on calculator PDFs. */
+const AMANA_MPESA_PAYMENT = {
+  brand: "M-PESA",
+  section: "Payment details",
+  type: "Buy Goods and Services",
+  tillLabel: "Till No.",
+  till: "5757375",
+  payee: "Amana Kuku Feeds",
+};
+
+function shouldIncludeAmanaMpesaPaymentInPdf() {
+  return state.appInstance === "amana";
+}
+
+/**
+ * Draws an M-Pesa-style green payment block on a jsPDF document.
+ * @returns {number} Y position below the block
+ */
+function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const w = tableW ?? pageW - 2 * margin;
+  const blockH = 88;
+  const green = [0, 166, 81];
+  const greenDark = [0, 120, 58];
+  const white = [255, 255, 255];
+
+  doc.setFillColor(...green);
+  doc.roundedRect(margin, startY, w, blockH, 8, 8, "F");
+  doc.setFillColor(...greenDark);
+  doc.rect(margin, startY, w, 22, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...white);
+  doc.text(AMANA_MPESA_PAYMENT.brand, margin + 12, startY + 14);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text("PAYMENTS", margin + w - 12, startY + 14, { align: "right" });
+
+  let y = startY + 30;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(230, 255, 240);
+  doc.text(AMANA_MPESA_PAYMENT.section.toUpperCase(), margin + 12, y);
+  y += 12;
+  doc.setFontSize(10);
+  doc.setTextColor(...white);
+  doc.text(AMANA_MPESA_PAYMENT.type, margin + 12, y);
+  y += 14;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(AMANA_MPESA_PAYMENT.tillLabel, margin + 12, y);
+  y += 14;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(AMANA_MPESA_PAYMENT.till, margin + 12, y);
+  y += 16;
+  doc.setDrawColor(255, 255, 255);
+  doc.setLineWidth(0.4);
+  doc.setLineDashPattern([3, 2], 0);
+  doc.line(margin + 12, y, margin + w - 12, y);
+  doc.setLineDashPattern([], 0);
+  y += 10;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text(AMANA_MPESA_PAYMENT.payee, margin + 12, y);
+  doc.setTextColor(0, 0, 0);
+
+  return startY + blockH + 16;
+}
+
 /** Invoice / proforma header: logo above the divider line, title on the left. Returns Y for content below the line. */
 function drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G }) {
   const rightX = pageW - margin;
@@ -5558,6 +5631,21 @@ async function downloadCalcChickenProformaPdf() {
   });
   doc.setTextColor(0, 0, 0);
 
+  if (shouldIncludeAmanaMpesaPaymentInPdf()) {
+    let payY = summaryY + 20;
+    const pageH = doc.internal.pageSize.getHeight();
+    if (payY > pageH - 120) {
+      doc.addPage();
+      payY = 50;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(14, 92, 58);
+    doc.text("PAY WITH M-PESA", margin, payY);
+    payY += 12;
+    drawMpesaPaymentBlockPdf(doc, payY, { margin, tableW });
+  }
+
   doc.save(`${safeBusiness}-chicken-proforma-${fileDate}.pdf`);
 }
 
@@ -5749,6 +5837,20 @@ async function downloadCalculatorPdf(mode = "calculator") {
       footY += 18;
     }
     doc.text(`Grand total: ${currency(grand)}`, 40, footY);
+    footY += 22;
+    if (shouldIncludeAmanaMpesaPaymentInPdf()) {
+      const pageH = doc.internal.pageSize.getHeight();
+      if (footY > pageH - 120) {
+        doc.addPage();
+        footY = 50;
+      }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(14, 92, 58);
+      doc.text("Payment details", 40, footY);
+      footY += 14;
+      drawMpesaPaymentBlockPdf(doc, footY, { margin: 40, tableW: doc.internal.pageSize.getWidth() - 80 });
+    }
     doc.save(`${safeBusiness}-calculator-${fileDate}.pdf`);
     return;
   }
@@ -5885,6 +5987,21 @@ async function downloadCalculatorPdf(mode = "calculator") {
     summaryY += 18;
   });
   doc.setTextColor(0, 0, 0);
+
+  if (shouldIncludeAmanaMpesaPaymentInPdf()) {
+    let payY = summaryY + 20;
+    const pageH = doc.internal.pageSize.getHeight();
+    if (payY > pageH - 120) {
+      doc.addPage();
+      payY = 50;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(...G.dark);
+    doc.text("PAY WITH M-PESA", margin, payY);
+    payY += 12;
+    drawMpesaPaymentBlockPdf(doc, payY, { margin, tableW });
+  }
 
   const safeMode = isProforma ? "proforma" : "invoice";
   doc.save(`${safeBusiness}-${safeMode}-${fileDate}.pdf`);
