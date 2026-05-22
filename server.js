@@ -905,6 +905,21 @@ async function initDb() {
   `);
   await run("ALTER TABLE cess_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS pigs_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      lot_no TEXT NOT NULL DEFAULT '',
+      num_pigs INTEGER NOT NULL DEFAULT 0,
+      description TEXT NOT NULL DEFAULT '',
+      money_in REAL NOT NULL DEFAULT 0,
+      money_out REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
   const accBagsMigrated = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_bags_v1"]);
   if (!accBagsMigrated || accBagsMigrated.value !== "1") {
     await run(`UPDATE inventory SET accumulated_bags = quantity_in_stock`);
@@ -1348,6 +1363,7 @@ function normalizeThroughParty(val) {
   if (lower === "cess") return "Cess";
   if (lower === "rose") return "Rose";
   if (lower === "ufaray") return "Ufaray";
+  if (lower === "pigs page") return "Pigs Page";
   return s;
 }
 
@@ -4134,6 +4150,73 @@ app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), asyn
     req.user.role === "owner"
       ? await run("DELETE FROM cess_accounts_entries WHERE id = ?", [Number(req.params.id)])
       : await run("DELETE FROM cess_accounts_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
+app.get("/api/pigs", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM pigs_entries ORDER BY id DESC")
+      : await all("SELECT * FROM pigs_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/pigs", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const lotNo = String(p.lot_no || "").trim();
+  const numPigs = Math.max(0, Math.floor(Number(p.num_pigs) || 0));
+  const description = String(p.description || "").trim();
+  let moneyIn, moneyOut;
+  try {
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO pigs_entries (date, lot_no, num_pigs, description, money_in, money_out, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, lotNo, numPigs, description, moneyIn, moneyOut, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM pigs_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM pigs_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const lotNo = String(p.lot_no || "").trim();
+  const numPigs = Math.max(0, Math.floor(Number(p.num_pigs) || 0));
+  const description = String(p.description || "").trim();
+  let moneyIn, moneyOut;
+  try {
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  await run(
+    `UPDATE pigs_entries SET date = ?, lot_no = ?, num_pigs = ?, description = ?, money_in = ?, money_out = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, lotNo, numPigs, description, moneyIn, moneyOut, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM pigs_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM pigs_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });

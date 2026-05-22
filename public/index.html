@@ -151,6 +151,7 @@
           <button type="button" class="nav-tab" data-page="rose-inventory" id="roseInventoryTabLabel">Rose Inventory</button>
           <button type="button" class="nav-tab" data-page="nahashon-records" id="nahashonRecordsTab">Nahashon Records</button>
           <button type="button" class="nav-tab" data-page="cess-accounts" id="cessAccountsTab">Cess Accounts</button>
+          <button type="button" class="nav-tab" data-page="pigs">Pigs Page</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="balance">Balance</button>
@@ -1654,6 +1655,76 @@
                     <th id="cessAccTotalMoneyIn">0</th>
                     <th id="cessAccTotalMoneyOut">0</th>
                     <th>—</th>
+                    <th>—</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-pigs" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Pigs Page</h3>
+            <p class="field-hint">Record pig lot entries with money in and money out.</p>
+            <form id="pigs-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="pigsDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="pigsOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="pigsDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Lot No
+                  <input type="text" id="pigsLotNo" placeholder="e.g. LOT-001" />
+                </label>
+                <label>
+                  Number of Pigs
+                  <input type="number" id="pigsNumPigs" min="0" step="1" value="0" />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="pigsDescription" />
+                </label>
+                <label>
+                  Money In
+                  <input type="text" id="pigsMoneyIn" inputmode="decimal" autocomplete="off" value="0" />
+                </label>
+                <label>
+                  Money Out
+                  <input type="text" id="pigsMoneyOut" inputmode="decimal" autocomplete="off" value="0" />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="pigsSaveBtn">Save entry</button>
+                <button type="button" class="secondary" id="pigsClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Date</th>
+                    <th>Lot No</th>
+                    <th>No. of Pigs</th>
+                    <th>Description</th>
+                    <th>Money In</th>
+                    <th>Money Out</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="pigs-body"><tr><td colspan="8" class="empty">No records.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="5">Grand Total</th>
+                    <th id="pigsTotalMoneyIn">0</th>
+                    <th id="pigsTotalMoneyOut">0</th>
                     <th>—</th>
                   </tr>
                 </tfoot>

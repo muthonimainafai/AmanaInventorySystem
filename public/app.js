@@ -63,6 +63,8 @@ const state = {
   editCessAccountsId: null,
   nahashonEntries: [],
   editNahashonId: null,
+  pigsEntries: [],
+  editPigsId: null,
   calculatorValues: {},
 };
 
@@ -79,6 +81,7 @@ const PAGE_HEADINGS = {
   "nahashon-records": "Nahashon Records",
   "cess-accounts": "Cess Accounts",
   calculator: "Calculator",
+  pigs: "Pigs Page",
   expenditure: "Expenditure",
   balance: "Balance",
 };
@@ -136,6 +139,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "rose-inventory",
   "nahashon-records",
   "cess-accounts",
+  "pigs",
   "calculator",
   "expenditure",
   "balance",
@@ -299,6 +303,11 @@ const nahashonBody = document.getElementById("nahashon-body");
 const nahashonDateDisplay = document.getElementById("nahashonDateDisplay");
 const nahashonDate = document.getElementById("nahashonDate");
 const nahashonOpenCalendarBtn = document.getElementById("nahashonOpenCalendarBtn");
+const pigsForm = document.getElementById("pigs-form");
+const pigsBody = document.getElementById("pigs-body");
+const pigsDateDisplay = document.getElementById("pigsDateDisplay");
+const pigsDate = document.getElementById("pigsDate");
+const pigsOpenCalendarBtn = document.getElementById("pigsOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
 const calcDueDate = document.getElementById("calcDueDate");
@@ -1227,6 +1236,7 @@ function normalizeSaleVia(value) {
   if (lower === "cess") return "Cess";
   if (lower === "rose") return "Rose";
   if (lower === "ufaray") return "Ufaray";
+  if (lower === "pigs page") return "Pigs Page";
   return raw;
 }
 
@@ -1243,7 +1253,9 @@ function bagSaleViaOptions() {
     return ["", "Amana"];
   }
   if (state.appInstance === "amana") {
-    return ["", "Ufaray", "Cess"];
+    const opts = ["", "Ufaray", "Cess"];
+    if (state.user?.role === "employee") opts.push("Pigs Page");
+    return opts;
   }
   return [""];
 }
@@ -1297,7 +1309,9 @@ function fillSimpleSaleTypeSelect(selectEl, selectedValue = "") {
       "": "Shop sale (normal)",
       Ufaray: "By Ufaray",
       Cess: "By Cess",
+      "Pigs Page": "Via Pigs Page",
     };
+    if (state.user?.role === "employee") options.push("Pigs Page");
   } else {
     options = ["", "Ufaray"];
     labels = {
@@ -1702,6 +1716,9 @@ function showLoggedIn() {
     }
     if (page === "nahashon-records") {
       shouldShow = state.appInstance === "terry";
+    }
+    if (page === "pigs") {
+      shouldShow = state.appInstance === "amana" && isOwner;
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -3510,6 +3527,56 @@ function renderNahashonTable() {
   if (mortEl) mortEl.textContent = String(sumMort);
 }
 
+function resetPigsForm() {
+  if (!pigsForm) return;
+  pigsForm.reset();
+  state.editPigsId = null;
+  if (pigsDate) pigsDate.value = "";
+  if (pigsDateDisplay) pigsDateDisplay.value = "";
+  const saveBtn = document.getElementById("pigsSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function renderPigsTable() {
+  if (!pigsBody) return;
+  const rows = sortRowsLatestFirst(state.pigsEntries || []);
+  const inEl = document.getElementById("pigsTotalMoneyIn");
+  const outEl = document.getElementById("pigsTotalMoneyOut");
+  if (!rows.length) {
+    pigsBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
+    if (inEl) inEl.textContent = currency(0);
+    if (outEl) outEl.textContent = currency(0);
+    return;
+  }
+  let sumIn = 0;
+  let sumOut = 0;
+  pigsBody.innerHTML = rows
+    .map((row, idx) => {
+      sumIn += Number(row.money_in || 0);
+      sumOut += Number(row.money_out || 0);
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.lot_no || "")}</td>
+        <td>${Number(row.num_pigs || 0)}</td>
+        <td>${escapeHtmlCell(row.description || "")}</td>
+        <td>${currency(row.money_in)}</td>
+        <td>${currency(row.money_out)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="pigs" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="pigs" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  if (inEl) inEl.textContent = currency(sumIn);
+  if (outEl) outEl.textContent = currency(sumOut);
+}
+
 function chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow) {
   if (isOwnerInventoryRow) {
     return "<td>—</td><td>—</td><td>—</td><td>—</td>";
@@ -3723,6 +3790,9 @@ function showPage(page) {
       return showPage("sales-bags");
     }
   }
+  if (page === "pigs" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
+    return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+  }
   if (page === "nahashon-records" && state.appInstance !== "terry") {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
@@ -3825,6 +3895,7 @@ function showPage(page) {
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
+  if (page === "pigs") renderPigsTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
     initCalcChickenFormDefaults();
@@ -4050,6 +4121,7 @@ async function loadAllData() {
     api("/api/rose/inventory"),
     api("/api/nahashon-accounts"),
     api("/api/cess-accounts"),
+    api("/api/pigs"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -4066,6 +4138,7 @@ async function loadAllData() {
   state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
   state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
+  state.pigsEntries = extras[15].status === "fulfilled" ? extras[15].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -4103,6 +4176,7 @@ async function loadAllData() {
   renderRoseTable();
   renderCessAccountsTable();
   renderNahashonTable();
+  renderPigsTable();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
   restoreInventoryFormDraft(inventoryDraft);
@@ -4571,6 +4645,12 @@ if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
 if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
   wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
 }
+if (pigsDateDisplay && pigsDate && pigsOpenCalendarBtn) {
+  wireDatePicker(pigsDateDisplay, pigsDate, pigsOpenCalendarBtn);
+}
+document.getElementById("pigsClearBtn")?.addEventListener("click", resetPigsForm);
+wireMoneyInputBlur(document.getElementById("pigsMoneyIn"));
+wireMoneyInputBlur(document.getElementById("pigsMoneyOut"));
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
@@ -5537,6 +5617,31 @@ nahashonForm?.addEventListener("submit", async (event) => {
       await api("/api/nahashon-accounts", { method: "POST", body: JSON.stringify(payload) });
     }
     resetNahashonForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+pigsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = pigsDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    lot_no: String(document.getElementById("pigsLotNo")?.value || "").trim(),
+    num_pigs: Math.max(0, Math.floor(Number(document.getElementById("pigsNumPigs")?.value || 0))),
+    description: String(document.getElementById("pigsDescription")?.value || "").trim(),
+    money_in: parseMoneyFromInput(document.getElementById("pigsMoneyIn")?.value) || 0,
+    money_out: parseMoneyFromInput(document.getElementById("pigsMoneyOut")?.value) || 0,
+  };
+  try {
+    if (state.editPigsId) {
+      await api(`/api/pigs/${state.editPigsId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/pigs", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetPigsForm();
     await loadAllData();
   } catch (error) {
     alert(error.message);
@@ -6692,6 +6797,44 @@ nahashonBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/nahashon-accounts/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+pigsBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "pigs") return;
+  const row = state.pigsEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editPigsId = row.id;
+    if (pigsDate) pigsDate.value = toIsoDate(row.date);
+    if (pigsDateDisplay) pigsDateDisplay.value = formatDateDMY(row.date);
+    const lotEl = document.getElementById("pigsLotNo");
+    const numEl = document.getElementById("pigsNumPigs");
+    const descEl = document.getElementById("pigsDescription");
+    const minEl = document.getElementById("pigsMoneyIn");
+    const moutEl = document.getElementById("pigsMoneyOut");
+    if (lotEl) lotEl.value = row.lot_no || "";
+    if (numEl) numEl.value = row.num_pigs ?? 0;
+    if (descEl) descEl.value = row.description || "";
+    if (minEl) minEl.value = formatMoneyForInput(row.money_in ?? 0);
+    if (moutEl) moutEl.value = formatMoneyForInput(row.money_out ?? 0);
+    const saveBtn = document.getElementById("pigsSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/pigs/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
