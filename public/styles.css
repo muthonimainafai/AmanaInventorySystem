@@ -716,14 +716,10 @@ tr.table-date-separator td {
   font-size: 1.15rem;
   letter-spacing: 0.06em;
 }
-.mpesa-payment-badge {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
+.mpesa-payment-header-suffix {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.06em;
 }
 .mpesa-payment-label {
   margin: 14px 16px 4px;
@@ -740,9 +736,10 @@ tr.table-date-separator td {
   line-height: 1.35;
 }
 .mpesa-payment-till-label {
-  margin: 0 16px 2px;
-  font-size: 0.8rem;
-  opacity: 0.9;
+  margin: 0 16px 4px;
+  font-size: 1rem;
+  font-weight: 600;
+  opacity: 0.95;
 }
 .mpesa-payment-till {
   margin: 0 16px 8px;

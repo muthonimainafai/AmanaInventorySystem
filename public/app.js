@@ -5354,9 +5354,10 @@ function addPdfLogoTopRight(doc, logoMeta, opts = {}) {
 /** M-Pesa Buy Goods payment details shown on Calculator (Amana) and included on calculator PDFs. */
 const AMANA_MPESA_PAYMENT = {
   brand: "M-PESA",
+  headerSuffix: "PAYMENTS",
   section: "Payment details",
   type: "Buy Goods and Services",
-  tillLabel: "Till No.",
+  tillLabel: "Till Number",
   till: "5757375",
   payee: "Amana Kuku Feeds",
 };
@@ -5388,9 +5389,7 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   const brandX = margin + 12;
   doc.text(AMANA_MPESA_PAYMENT.brand, brandX, headerTextY);
   const paymentsX = brandX + doc.getTextWidth(AMANA_MPESA_PAYMENT.brand) + 6;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text("Payments", paymentsX, headerTextY);
+  doc.text(AMANA_MPESA_PAYMENT.headerSuffix, paymentsX, headerTextY);
 
   let y = startY + 30;
   doc.setFont("helvetica", "bold");
@@ -5402,8 +5401,8 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   doc.setTextColor(...white);
   doc.text(AMANA_MPESA_PAYMENT.type, margin + 12, y);
   y += 14;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
   doc.text(AMANA_MPESA_PAYMENT.tillLabel, margin + 12, y);
   y += 14;
   doc.setFont("helvetica", "bold");
