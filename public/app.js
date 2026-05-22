@@ -1690,6 +1690,21 @@ function parseDMYParts(dateValue) {
   return { d: Number(m[1]), m: Number(m[2]), y: Number(m[3]) };
 }
 
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** e.g. Saturday 23/05/2026 for calculator proforma / invoice PDFs. */
+function formatDateWithDayName(dateValue) {
+  const dmy = formatDateDMY(dateValue);
+  const parts = parseDMYParts(dmy);
+  if (!parts) return dmy || "";
+  const dt = new Date(parts.y, parts.m - 1, parts.d);
+  if (Number.isNaN(dt.getTime())) return dmy;
+  return `${WEEKDAY_NAMES[dt.getDay()]} ${dmy}`;
+}
+
+/** Fixed validity line on calculator proforma PDFs. */
+const CALC_PROFORMA_VALID_UNTIL_TEXT = "Saturday 12.00pm";
+
 function compareDMYParts(a, b) {
   if (a.y !== b.y) return a.y - b.y;
   if (a.m !== b.m) return a.m - b.m;
@@ -5540,9 +5555,8 @@ async function downloadCalcChickenProformaPdf() {
   const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G });
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
-  const dueForPdf = getCalcDueDateForPdf();
   const leftBlockH = 14 + billLines.length * 12;
-  const rightBlockH = 14 * 4;
+  const rightBlockH = 14 * 3;
   const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
 
   doc.setFillColor(...G.mint);
@@ -5561,11 +5575,9 @@ async function downloadCalcChickenProformaPdf() {
   doc.setFont("helvetica", "bold");
   doc.text(`PROFORMA NO. ${docNo}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`DATE: ${row.dateStr}`, rightX, ry, { align: "right" });
+  doc.text(`DATE: ${formatDateWithDayName(row.dateStr)}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`VALID UNTIL: ${dueForPdf}`, rightX, ry, { align: "right" });
-  ry += 14;
-  doc.text("NOTE: Cost estimate — not a tax invoice", rightX, ry, { align: "right" });
+  doc.text(`VALID UNTIL: ${CALC_PROFORMA_VALID_UNTIL_TEXT}`, rightX, ry, { align: "right" });
 
   const desc = `${row.breed} DAY-OLD CHICKS`.replace(/\s+/g, " ").trim().toUpperCase();
   const tableBody = [[desc, String(row.qtyNum), `Ksh${formatKshPlainNumber(row.unitPrice)}`, `Ksh${formatKshPlainNumber(row.lineTotal)}`]];
@@ -5876,9 +5888,8 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
   const dueForPdf = getCalcDueDateForPdf();
   const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
-  const terms = isProforma ? "Cost estimate — not a tax invoice" : "Due on receipt";
   const leftBlockH = 14 + billLines.length * 12;
-  const rightBlockH = 14 * 4;
+  const rightBlockH = isProforma ? 14 * 3 : 14 * 4;
   const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
 
   doc.setFillColor(...G.mint);
@@ -5897,11 +5908,15 @@ async function downloadCalculatorPdf(mode = "calculator") {
   doc.setFont("helvetica", "bold");
   doc.text(`${noLabel} ${docNo}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`DATE: ${today}`, rightX, ry, { align: "right" });
+  doc.text(`DATE: ${formatDateWithDayName(today)}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`${isProforma ? "VALID UNTIL" : "DUE DATE"}: ${dueForPdf}`, rightX, ry, { align: "right" });
-  ry += 14;
-  doc.text(`${isProforma ? "NOTE" : "TERMS"}: ${terms}`, rightX, ry, { align: "right" });
+  if (isProforma) {
+    doc.text(`VALID UNTIL: ${CALC_PROFORMA_VALID_UNTIL_TEXT}`, rightX, ry, { align: "right" });
+  } else {
+    doc.text(`DUE DATE: ${formatDateWithDayName(dueForPdf)}`, rightX, ry, { align: "right" });
+    ry += 14;
+    doc.text("TERMS: Due on receipt", rightX, ry, { align: "right" });
+  }
 
   const tableBody = exportRows.map((r) => {
     const rate = r.sellingNum;
