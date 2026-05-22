@@ -675,3 +675,17 @@ tr.table-date-separator td {
   margin-top: 12px;
   font-size: 13px;
 }
+
+.advice-list {
+  margin: 8px 0 0 0;
+  padding-left: 22px;
+  line-height: 1.55;
+}
+.advice-list li {
+  margin-bottom: 8px;
+}
+.advice-list li.empty {
+  list-style: none;
+  text-align: center;
+  margin-left: -22px;
+}

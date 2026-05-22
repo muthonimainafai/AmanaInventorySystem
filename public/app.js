@@ -83,6 +83,7 @@ const PAGE_HEADINGS = {
   calculator: "Calculator",
   pigs: "Pigs Page",
   expenditure: "Expenditure",
+  "monthly-report": "Monthly Report",
   balance: "Balance",
 };
 
@@ -126,7 +127,7 @@ function isTerryOrCessTenant() {
 }
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
-const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance"]);
+const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance", "monthly-report"]);
 const OWNER_ALLOWED_PAGES = new Set([
   "inventory",
   "retail-inventory",
@@ -142,6 +143,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "pigs",
   "calculator",
   "expenditure",
+  "monthly-report",
   "balance",
 ]);
 /** Owner pages that show the combined accumulated profit footer at the bottom. */
@@ -1055,6 +1057,291 @@ function updateBalanceBanner() {
   });
 }
 
+/** Returns yyyy-mm for the month currently selected on the Monthly Report page (or current month). */
+function monthlyReportSelectedYM() {
+  const input = document.getElementById("mrMonth");
+  if (input instanceof HTMLInputElement && /^\d{4}-\d{2}$/.test(input.value)) return input.value;
+  const today = state.shopToday || clientShopTodayDMY();
+  const parts = parseDMYParts(today);
+  if (!parts) {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}`;
+}
+
+/** Previous month string for a given yyyy-mm. */
+function previousYM(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym || "");
+  if (!m) return null;
+  let y = Number(m[1]);
+  let mo = Number(m[2]) - 1;
+  if (mo < 1) { mo = 12; y -= 1; }
+  return `${y}-${String(mo).padStart(2, "0")}`;
+}
+
+function rowMatchesYM(row, ym) {
+  const parts = parseDMYParts(row?.date);
+  if (!parts) return false;
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}` === ym;
+}
+
+function monthLabel(ym) {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym || "");
+  if (!m) return ym || "";
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  return `${names[mo - 1] || ""} ${y}`;
+}
+
+/** Aggregate Sales Per Bags rows for the given yyyy-mm month. */
+function aggregateBagSalesForMonth(ym) {
+  const rows = (state.salesBags || []).filter((r) => rowMatchesYM(r, ym));
+  const map = new Map();
+  let totalBags = 0;
+  let totalRevenue = 0;
+  let passThroughBags = 0;
+  for (const r of rows) {
+    const brand = displayBrand(r.brand) || "—";
+    const feed = displayFeedType(r.feed_type) || "—";
+    const bs = Number(r.bag_size) || 0;
+    const key = `${brand}|||${feed}|||${bs}`;
+    const bagsSold = Number(r.bags_sold) || 0;
+    const revenue = Number.isFinite(Number(r.total_amount))
+      ? Number(r.total_amount)
+      : bagsSold * (Number(r.price_per_bag) || 0);
+    if (!map.has(key)) map.set(key, { brand, feed, bagSize: bs, bagsSold: 0, revenue: 0 });
+    const entry = map.get(key);
+    entry.bagsSold += bagsSold;
+    entry.revenue += revenue;
+    totalBags += bagsSold;
+    totalRevenue += revenue;
+    if (r.through_party && String(r.through_party).trim() !== "") passThroughBags += bagsSold;
+  }
+  return {
+    rows: Array.from(map.values()).sort((a, b) => b.bagsSold - a.bagsSold || b.revenue - a.revenue),
+    totalBags,
+    totalRevenue,
+    passThroughBags,
+    rowCount: rows.length,
+  };
+}
+
+/** Aggregate Sales Per Kg rows for the given yyyy-mm month. */
+function aggregateKgSalesForMonth(ym) {
+  const rows = (state.salesKg || []).filter((r) => rowMatchesYM(r, ym));
+  const map = new Map();
+  let totalKg = 0;
+  let totalRevenue = 0;
+  let passThroughKg = 0;
+  for (const r of rows) {
+    const brand = displayBrand(r.brand) || "—";
+    const feed = displayFeedType(r.feed_type) || "—";
+    const key = `${brand}|||${feed}`;
+    const kg = Number(r.kg_sold) || 0;
+    const revenue = Number.isFinite(Number(r.total_amount))
+      ? Number(r.total_amount)
+      : kg * (Number(r.price_per_kg) || 0);
+    if (!map.has(key)) map.set(key, { brand, feed, kg: 0, revenue: 0 });
+    const entry = map.get(key);
+    entry.kg += kg;
+    entry.revenue += revenue;
+    totalKg += kg;
+    totalRevenue += revenue;
+    if (r.through_party && String(r.through_party).trim() !== "") passThroughKg += kg;
+  }
+  return {
+    rows: Array.from(map.values()).sort((a, b) => b.kg - a.kg || b.revenue - a.revenue),
+    totalKg,
+    totalRevenue,
+    passThroughKg,
+    rowCount: rows.length,
+  };
+}
+
+/** Catalog feed lines that had zero bag-sales in the month (used in advice). */
+function catalogLinesWithNoBagSales(bagAgg) {
+  const sold = new Set();
+  for (const row of bagAgg.rows) {
+    sold.add(`${row.brand}|||${row.feed}|||${row.bagSize}`);
+  }
+  const dormant = [];
+  const catalog = state.catalog || {};
+  for (const brandKey of Object.keys(catalog)) {
+    const brand = displayBrand(brandKey);
+    for (const item of catalog[brandKey] || []) {
+      const feed = displayFeedType(item.type);
+      const bs = Number(item.bagSize) || 0;
+      const key = `${brand}|||${feed}|||${bs}`;
+      if (!sold.has(key)) dormant.push({ brand, feed, bagSize: bs });
+    }
+  }
+  return dormant;
+}
+
+function buildMonthlyAdvice(ym, bagAgg, kgAgg) {
+  const advice = [];
+  const monthName = monthLabel(ym);
+  const prevYm = previousYM(ym);
+  const prevBag = prevYm ? aggregateBagSalesForMonth(prevYm) : null;
+  const prevKg = prevYm ? aggregateKgSalesForMonth(prevYm) : null;
+
+  if (bagAgg.totalBags === 0 && kgAgg.totalKg === 0) {
+    advice.push(`No sales recorded for ${monthName}. Make sure staff are recording sales on the Sales Per Bags and Sales Per Kg pages.`);
+    return advice;
+  }
+
+  const topBag = bagAgg.rows[0];
+  if (topBag) {
+    advice.push(
+      `<strong>Top bag seller:</strong> ${topBag.brand} — ${topBag.feed} (${topBag.bagSize} kg) at ${topBag.bagsSold} bag${topBag.bagsSold === 1 ? "" : "s"} (${currency(topBag.revenue)}). Keep this product well stocked and visible for next month.`
+    );
+  }
+
+  const topKg = kgAgg.rows[0];
+  if (topKg) {
+    advice.push(
+      `<strong>Top retail seller:</strong> ${topKg.brand} — ${topKg.feed} at ${Number(topKg.kg).toFixed(2)} kg (${currency(topKg.revenue)}). Open a fresh bag early in the day so retail customers always find it.`
+    );
+  }
+
+  if (prevBag && prevBag.totalBags > 0) {
+    const diff = bagAgg.totalBags - prevBag.totalBags;
+    const pct = prevBag.totalBags ? Math.round((diff / prevBag.totalBags) * 100) : 0;
+    if (diff > 0) {
+      advice.push(`Bag sales are up ${pct}% versus ${monthLabel(prevYm)} (${prevBag.totalBags} → ${bagAgg.totalBags} bags). Keep the momentum — reorder before stock-outs.`);
+    } else if (diff < 0) {
+      advice.push(`Bag sales dropped ${Math.abs(pct)}% versus ${monthLabel(prevYm)} (${prevBag.totalBags} → ${bagAgg.totalBags} bags). Consider a small promotion on the slow lines or a customer call-back.`);
+    } else if (bagAgg.totalBags > 0) {
+      advice.push(`Bag sales matched ${monthLabel(prevYm)} (${bagAgg.totalBags} bags). Push for at least one extra bag a day to grow steadily.`);
+    }
+  }
+
+  if (prevKg && prevKg.totalKg > 0) {
+    const diff = kgAgg.totalKg - prevKg.totalKg;
+    const pct = prevKg.totalKg ? Math.round((diff / prevKg.totalKg) * 100) : 0;
+    if (diff > 0) {
+      advice.push(`Retail kg sales are up ${pct}% versus ${monthLabel(prevYm)}. Maintain consistent retail weight per bag so customers come back.`);
+    } else if (diff < 0) {
+      advice.push(`Retail kg sales dropped ${Math.abs(pct)}% versus ${monthLabel(prevYm)}. Promote small-kg sales to walk-in customers (e.g. starter packs).`);
+    }
+  }
+
+  if (bagAgg.passThroughBags > 0) {
+    const total = bagAgg.totalBags || 1;
+    const share = Math.round((bagAgg.passThroughBags / total) * 100);
+    if (share >= 50) {
+      advice.push(`<strong>${share}% of bag sales were pass-through (no profit).</strong> Promote direct shop sales — flyers, price boards, or a small bulk discount can shift this ratio.`);
+    } else if (share >= 25) {
+      advice.push(`${share}% of bag sales went through other shops. That's normal, but watch the ratio — direct shop sales make more profit per bag.`);
+    }
+  }
+
+  const dormant = catalogLinesWithNoBagSales(bagAgg);
+  if (dormant.length > 0 && dormant.length <= 6) {
+    const items = dormant.slice(0, 4).map((d) => `${d.brand} — ${d.feed} (${d.bagSize} kg)`).join("; ");
+    advice.push(`Feed lines with zero bag sales this month: ${items}${dormant.length > 4 ? ` and ${dormant.length - 4} more` : ""}. Consider a small promotion or asking customers what they need.`);
+  } else if (dormant.length > 6) {
+    advice.push(`${dormant.length} feed lines had zero bag sales this month. Trim slow-moving stock and put the cash into the top sellers.`);
+  }
+
+  const monthRows = (state.salesBags || []).filter((r) => rowMatchesYM(r, ym))
+    .concat((state.salesKg || []).filter((r) => rowMatchesYM(r, ym)));
+  const activeDays = new Set();
+  for (const r of monthRows) {
+    const p = parseDMYParts(r.date);
+    if (p) activeDays.add(`${p.y}-${p.m}-${p.d}`);
+  }
+  if (activeDays.size > 0) {
+    const totalRevenue = bagAgg.totalRevenue + kgAgg.totalRevenue;
+    const avg = totalRevenue / activeDays.size;
+    advice.push(`Average sales per active day this month: ${currency(avg)} across ${activeDays.size} day${activeDays.size === 1 ? "" : "s"}. Aim a bit higher next month — even 10% extra adds up.`);
+  }
+
+  return advice;
+}
+
+function renderMonthlyReport() {
+  if (state.currentPage !== "monthly-report") return;
+  if (state.user?.role !== "owner") return;
+  if (state.appInstance !== "amana" && state.appInstance !== "ufaray") return;
+
+  const monthInput = document.getElementById("mrMonth");
+  if (monthInput instanceof HTMLInputElement && !monthInput.value) {
+    monthInput.value = monthlyReportSelectedYM();
+  }
+  const ym = monthlyReportSelectedYM();
+
+  const bagAgg = aggregateBagSalesForMonth(ym);
+  const kgAgg = aggregateKgSalesForMonth(ym);
+  const monthName = monthLabel(ym);
+  const totalRevenue = bagAgg.totalRevenue + kgAgg.totalRevenue;
+
+  const titleEl = document.getElementById("mrSummaryTitle");
+  if (titleEl) titleEl.textContent = `${monthName} — total recorded revenue`;
+  const subEl = document.getElementById("mrSummarySub");
+  if (subEl) {
+    subEl.textContent = `Combined revenue from every bag and kg sale recorded in ${monthName}.`;
+  }
+  const amtEl = document.getElementById("mrSummaryAmount");
+  if (amtEl) amtEl.textContent = currency(totalRevenue);
+  const metaEl = document.getElementById("mrSummaryMeta");
+  if (metaEl) {
+    const kgPretty = Number(kgAgg.totalKg).toFixed(2);
+    metaEl.textContent = `${bagAgg.totalBags} bag${bagAgg.totalBags === 1 ? "" : "s"} sold (${currency(bagAgg.totalRevenue)}) · ${kgPretty} kg sold (${currency(kgAgg.totalRevenue)})`;
+  }
+
+  const bagsBody = document.getElementById("mr-bags-body");
+  if (bagsBody) {
+    if (bagAgg.rows.length === 0) {
+      bagsBody.innerHTML = `<tr><td colspan="6" class="empty">No bag sales for ${monthName}.</td></tr>`;
+    } else {
+      bagsBody.innerHTML = bagAgg.rows
+        .slice(0, 10)
+        .map((row, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${escapeHtmlCell(row.brand)}</td>
+            <td>${escapeHtmlCell(row.feed)}</td>
+            <td>${row.bagSize} kg</td>
+            <td>${row.bagsSold}</td>
+            <td>${currency(row.revenue)}</td>
+          </tr>`)
+        .join("");
+    }
+  }
+
+  const kgBody = document.getElementById("mr-kg-body");
+  if (kgBody) {
+    if (kgAgg.rows.length === 0) {
+      kgBody.innerHTML = `<tr><td colspan="5" class="empty">No kg sales for ${monthName}.</td></tr>`;
+    } else {
+      kgBody.innerHTML = kgAgg.rows
+        .slice(0, 10)
+        .map((row, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${escapeHtmlCell(row.brand)}</td>
+            <td>${escapeHtmlCell(row.feed)}</td>
+            <td>${Number(row.kg).toFixed(2)}</td>
+            <td>${currency(row.revenue)}</td>
+          </tr>`)
+        .join("");
+    }
+  }
+
+  const adviceEl = document.getElementById("mrAdvice");
+  if (adviceEl) {
+    const items = buildMonthlyAdvice(ym, bagAgg, kgAgg);
+    if (items.length === 0) {
+      adviceEl.innerHTML = `<li class="empty">No advice available for ${monthName} yet.</li>`;
+    } else {
+      adviceEl.innerHTML = items.map((html) => `<li>${html}</li>`).join("");
+    }
+  }
+}
+
 function applyEmployeeSalesDateRules() {
   const isEmployee = state.user && state.user.role === "employee";
   const todayStr = state.shopToday || clientShopTodayDMY();
@@ -1763,6 +2050,9 @@ function showLoggedIn() {
     }
     if (page === "pigs") {
       shouldShow = state.appInstance === "amana" && isOwner;
+    }
+    if (page === "monthly-report") {
+      shouldShow = isOwner && (state.appInstance === "amana" || state.appInstance === "ufaray");
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -3869,6 +4159,12 @@ function showPage(page) {
   if (page === "balance" && state.user?.role !== "owner") {
     return showPage("sales-bags");
   }
+  if (page === "monthly-report") {
+    if (state.user?.role !== "owner") return showPage("sales-bags");
+    if (state.appInstance !== "amana" && state.appInstance !== "ufaray") {
+      return showPage("inventory");
+    }
+  }
   state.currentPage = page;
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
@@ -3958,6 +4254,7 @@ function showPage(page) {
   }
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
+  if (page === "monthly-report") renderMonthlyReport();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -4230,6 +4527,7 @@ async function loadAllData() {
   renderCessAccountsTable();
   renderNahashonTable();
   renderPigsTable();
+  if (state.currentPage === "monthly-report") renderMonthlyReport();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
   restoreInventoryFormDraft(inventoryDraft);
@@ -4704,6 +5002,8 @@ if (pigsDateDisplay && pigsDate && pigsOpenCalendarBtn) {
 document.getElementById("pigsClearBtn")?.addEventListener("click", resetPigsForm);
 wireMoneyInputBlur(document.getElementById("pigsMoneyIn"));
 wireMoneyInputBlur(document.getElementById("pigsMoneyOut"));
+
+document.getElementById("mrMonth")?.addEventListener("change", () => renderMonthlyReport());
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
