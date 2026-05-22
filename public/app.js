@@ -1342,6 +1342,200 @@ function renderMonthlyReport() {
   }
 }
 
+/** Strip HTML tags from advice strings for PDF rendering. */
+function stripHtmlForPdf(html) {
+  return String(html || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Generates a PDF snapshot of the Monthly Report for the currently selected month. */
+function downloadMonthlyReportPdf() {
+  if (state.user?.role !== "owner") return;
+  if (state.appInstance !== "amana" && state.appInstance !== "ufaray") return;
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return;
+  }
+
+  const ym = monthlyReportSelectedYM();
+  const bagAgg = aggregateBagSalesForMonth(ym);
+  const kgAgg = aggregateKgSalesForMonth(ym);
+  const monthName = monthLabel(ym);
+  const totalRevenue = bagAgg.totalRevenue + kgAgg.totalRevenue;
+  const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const safeMonth = (ym || "").replace(/-/g, "");
+
+  const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
+  if (typeof autoTableFn !== "function") {
+    alert("PDF table helper is not loaded. Refresh and try again.");
+    return;
+  }
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const tableW = pageW - 2 * margin;
+  const G = { dark: [14, 92, 58], accent: [39, 150, 99], mint: [234, 248, 240], edge: [186, 222, 198] };
+
+  doc.setFillColor(...G.dark);
+  doc.rect(0, 0, pageW, 64, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text(businessTitle.toUpperCase(), margin, 30);
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "normal");
+  doc.text("MONTHLY REPORT", margin, 50);
+  doc.setFontSize(11);
+  doc.text(monthName, pageW - margin, 50, { align: "right" });
+
+  let y = 92;
+  doc.setFillColor(...G.mint);
+  doc.setDrawColor(...G.edge);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(margin, y - 8, tableW, 76, 6, 6, "FD");
+  doc.setTextColor(...G.dark);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text(`${monthName} — total recorded revenue`, margin + 12, y + 8);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(...G.accent);
+  doc.text(currency(totalRevenue), pageW - margin - 12, y + 14, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9.5);
+  doc.setTextColor(33, 33, 33);
+  const kgPretty = Number(kgAgg.totalKg).toFixed(2);
+  doc.text(
+    `${bagAgg.totalBags} bag${bagAgg.totalBags === 1 ? "" : "s"} sold (${currency(bagAgg.totalRevenue)})   |   ${kgPretty} kg sold (${currency(kgAgg.totalRevenue)})`,
+    margin + 12,
+    y + 32,
+  );
+  doc.text("Combined revenue from every bag and kg sale recorded in the selected month.", margin + 12, y + 50);
+  y += 88;
+
+  doc.setTextColor(...G.dark);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Top sellers — Feed Inventory (per bag)", margin, y);
+  y += 6;
+
+  const bagBody = bagAgg.rows.length === 0
+    ? [["—", `No bag sales for ${monthName}.`, "", "", "", ""]]
+    : bagAgg.rows.slice(0, 10).map((row, idx) => [
+        String(idx + 1),
+        row.brand,
+        row.feed,
+        `${row.bagSize} kg`,
+        String(row.bagsSold),
+        `Ksh${formatKshPlainNumber(row.revenue)}`,
+      ]);
+
+  autoTableFn.call(doc, {
+    head: [["#", "BRAND", "FEED TYPE", "BAG SIZE", "BAGS SOLD", "REVENUE"]],
+    body: bagBody,
+    startY: y + 6,
+    margin: { left: margin, right: margin },
+    tableWidth: tableW,
+    styles: { font: "helvetica", fontSize: 9.5, cellPadding: { top: 6, bottom: 6, left: 8, right: 8 }, valign: "middle", lineColor: G.edge, lineWidth: 0.2, textColor: [33, 33, 33] },
+    headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", valign: "middle", fontSize: 9 },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 28 },
+      1: { halign: "left" },
+      2: { halign: "left" },
+      3: { halign: "center", cellWidth: 60 },
+      4: { halign: "right", cellWidth: 70 },
+      5: { halign: "right", cellWidth: 90 },
+    },
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
+  });
+  y = (doc.lastAutoTable?.finalY || y) + 22;
+
+  if (y > 720) { doc.addPage(); y = 60; }
+
+  doc.setTextColor(...G.dark);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Top sellers — Sales Per Kg", margin, y);
+  y += 6;
+
+  const kgBody = kgAgg.rows.length === 0
+    ? [["—", `No kg sales for ${monthName}.`, "", "", ""]]
+    : kgAgg.rows.slice(0, 10).map((row, idx) => [
+        String(idx + 1),
+        row.brand,
+        row.feed,
+        Number(row.kg).toFixed(2),
+        `Ksh${formatKshPlainNumber(row.revenue)}`,
+      ]);
+
+  autoTableFn.call(doc, {
+    head: [["#", "BRAND", "FEED TYPE", "KG SOLD", "REVENUE"]],
+    body: kgBody,
+    startY: y + 6,
+    margin: { left: margin, right: margin },
+    tableWidth: tableW,
+    styles: { font: "helvetica", fontSize: 9.5, cellPadding: { top: 6, bottom: 6, left: 8, right: 8 }, valign: "middle", lineColor: G.edge, lineWidth: 0.2, textColor: [33, 33, 33] },
+    headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", valign: "middle", fontSize: 9 },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 28 },
+      1: { halign: "left" },
+      2: { halign: "left" },
+      3: { halign: "right", cellWidth: 80 },
+      4: { halign: "right", cellWidth: 100 },
+    },
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
+  });
+  y = (doc.lastAutoTable?.finalY || y) + 22;
+
+  if (y > 700) { doc.addPage(); y = 60; }
+
+  doc.setTextColor(...G.dark);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text("Advice for next month", margin, y);
+  y += 16;
+
+  const adviceLines = buildMonthlyAdvice(ym, bagAgg, kgAgg).map(stripHtmlForPdf);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(33, 33, 33);
+  if (adviceLines.length === 0) {
+    doc.text("No advice available for this month yet.", margin, y);
+  } else {
+    for (const line of adviceLines) {
+      if (y > 780) { doc.addPage(); y = 60; }
+      const wrapped = doc.splitTextToSize(`• ${line}`, tableW);
+      doc.text(wrapped, margin, y);
+      y += wrapped.length * 13 + 4;
+    }
+  }
+
+  const pageCount = doc.internal.getNumberOfPages();
+  const generatedAt = `${state.shopToday || clientShopTodayDMY()}`;
+  for (let i = 1; i <= pageCount; i += 1) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Generated ${generatedAt} · ${businessTitle}`, margin, doc.internal.pageSize.getHeight() - 18);
+    doc.text(`Page ${i} of ${pageCount}`, pageW - margin, doc.internal.pageSize.getHeight() - 18, { align: "right" });
+  }
+
+  doc.save(`${safeBusiness}-monthly-report-${safeMonth || "month"}.pdf`);
+}
+
 function applyEmployeeSalesDateRules() {
   const isEmployee = state.user && state.user.role === "employee";
   const todayStr = state.shopToday || clientShopTodayDMY();
@@ -1997,6 +2191,9 @@ function showLoggedIn() {
     el.classList.toggle("hidden", !isOwner);
   });
   document.querySelectorAll(".amana-only-bag-cess-block").forEach((el) => {
+    el.classList.toggle("hidden", !isOwner || state.appInstance !== "amana");
+  });
+  document.querySelectorAll(".amana-only-bag-pigs-block").forEach((el) => {
     el.classList.toggle("hidden", !isOwner || state.appInstance !== "amana");
   });
   document.querySelectorAll(".employee-only-action").forEach((el) => {
@@ -2945,6 +3142,16 @@ function renderOwnerPassThroughBagSales() {
       cessRows,
       "cess",
       "No Via Cess Accounts bag sales yet. Staff record these under Sales Per Bags with Sale recorded for set to By Cess."
+    );
+  }
+  const tbodyPigs = document.getElementById("pigs-bag-sales-body");
+  if (tbodyPigs && state.appInstance === "amana") {
+    const pigsRows = bags.filter((r) => normalizeSaleVia(r.through_party) === "Pigs Page");
+    renderOwnerPassThroughBagSalesTable(
+      tbodyPigs,
+      pigsRows,
+      "pigs-bag",
+      "No Via Pigs Page bag sales yet. Staff record these under Sales Per Bags with Sale recorded for set to Via Pigs Page."
     );
   }
 }
@@ -5004,6 +5211,14 @@ wireMoneyInputBlur(document.getElementById("pigsMoneyIn"));
 wireMoneyInputBlur(document.getElementById("pigsMoneyOut"));
 
 document.getElementById("mrMonth")?.addEventListener("change", () => renderMonthlyReport());
+document.getElementById("mrDownloadPdfBtn")?.addEventListener("click", () => {
+  try {
+    downloadMonthlyReportPdf();
+  } catch (err) {
+    console.error("Monthly report PDF failed", err);
+    alert("Could not generate the Monthly Report PDF. Refresh and try again.");
+  }
+});
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
@@ -6309,6 +6524,7 @@ function wireOwnerPassThroughBagSalesBodyListener(bodyId, kindPrefix) {
 
 wireOwnerPassThroughBagSalesBodyListener("ufaray-bag-sales-body", "ufaray");
 wireOwnerPassThroughBagSalesBodyListener("cess-bag-sales-body", "cess");
+wireOwnerPassThroughBagSalesBodyListener("pigs-bag-sales-body", "pigs-bag");
 
 function wireOwnerUfarayExtraTable(tableId, statusKind, statusSaveKind, saleKind, statusEndpointBase, saleEndpointBase) {
   document.getElementById(tableId)?.addEventListener("click", async (event) => {
