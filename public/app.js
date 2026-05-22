@@ -5372,10 +5372,11 @@ function shouldIncludeAmanaMpesaPaymentInPdf() {
 function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   const pageW = doc.internal.pageSize.getWidth();
   const w = tableW ?? pageW - 2 * margin;
-  const blockH = 88;
+  const blockH = 96;
   const green = [0, 166, 81];
   const greenDark = [0, 120, 58];
   const white = [255, 255, 255];
+  const headerTextY = startY + 14;
 
   doc.setFillColor(...green);
   doc.roundedRect(margin, startY, w, blockH, 8, 8, "F");
@@ -5384,10 +5385,12 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(...white);
-  doc.text(AMANA_MPESA_PAYMENT.brand, margin + 12, startY + 14);
+  const brandX = margin + 12;
+  doc.text(AMANA_MPESA_PAYMENT.brand, brandX, headerTextY);
+  const paymentsX = brandX + doc.getTextWidth(AMANA_MPESA_PAYMENT.brand) + 6;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
-  doc.text("PAYMENTS", margin + w - 12, startY + 14, { align: "right" });
+  doc.text("Payments", paymentsX, headerTextY);
 
   let y = startY + 30;
   doc.setFont("helvetica", "bold");
@@ -5406,13 +5409,7 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.text(AMANA_MPESA_PAYMENT.till, margin + 12, y);
-  y += 16;
-  doc.setDrawColor(255, 255, 255);
-  doc.setLineWidth(0.4);
-  doc.setLineDashPattern([3, 2], 0);
-  doc.line(margin + 12, y, margin + w - 12, y);
-  doc.setLineDashPattern([], 0);
-  y += 10;
+  y += 14;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.text(AMANA_MPESA_PAYMENT.payee, margin + 12, y);

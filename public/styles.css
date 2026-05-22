@@ -705,7 +705,8 @@ tr.table-date-separator td {
 .mpesa-payment-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 10px;
   padding: 12px 16px 10px;
   background: rgba(0, 0, 0, 0.12);
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
@@ -751,9 +752,7 @@ tr.table-date-separator td {
   line-height: 1.2;
 }
 .mpesa-payment-payee {
-  margin: 0 16px 16px;
+  margin: 4px 16px 16px;
   font-size: 1.05rem;
   font-weight: 600;
-  padding-top: 10px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.35);
 }
