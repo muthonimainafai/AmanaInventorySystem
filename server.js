@@ -846,11 +846,13 @@ async function initDb() {
       description TEXT NOT NULL,
       money_out REAL NOT NULL,
       total REAL NOT NULL,
+      category TEXT NOT NULL DEFAULT 'Other',
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
+  await run("ALTER TABLE employee_expenditure ADD COLUMN category TEXT NOT NULL DEFAULT 'Other'").catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS rose_inventory_entries (
@@ -3841,6 +3843,12 @@ app.get("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, r
   res.json(rows);
 });
 
+function normalizeExpenditureCategory(val) {
+  const s = String(val || "").trim().toLowerCase();
+  if (s === "operational costs" || s === "operational" || s === "ops") return "Operational costs";
+  return "Other";
+}
+
 app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
@@ -3851,12 +3859,13 @@ app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, 
   if (!Number.isFinite(moneyOut) || moneyOut < 0) {
     return res.status(400).json({ error: "Money out must be a valid non-negative number." });
   }
+  const category = normalizeExpenditureCategory(p.category);
   const total = moneyOut;
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO employee_expenditure (date, description, money_out, total, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, moneyOut, total, req.user.username, nowIso, nowIso]
+    `INSERT INTO employee_expenditure (date, description, money_out, total, category, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, moneyOut, total, category, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -3878,10 +3887,11 @@ app.put("/api/expenditure/:id", auth, allowRoles("owner", "employee"), async (re
   if (!Number.isFinite(moneyOut) || moneyOut < 0) {
     return res.status(400).json({ error: "Money out must be a valid non-negative number." });
   }
+  const category = normalizeExpenditureCategory(p.category);
   const total = moneyOut;
   await run(
-    `UPDATE employee_expenditure SET date = ?, description = ?, money_out = ?, total = ?, updated_at = ? WHERE id = ?`,
-    [dateCanon, description, moneyOut, total, new Date().toISOString(), id]
+    `UPDATE employee_expenditure SET date = ?, description = ?, money_out = ?, total = ?, category = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, moneyOut, total, category, new Date().toISOString(), id]
   );
   res.json({ ok: true });
 });

@@ -983,26 +983,70 @@ function inclusiveBusinessDaysFromOpen(openedDmy, todayDmy) {
   return diff >= 0 ? diff + 1 : 0;
 }
 
+/** Latest expenditure entry tagged "Operational costs" (returns its DD/MM/YYYY date, or null). */
+function findLastOperationalCostsPaymentDate() {
+  const rows = state.expenditureEntries || [];
+  let latestDmy = null;
+  let latestKey = null;
+  for (const row of rows) {
+    if (normalizeExpenditureCategory(row.category) !== "Operational costs") continue;
+    const dmy = formatDateDMY(row.date);
+    const parts = parseDMYParts(dmy);
+    if (!parts) continue;
+    const key = Date.UTC(parts.y, parts.m - 1, parts.d);
+    if (latestKey == null || key > latestKey) {
+      latestKey = key;
+      latestDmy = dmy;
+    }
+  }
+  return latestDmy;
+}
+
 function updateBalanceBanner() {
   if (state.user?.role !== "owner") return;
   const combined = getOwnerCombinedProfitTotal();
   const today = state.shopToday || clientShopTodayDMY();
-  const days = inclusiveBusinessDaysFromOpen(BUSINESS_OPENED_DMY, today);
   const dailyOps = balanceDailyOperationalCostKes();
-  const operational = days * dailyOps;
   const expRows = state.expenditureEntries || [];
   const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
+
+  const lastOpPaymentDmy = findLastOperationalCostsPaymentDate();
+  const totalDays = inclusiveBusinessDaysFromOpen(BUSINESS_OPENED_DMY, today);
+  let cycleStartDmy = BUSINESS_OPENED_DMY;
+  let daysUncovered = totalDays;
+  if (lastOpPaymentDmy) {
+    const lastParts = parseDMYParts(lastOpPaymentDmy);
+    if (lastParts) {
+      const dayAfter = new Date(Date.UTC(lastParts.y, lastParts.m - 1, lastParts.d + 1));
+      const dd = String(dayAfter.getUTCDate()).padStart(2, "0");
+      const mm = String(dayAfter.getUTCMonth() + 1).padStart(2, "0");
+      const yy = dayAfter.getUTCFullYear();
+      cycleStartDmy = `${dd}/${mm}/${yy}`;
+    }
+    const todayParts = parseDMYParts(today);
+    if (lastParts && todayParts) {
+      const utcLast = Date.UTC(lastParts.y, lastParts.m - 1, lastParts.d);
+      const utcToday = Date.UTC(todayParts.y, todayParts.m - 1, todayParts.d);
+      const diff = Math.floor((utcToday - utcLast) / 86400000);
+      daysUncovered = diff > 0 ? diff : 0;
+    } else {
+      daysUncovered = 0;
+    }
+  }
+  const operational = daysUncovered * dailyOps;
   const remaining = combined - operational - totalExpenditure;
+
   document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
     const formatted = currency(Math.abs(remaining));
     const isNegative = remaining < 0;
     el.textContent = isNegative ? `- ${formatted}` : formatted;
   });
-  const meta = `${currency(combined)} - (${currency(dailyOps)} × ${days} day${days === 1 ? "" : "s"}) - ${currency(
+  const cycleNote = lastOpPaymentDmy
+    ? `Current cycle since ${cycleStartDmy} (last Operational costs payment ${lastOpPaymentDmy})`
+    : `Current cycle since ${BUSINESS_OPENED_DMY} (no Operational costs payment recorded yet)`;
+  const meta = `${currency(combined)} - (${currency(dailyOps)} × ${daysUncovered} day${daysUncovered === 1 ? "" : "s"}) - ${currency(
     totalExpenditure
-  )} (expenditure) = ${currency(
-    remaining
-  )} · Opened ${BUSINESS_OPENED_DMY}`;
+  )} (expenditure) = ${currency(remaining)} · ${cycleNote}`;
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -3239,10 +3283,16 @@ function resetGasForm() {
   syncOwnerLineProfitMargin("gasBuyingPrice", "gasSellingPrice", "gasProfitMargin");
 }
 
+function normalizeExpenditureCategory(value) {
+  const s = String(value || "").trim().toLowerCase();
+  if (s === "operational costs" || s === "operational" || s === "ops") return "Operational costs";
+  return "Other";
+}
+
 function renderExpenditureTable() {
   if (!expBody) return;
   const rows = state.expenditureEntries || [];
-  const colSpan = 4;
+  const colSpan = 5;
   if (!rows.length) {
     expBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
     updateExpenditureAccumulatedDisplay();
@@ -3252,6 +3302,7 @@ function renderExpenditureTable() {
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${escapeHtmlCell(row.description)}</td>
+        <td>${escapeHtmlCell(normalizeExpenditureCategory(row.category))}</td>
         <td>${currency(row.money_out)}</td>
         <td>
           <div class="row-actions">
@@ -3343,6 +3394,8 @@ function resetExpenditureForm() {
   expenditureForm.reset();
   state.editExpenditureId = null;
   if (expDateDisplay) expDateDisplay.value = "";
+  const catEl = document.getElementById("expCategory");
+  if (catEl instanceof HTMLSelectElement) catEl.value = "Other";
   const saveBtn = document.getElementById("expSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
   applyEmployeeSalesDateRules();
@@ -5529,6 +5582,7 @@ expenditureForm?.addEventListener("submit", async (event) => {
     description: String(document.getElementById("expDescription")?.value || "").trim(),
     money_out: moneyOut,
     total: moneyOut,
+    category: normalizeExpenditureCategory(document.getElementById("expCategory")?.value),
   };
   try {
     if (state.editExpenditureId) {
@@ -6663,8 +6717,10 @@ expBody?.addEventListener("click", async (event) => {
     if (expDateDisplay) expDateDisplay.value = formatDateDMY(row.date);
     const desc = document.getElementById("expDescription");
     const out = document.getElementById("expMoneyOut");
+    const cat = document.getElementById("expCategory");
     if (desc) desc.value = row.description || "";
     if (out) out.value = row.money_out ?? 0;
+    if (cat instanceof HTMLSelectElement) cat.value = normalizeExpenditureCategory(row.category);
     const saveBtn = document.getElementById("expSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
     return;

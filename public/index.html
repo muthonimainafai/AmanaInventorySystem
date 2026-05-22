@@ -1758,10 +1758,21 @@
                   <input type="text" id="expDescription" required />
                 </label>
                 <label>
+                  Category
+                  <select id="expCategory" required>
+                    <option value="Other">Other</option>
+                    <option value="Operational costs">Operational costs (resets the 540/day counter)</option>
+                  </select>
+                </label>
+                <label>
                   Money out
                   <input type="number" id="expMoneyOut" min="0" step="0.01" required />
                 </label>
               </div>
+              <p class="field-hint" style="margin-top: 0.5rem">
+                Use <strong>Operational costs</strong> when you make the monthly payment for daily operational costs (rent, salaries, etc.).
+                Recording one resets the running 540/day counter on the Balance page from the day after the payment date. Use <strong>Other</strong> for any other money going out.
+              </p>
               <div class="actions">
                 <button type="submit" id="expSaveBtn">Save entry</button>
                 <button type="button" class="secondary" id="expClearBtn">Clear</button>
@@ -1787,11 +1798,12 @@
                   <tr>
                     <th>Date</th>
                     <th>Description</th>
+                    <th>Category</th>
                     <th>Money out</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="exp-body"><tr><td colspan="4" class="empty">No records.</td></tr></tbody>
+                <tbody id="exp-body"><tr><td colspan="5" class="empty">No records.</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -1805,7 +1817,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Remaining balance after daily operational costs</p>
                   <p class="profit-highlight-sub">
-                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day from the opening date (inclusive) to today, and minus total recorded expenditures.
+                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for the current operational cycle (since the day after the last <em>Operational costs</em> payment, or the opening date if none yet), and minus total recorded expenditures.
                   </p>
                 </div>
                 <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>
