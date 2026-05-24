@@ -1702,8 +1702,24 @@ function formatDateWithDayName(dateValue) {
   return `${WEEKDAY_NAMES[dt.getDay()]} ${dmy}`;
 }
 
-/** Fixed validity line on calculator proforma PDFs. */
-const CALC_PROFORMA_VALID_UNTIL_TEXT = "Saturday 12.00pm";
+/** Returns the DD/MM/YYYY of the coming Saturday (or today if today is Saturday). */
+function nextSaturdayDMY(fromDMY) {
+  const parts = parseDMYParts(fromDMY);
+  if (!parts) return fromDMY;
+  const dt = new Date(parts.y, parts.m - 1, parts.d);
+  const dayOfWeek = dt.getDay(); // 0 = Sun, 6 = Sat
+  const daysUntilSat = dayOfWeek === 6 ? 0 : (6 - dayOfWeek + 7) % 7;
+  dt.setDate(dt.getDate() + daysUntilSat);
+  const d = String(dt.getDate()).padStart(2, "0");
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  return `${d}/${m}/${dt.getFullYear()}`;
+}
+
+/** "Saturday DD/MM/YYYY 12.00pm" — validity line for proforma/invoice PDFs. */
+function calcValidUntilText(fromDMY) {
+  const satDMY = nextSaturdayDMY(fromDMY);
+  return `Saturday ${satDMY} 12.00pm`;
+}
 
 function compareDMYParts(a, b) {
   if (a.y !== b.y) return a.y - b.y;
@@ -5828,7 +5844,7 @@ async function downloadCalcChickenProformaPdf() {
   ry += 14;
   doc.text(`DATE: ${formatDateWithDayName(row.dateStr)}`, rightX, ry, { align: "right" });
   ry += 14;
-  doc.text(`VALID UNTIL: ${CALC_PROFORMA_VALID_UNTIL_TEXT}`, rightX, ry, { align: "right" });
+  doc.text(`VALID UNTIL: ${calcValidUntilText(row.dateStr)}`, rightX, ry, { align: "right" });
 
   const desc = `${row.breed} DAY-OLD CHICKS`.replace(/\s+/g, " ").trim().toUpperCase();
   const tableBody = [[desc, String(row.qtyNum), `Ksh${formatKshPlainNumber(row.unitPrice)}`, `Ksh${formatKshPlainNumber(row.lineTotal)}`]];
@@ -6140,7 +6156,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const dueForPdf = getCalcDueDateForPdf();
   const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
   const leftBlockH = 14 + billLines.length * 12;
-  const rightBlockH = isProforma ? 14 * 3 : 14 * 4;
+  const rightBlockH = 14 * 3;
   const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
 
   doc.setFillColor(...G.mint);
@@ -6161,13 +6177,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   ry += 14;
   doc.text(`DATE: ${formatDateWithDayName(today)}`, rightX, ry, { align: "right" });
   ry += 14;
-  if (isProforma) {
-    doc.text(`VALID UNTIL: ${CALC_PROFORMA_VALID_UNTIL_TEXT}`, rightX, ry, { align: "right" });
-  } else {
-    doc.text(`DUE DATE: ${formatDateWithDayName(dueForPdf)}`, rightX, ry, { align: "right" });
-    ry += 14;
-    doc.text("TERMS: Due on receipt", rightX, ry, { align: "right" });
-  }
+  doc.text(`VALID UNTIL: ${calcValidUntilText(today)}`, rightX, ry, { align: "right" });
 
   const tableBody = exportRows.map((r) => {
     const rate = r.sellingNum;
