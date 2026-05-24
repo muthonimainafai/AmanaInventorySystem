@@ -1711,6 +1711,57 @@ function compareDMYParts(a, b) {
   return a.d - b.d;
 }
 
+function chickenRowDateIso(row) {
+  const dmy = formatDateDMY(row?.date);
+  return dmy ? toIsoDate(dmy) : "";
+}
+
+function rowInDateRangeInclusive(row, fromDMY, toDMY) {
+  const rowParts = parseDMYParts(formatDateDMY(row?.date));
+  const fromParts = parseDMYParts(fromDMY);
+  const toParts = parseDMYParts(toDMY);
+  if (!rowParts || !fromParts || !toParts) return false;
+  return compareDMYParts(rowParts, fromParts) >= 0 && compareDMYParts(rowParts, toParts) <= 0;
+}
+
+function initChickenPdfDateDefaults() {
+  const fromDisplay = document.getElementById("chPdfDateFromDisplay");
+  const fromInput = document.getElementById("chPdfDateFrom");
+  const toDisplay = document.getElementById("chPdfDateToDisplay");
+  const toInput = document.getElementById("chPdfDateTo");
+  if (!fromDisplay || !fromInput || !toDisplay || !toInput) return;
+
+  const todayDMY = formatDateDMY(state.shopToday || clientShopTodayDMY());
+  const todayParts = parseDMYParts(todayDMY);
+  const firstDMY = todayParts
+    ? `01/${String(todayParts.m).padStart(2, "0")}/${todayParts.y}`
+    : "";
+
+  if (!fromDisplay.value.trim()) {
+    fromDisplay.value = firstDMY;
+    fromInput.value = toIsoDate(firstDMY);
+  }
+  if (!toDisplay.value.trim()) {
+    toDisplay.value = todayDMY;
+    toInput.value = toIsoDate(todayDMY);
+  }
+}
+
+function chickenPdfSelectedDateRange() {
+  const fromDisplay = document.getElementById("chPdfDateFromDisplay");
+  const fromInput = document.getElementById("chPdfDateFrom");
+  const toDisplay = document.getElementById("chPdfDateToDisplay");
+  const toInput = document.getElementById("chPdfDateTo");
+
+  let fromDMY = (fromDisplay?.value || "").trim();
+  if (!fromDMY && fromInput?.value) fromDMY = formatDateDMY(fromInput.value);
+
+  let toDMY = (toDisplay?.value || "").trim();
+  if (!toDMY && toInput?.value) toDMY = formatDateDMY(toInput.value);
+
+  return { fromDMY, toDMY };
+}
+
 function tableDateSeparatorRow(colSpan) {
   return `<tr class="table-date-separator" aria-hidden="true"><td colspan="${colSpan}"></td></tr>`;
 }
@@ -1896,6 +1947,20 @@ function saleLineTotalChicken(row) {
   const t = Number(row.total_amount);
   if (Number.isFinite(t)) return t;
   return Number(row.quantity_birds || 0) * Number(row.unit_price || 0);
+}
+
+/** Feed line total for a staff sale row (0 for owner inventory rows). */
+function chickenSaleLineFeedTotal(row) {
+  if (isChickenRowOwnerInventory(row)) return 0;
+  const raw = row.feed_line_total;
+  if (raw === "" || raw == null) return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Chicks amount + feed amount for this sale. */
+function chickenSaleLineCombinedTotal(row) {
+  return saleLineTotalChicken(row) + chickenSaleLineFeedTotal(row);
 }
 
 function escapeHtmlCell(text) {
@@ -4166,7 +4231,7 @@ function chickenSalesTableRowsHtml() {
   const emptyMsg =
     state.user.role === "owner" ? "No chick records yet." : "No chick sales recorded yet.";
   const isEmployeeViewer = state.user.role === "employee";
-  const colSpan = isEmployeeViewer ? 19 : 20;
+  const colSpan = isEmployeeViewer ? 20 : 21;
   if (!state.chickenSales.length) {
     return `<tr><td colspan="${colSpan}" class="empty">${emptyMsg}</td></tr>`;
   }
@@ -4188,6 +4253,7 @@ function chickenSalesTableRowsHtml() {
     const viaRaw = String(row.through_party || "").trim();
     const viaCell = viaRaw ? `By ${viaRaw}` : "—";
     const feedCells = chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow);
+    const combinedTotal = chickenSaleLineCombinedTotal(row);
     return `
       <tr data-chicken-row-id="${row.id}">
         <td>${formatDateDMY(row.date)}</td>
@@ -4197,6 +4263,7 @@ function chickenSalesTableRowsHtml() {
         <td>${currency(row.unit_price)}</td>
         <td>${currency(saleLineTotalChicken(row))}</td>
         ${feedCells}
+        <td>${currency(combinedTotal)}</td>
         ${customerCells}
         ${profitCell}
         <td>${viaCell}</td>
@@ -4254,6 +4321,169 @@ function renderChickenSalesHistoryTable() {
     staffMarginSum += chickenSaleLineProfit(r);
   }
   summaryEl.textContent = `Your inventory: ${invBirds} chicks · ${currency(invRevenue)} at listed prices. Staff sales in this table: margin total ${currency(staffMarginSum)} (cleared payments only; matches Profit column). Highlight above uses the same basis.`;
+}
+
+function downloadChickenSalesPdf() {
+  if (state.user?.role !== "owner") return;
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return;
+  }
+  const autoTableCheck = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  const autoTableFn = autoTableCheck.autoTable || jsPdfNs?.autoTable;
+  if (typeof autoTableFn !== "function") {
+    alert("PDF table helper is not loaded. Refresh and try again.");
+    return;
+  }
+
+  const { fromDMY, toDMY } = chickenPdfSelectedDateRange();
+
+  if (!fromDMY || !toDMY) {
+    alert("Please set both Date From and Date To before downloading the PDF.");
+    return;
+  }
+  if (!isValidDMY(fromDMY) || !isValidDMY(toDMY)) {
+    alert("Please enter valid dates in DD/MM/YYYY format.");
+    return;
+  }
+  const fromParts = parseDMYParts(fromDMY);
+  const toParts = parseDMYParts(toDMY);
+  if (compareDMYParts(fromParts, toParts) > 0) {
+    alert("Date From must be on or before Date To.");
+    return;
+  }
+
+  const filtered = sortRowsLatestFirst(
+    state.chickenSales.filter((r) => rowInDateRangeInclusive(r, fromDMY, toDMY)),
+  );
+
+  const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const safeFrom = toIsoDate(fromDMY).replace(/-/g, "");
+  const safeTo = toIsoDate(toDMY).replace(/-/g, "");
+  const fromLabel = fromDMY;
+  const toLabel = toDMY;
+
+  const doc = new JsPdfCtor({ orientation: "landscape", unit: "pt", format: "a4" });
+  const autoFn = doc.autoTable || jsPdfNs?.autoTable;
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 36;
+  const G = { dark: [14, 92, 58], accent: [39, 150, 99], mint: [234, 248, 240], edge: [186, 222, 198] };
+
+  doc.setFillColor(...G.dark);
+  doc.rect(0, 0, pageW, 58, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(businessTitle.toUpperCase(), margin, 26);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text("CHICKEN SALES INVENTORY", margin, 44);
+  doc.setFontSize(9);
+  doc.text(`Period: ${fromLabel} – ${toLabel}`, pageW - margin, 44, { align: "right" });
+
+  let y = 74;
+  if (!filtered.length) {
+    doc.setTextColor(...G.dark);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(10);
+    doc.text(`No chicken sales records found between ${fromLabel} and ${toLabel}.`, margin, y + 14);
+    doc.save(`${safeBusiness}-chicken-sales-${safeFrom}-${safeTo}.pdf`);
+    return;
+  }
+
+  let totalChicks = 0;
+  let totalRevenue = 0;
+  let totalCombined = 0;
+  let totalProfit = 0;
+  const body = filtered.map((r) => {
+    const qty = Number(r.quantity_birds) || 0;
+    const lineTotal = saleLineTotalChicken(r);
+    const feedTotal = chickenSaleLineFeedTotal(r);
+    const combined = lineTotal + feedTotal;
+    const profit = chickenSaleLineProfit(r);
+    totalChicks += qty;
+    totalRevenue += lineTotal;
+    totalCombined += combined;
+    totalProfit += profit;
+    const via = String(r.through_party || "").trim();
+    const paid = Number(r.money_paid) || 0;
+    const balance = lineTotal - paid;
+    return [
+      formatDateDMY(r.date),
+      r.breed || "—",
+      r.description || "—",
+      String(qty),
+      currency(r.unit_price),
+      currency(lineTotal),
+      currency(combined),
+      r.customer_name || "—",
+      r.customer_phone || "—",
+      currency(paid),
+      currency(balance),
+      chickenSalePaymentStatusLabel(r),
+      chickenSaleDeliveryStatusLabel(r),
+      currency(profit),
+      via ? `By ${via}` : "—",
+      r.created_by || "—",
+    ];
+  });
+
+  body.push([
+    { content: "TOTALS", colSpan: 3, styles: { fontStyle: "bold", halign: "right" } },
+    { content: String(totalChicks), styles: { fontStyle: "bold", halign: "right" } },
+    "",
+    { content: currency(totalRevenue), styles: { fontStyle: "bold", halign: "right" } },
+    { content: currency(totalCombined), styles: { fontStyle: "bold", halign: "right" } },
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    { content: currency(totalProfit), styles: { fontStyle: "bold", halign: "right" } },
+    "",
+    "",
+  ]);
+
+  autoFn.call(doc, {
+    head: [["Date", "Breed", "Notes", "Chicks", "Price/chick", "Chicks Amount", "Combined Total", "Customer", "Phone", "Paid", "Balance", "Payment", "Delivery", "Profit", "Via", "By"]],
+    body,
+    startY: y,
+    margin: { left: margin, right: margin },
+    styles: { font: "helvetica", fontSize: 7.5, cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }, valign: "middle", lineColor: G.edge, lineWidth: 0.2, textColor: [33, 33, 33], overflow: "linebreak" },
+    headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", fontSize: 7.5 },
+    columnStyles: {
+      0: { cellWidth: 48 },
+      1: { cellWidth: 46 },
+      2: { cellWidth: 46 },
+      3: { halign: "right", cellWidth: 32 },
+      4: { halign: "right", cellWidth: 46 },
+      5: { halign: "right", cellWidth: 52 },
+      6: { halign: "right", cellWidth: 54 },
+      7: { cellWidth: 48 },
+      8: { cellWidth: 46 },
+      9: { halign: "right", cellWidth: 46 },
+      10: { halign: "right", cellWidth: 46 },
+      11: { halign: "center", cellWidth: 42 },
+      12: { halign: "center", cellWidth: 42 },
+      13: { halign: "right", cellWidth: 48 },
+      14: { cellWidth: 36 },
+      15: { cellWidth: 36 },
+    },
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
+  });
+
+  y = (doc.lastAutoTable?.finalY || y) + 14;
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Generated ${new Date().toLocaleString()} · ${filtered.length} record(s) · Period: ${fromLabel} – ${toLabel}`, margin, y);
+
+  doc.save(`${safeBusiness}-chicken-sales-${safeFrom}-${safeTo}.pdf`);
 }
 
 function populateChickenBreedSelect() {
@@ -4444,6 +4674,7 @@ function showPage(page) {
     applyEmployeeFeedSalePricingUi();
   }
   if (page === "chicken-inventory") {
+    initChickenPdfDateDefaults();
     renderChickenSalesHistoryTable();
     updateChickenProfitDisplay();
   }
@@ -5199,6 +5430,26 @@ wireMoneyInputBlur(document.getElementById("skKgSold"));
 wireMoneyInputBlur(document.getElementById("skPricePerKg"));
 
 wireDatePicker(chDateDisplay, chDate, chOpenCalendarBtn);
+const chPdfDateFromDisplay = document.getElementById("chPdfDateFromDisplay");
+const chPdfDateFrom = document.getElementById("chPdfDateFrom");
+const chPdfOpenCalendarFromBtn = document.getElementById("chPdfOpenCalendarFromBtn");
+const chPdfDateToDisplay = document.getElementById("chPdfDateToDisplay");
+const chPdfDateTo = document.getElementById("chPdfDateTo");
+const chPdfOpenCalendarToBtn = document.getElementById("chPdfOpenCalendarToBtn");
+if (chPdfDateFromDisplay && chPdfDateFrom && chPdfOpenCalendarFromBtn) {
+  wireDatePicker(chPdfDateFromDisplay, chPdfDateFrom, chPdfOpenCalendarFromBtn);
+}
+if (chPdfDateToDisplay && chPdfDateTo && chPdfOpenCalendarToBtn) {
+  wireDatePicker(chPdfDateToDisplay, chPdfDateTo, chPdfOpenCalendarToBtn);
+}
+document.getElementById("chDownloadPdfBtn")?.addEventListener("click", () => {
+  try {
+    downloadChickenSalesPdf();
+  } catch (err) {
+    console.error(err);
+    alert(err?.message || "Could not generate PDF. Please try again.");
+  }
+});
 chFeedBrand?.addEventListener("change", () => {
   populateChChickenFeedTypes(chFeedBrand.value);
 });
