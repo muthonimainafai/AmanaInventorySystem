@@ -82,7 +82,7 @@ const PAGE_HEADINGS = {
   "rose-inventory": "Rose Inventory",
   "nahashon-records": "Nahashon Records",
   "cess-accounts": "Cess Accounts",
-  "hadifa-accounts": "Hadifa Accounts",
+  credit: "Credit",
   calculator: "Calculator",
   pigs: "Pigs Page",
   expenditure: "Expenditure",
@@ -2354,7 +2354,7 @@ function showLoggedIn() {
     if (page === "cess-accounts") {
       shouldShow = state.appInstance === "amana" && isOwner;
     }
-    if (page === "hadifa-accounts") {
+    if (page === "credit") {
       shouldShow = state.appInstance === "ufaray";
     }
     if (page === "nahashon-records") {
@@ -4748,7 +4748,7 @@ function showPage(page) {
       return showPage("sales-bags");
     }
   }
-  if (page === "hadifa-accounts" && state.appInstance !== "ufaray") {
+  if (page === "credit" && state.appInstance !== "ufaray") {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
   if (page === "pigs" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
@@ -4863,7 +4863,7 @@ function showPage(page) {
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
-  if (page === "hadifa-accounts") renderHadifaAccountsTable();
+  if (page === "credit") renderHadifaAccountsTable();
   if (page === "pigs") renderPigsTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
@@ -5559,7 +5559,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
       if (!staffMayUseCalculator) return;
     }
     if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return;
-    if (page === "hadifa-accounts" && state.appInstance !== "ufaray") return;
+    if (page === "credit" && state.appInstance !== "ufaray") return;
     if (page === "nahashon-records" && state.appInstance !== "terry") return;
     showPage(page);
   });
