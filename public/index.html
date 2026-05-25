@@ -587,6 +587,7 @@
                   </select>
                 </label>
                 <div class="grid employee-only-action hidden" style="grid-column: 1 / -1">
+                  <label style="grid-column: 1 / -1; font-weight: 600; font-size: 0.85em; color: var(--text-muted, #666); padding-bottom: 0; margin-bottom: -4px;">Feed 1</label>
                   <label>
                     Feed brand
                     <select id="chFeedBrand">
@@ -606,6 +607,27 @@
                   <label>
                     Feed amount (KES)
                     <input type="text" id="chFeedLineTotal" readonly title="Bags × selling price per bag from Feed Inventory for the selected product." />
+                  </label>
+                  <label style="grid-column: 1 / -1; font-weight: 600; font-size: 0.85em; color: var(--text-muted, #666); padding-bottom: 0; margin-bottom: -4px;">Feed 2 — optional</label>
+                  <label>
+                    Feed brand 2
+                    <select id="chFeedBrand2">
+                      <option value="">Select brand</option>
+                    </select>
+                  </label>
+                  <label>
+                    Feed type 2
+                    <select id="chFeedType2" disabled>
+                      <option value="">Select feed type</option>
+                    </select>
+                  </label>
+                  <label>
+                    Feed quantity 2 (bags)
+                    <input type="number" id="chFeedBagQty2" min="0" step="1" value="0" title="Number of bags for the second feed product." />
+                  </label>
+                  <label>
+                    Feed amount 2 (KES)
+                    <input type="text" id="chFeedLineTotal2" readonly title="Bags × selling price per bag from Feed Inventory for the second feed product." />
                   </label>
                 </div>
               </div>

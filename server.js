@@ -685,6 +685,10 @@ async function initDb() {
   await run("ALTER TABLE chicken_sales ADD COLUMN feed_type TEXT").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN feed_bag_qty INTEGER").catch(() => {});
   await run("ALTER TABLE chicken_sales ADD COLUMN feed_line_total REAL").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_brand2 TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_type2 TEXT").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_bag_qty2 INTEGER").catch(() => {});
+  await run("ALTER TABLE chicken_sales ADD COLUMN feed_line_total2 REAL").catch(() => {});
   await run(
     "UPDATE chicken_sales SET delivery_status = 'delivered' WHERE (delivery_status IS NULL OR TRIM(COALESCE(delivery_status, '')) = '') AND LOWER(TRIM(COALESCE(payment_status, ''))) = 'delivered'"
   ).catch(() => {});
@@ -2160,6 +2164,81 @@ async function resolveEmployeeChickenFeedBundle(req, res, p, existingRow = null)
   };
 }
 
+/**
+ * Optional second feed line for employee chicken sales (same logic as resolveEmployeeChickenFeedBundle
+ * but uses feed_brand2/feed_type2/feed_bag_qty2 fields). Returns null fields when not provided.
+ */
+async function resolveEmployeeChickenFeedBundle2(req, res, p, existingRow = null) {
+  if (req.user.role !== "employee") {
+    return { feed_brand2: null, feed_type2: null, feed_bag_qty2: null, feed_line_total2: null };
+  }
+  const brandRaw =
+    p.feed_brand2 != null && String(p.feed_brand2).trim() !== ""
+      ? String(p.feed_brand2).trim()
+      : existingRow?.feed_brand2 != null && String(existingRow.feed_brand2).trim() !== ""
+        ? String(existingRow.feed_brand2).trim()
+        : "";
+  const feedTypeRaw =
+    p.feed_type2 != null && String(p.feed_type2).trim() !== ""
+      ? String(p.feed_type2).trim()
+      : existingRow?.feed_type2 != null && String(existingRow.feed_type2).trim() !== ""
+        ? String(existingRow.feed_type2).trim()
+        : "";
+  if (!brandRaw || !feedTypeRaw) {
+    return { feed_brand2: null, feed_type2: null, feed_bag_qty2: null, feed_line_total2: null };
+  }
+  let bagQtyRaw = p.feed_bag_qty2;
+  if (bagQtyRaw === undefined || bagQtyRaw === null || String(bagQtyRaw).trim() === "") {
+    if (existingRow != null && existingRow.feed_bag_qty2 != null && String(existingRow.feed_bag_qty2).trim() !== "") {
+      bagQtyRaw = existingRow.feed_bag_qty2;
+    } else {
+      bagQtyRaw = 0;
+    }
+  }
+  const bagQty = bagQtyRaw === "" || bagQtyRaw == null ? NaN : Math.floor(Number(bagQtyRaw));
+  if (!Number.isFinite(bagQty) || bagQty < 0) {
+    res.status(400).json({ error: "Feed 2 quantity (bags) must be a whole number zero or greater." });
+    return null;
+  }
+  const brandKey = resolveBrandKey(brandRaw);
+  const catalog = catalogForActiveTenant();
+  if (!catalog[brandKey] || !Array.isArray(catalog[brandKey]) || !catalog[brandKey].length) {
+    res.status(400).json({ error: "Unknown feed brand (2nd feed) for this site." });
+    return null;
+  }
+  const ftCanon = feedCatalogTypeValue(brandKey, feedTypeRaw);
+  const typeOk = catalog[brandKey].some((i) => normalizeFeedType(i.type) === normalizeFeedType(ftCanon));
+  if (!typeOk) {
+    res.status(400).json({ error: "Select a valid feed type for the 2nd feed brand." });
+    return null;
+  }
+  const defaultBagSize = catalogBagSizeForFeed(brandKey, ftCanon);
+  const lookupFeedType = canonicalFeedTypeForLookup(brandKey, ftCanon, defaultBagSize);
+  let itemResolved =
+    (await getInventoryItem(brandKey, lookupFeedType, Number(defaultBagSize))) ||
+    (await getInventoryItemAnyBagSize(brandKey, lookupFeedType, defaultBagSize));
+  if (!itemResolved) {
+    res.status(400).json({
+      error: "No Feed Inventory line for the 2nd feed brand and type. The owner must add stock first.",
+    });
+    return null;
+  }
+  const selling = Number(itemResolved.selling_price);
+  if (!Number.isFinite(selling) || selling < 0) {
+    res.status(400).json({ error: "Feed Inventory selling price is missing for the 2nd feed product." });
+    return null;
+  }
+  const storedBrand = resolveBrandKey(itemResolved.brand) || brandKey;
+  const storedType = feedCatalogTypeValue(brandKey, itemResolved.feed_type) || ftCanon;
+  const lineTotal = bagQty * selling;
+  return {
+    feed_brand2: storedBrand,
+    feed_type2: storedType,
+    feed_bag_qty2: bagQty,
+    feed_line_total2: lineTotal,
+  };
+}
+
 async function assertEmployeeChickenSalePrice(req, res, breed, unitPrice) {
   if (req.user.role !== "employee") return true;
   const row = await get("SELECT selling_price FROM chicken_breeds WHERE breed = ?", [breed]);
@@ -2286,22 +2365,26 @@ async function applyChickenSaleFeedInventoryEffect(row, { reverse = false, skipR
     const u = await get("SELECT role FROM users WHERE username = ?", [row.created_by]);
     if (u?.role !== "employee") return;
   }
-  const brandRaw = String(row.feed_brand || "").trim();
-  const feedTypeRaw = String(row.feed_type || "").trim();
-  const bags = Math.floor(Number(row.feed_bag_qty));
-  if (!brandRaw || !feedTypeRaw) return;
-  if (!Number.isFinite(bags) || bags <= 0) return;
-  const brandKey = resolveBrandKey(brandRaw);
-  const feedTypeCanon = feedCatalogTypeValue(brandKey, feedTypeRaw);
-  const bagSize = catalogBagSizeForFeed(brandKey, feedTypeCanon);
-  if (!Number.isFinite(bagSize) || bagSize <= 0) return;
-  await adjustInventoryBags({
-    brand: brandKey,
-    feedType: feedTypeCanon,
-    bagSize,
-    deltaBags: reverse ? bags : -bags,
-    recordProfit: false,
-  });
+  async function applyOneFeedLine(brandField, typeField, qtyField) {
+    const brandRaw = String(row[brandField] || "").trim();
+    const feedTypeRaw = String(row[typeField] || "").trim();
+    const bags = Math.floor(Number(row[qtyField]));
+    if (!brandRaw || !feedTypeRaw) return;
+    if (!Number.isFinite(bags) || bags <= 0) return;
+    const brandKey = resolveBrandKey(brandRaw);
+    const feedTypeCanon = feedCatalogTypeValue(brandKey, feedTypeRaw);
+    const bagSize = catalogBagSizeForFeed(brandKey, feedTypeCanon);
+    if (!Number.isFinite(bagSize) || bagSize <= 0) return;
+    await adjustInventoryBags({
+      brand: brandKey,
+      feedType: feedTypeCanon,
+      bagSize,
+      deltaBags: reverse ? bags : -bags,
+      recordProfit: false,
+    });
+  }
+  await applyOneFeedLine("feed_brand", "feed_type", "feed_bag_qty");
+  await applyOneFeedLine("feed_brand2", "feed_type2", "feed_bag_qty2");
 }
 
 function isChickenFeedInventoryStockError(err) {
@@ -5278,6 +5361,8 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   if (marginSnap == null) return;
   const feedBundle = await resolveEmployeeChickenFeedBundle(req, res, p, null);
   if (feedBundle == null) return;
+  const feedBundle2 = await resolveEmployeeChickenFeedBundle2(req, res, p, null);
+  if (feedBundle2 == null) return;
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
@@ -5291,6 +5376,9 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
           feed_brand: feedBundle.feed_brand,
           feed_type: feedBundle.feed_type,
           feed_bag_qty: feedBundle.feed_bag_qty,
+          feed_brand2: feedBundle2.feed_brand2,
+          feed_type2: feedBundle2.feed_type2,
+          feed_bag_qty2: feedBundle2.feed_bag_qty2,
         },
         { skipRoleCheck: true }
       );
@@ -5299,8 +5387,8 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
       await adjustChickenBreedAccumulatedProfit(breed, qty * marginSnap);
     }
     await run(
-      `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, feed_brand, feed_type, feed_bag_qty, feed_line_total, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chicken_sales (date, description, quantity_birds, weight_kg, unit_price, total_amount, breed, margin_snap, customer_name, customer_phone, money_paid, payment_status, delivery_status, through_party, pass_through_status, feed_brand, feed_type, feed_bag_qty, feed_line_total, feed_brand2, feed_type2, feed_bag_qty2, feed_line_total2, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         p.date,
         description,
@@ -5321,6 +5409,10 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
         feedBundle.feed_type,
         feedBundle.feed_bag_qty,
         feedBundle.feed_line_total,
+        feedBundle2.feed_brand2,
+        feedBundle2.feed_type2,
+        feedBundle2.feed_bag_qty2,
+        feedBundle2.feed_line_total2,
         req.user.username,
         nowIso,
         nowIso,
@@ -5368,6 +5460,8 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   if (marginSnap == null) return;
   const feedBundle = await resolveEmployeeChickenFeedBundle(req, res, p, currentCh);
   if (feedBundle == null) return;
+  const feedBundle2 = await resolveEmployeeChickenFeedBundle2(req, res, p, currentCh);
+  if (feedBundle2 == null) return;
   const cust = normalizeChickenCustomerPayment(p, totalAmount, req.user.role);
   const recordsProfit = req.user.role === "employee";
   const marginSnapStored = recordsProfit ? marginSnap : 0;
@@ -5386,12 +5480,15 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
           feed_brand: feedBundle.feed_brand,
           feed_type: feedBundle.feed_type,
           feed_bag_qty: feedBundle.feed_bag_qty,
+          feed_brand2: feedBundle2.feed_brand2,
+          feed_type2: feedBundle2.feed_type2,
+          feed_bag_qty2: feedBundle2.feed_bag_qty2,
         },
         { skipRoleCheck: true }
       );
     }
     await run(
-      `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, feed_brand=?, feed_type=?, feed_bag_qty=?, feed_line_total=?, updated_at=? WHERE id=?`,
+      `UPDATE chicken_sales SET date=?, description=?, quantity_birds=?, weight_kg=?, unit_price=?, total_amount=?, breed=?, margin_snap=?, customer_name=?, customer_phone=?, money_paid=?, payment_status=?, delivery_status=?, through_party=?, pass_through_status=?, feed_brand=?, feed_type=?, feed_bag_qty=?, feed_line_total=?, feed_brand2=?, feed_type2=?, feed_bag_qty2=?, feed_line_total2=?, updated_at=? WHERE id=?`,
       [
         p.date,
         description,
@@ -5412,6 +5509,10 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
         feedBundle.feed_type,
         feedBundle.feed_bag_qty,
         feedBundle.feed_line_total,
+        feedBundle2.feed_brand2,
+        feedBundle2.feed_type2,
+        feedBundle2.feed_bag_qty2,
+        feedBundle2.feed_line_total2,
         new Date().toISOString(),
         Number(req.params.id),
       ]

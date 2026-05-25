@@ -263,6 +263,10 @@ const chFeedBrand = document.getElementById("chFeedBrand");
 const chFeedType = document.getElementById("chFeedType");
 const chFeedBagQty = document.getElementById("chFeedBagQty");
 const chFeedLineTotal = document.getElementById("chFeedLineTotal");
+const chFeedBrand2 = document.getElementById("chFeedBrand2");
+const chFeedType2 = document.getElementById("chFeedType2");
+const chFeedBagQty2 = document.getElementById("chFeedBagQty2");
+const chFeedLineTotal2 = document.getElementById("chFeedLineTotal2");
 const fdForm = document.getElementById("fd-form");
 const fdBody = document.getElementById("fd-body");
 const fdItem = document.getElementById("fdItem");
@@ -1969,9 +1973,10 @@ function saleLineTotalChicken(row) {
 function chickenSaleLineFeedTotal(row) {
   if (isChickenRowOwnerInventory(row)) return 0;
   const raw = row.feed_line_total;
-  if (raw === "" || raw == null) return 0;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
+  const t1 = raw === "" || raw == null ? 0 : (Number.isFinite(Number(raw)) ? Number(raw) : 0);
+  const raw2 = row.feed_line_total2;
+  const t2 = raw2 === "" || raw2 == null ? 0 : (Number.isFinite(Number(raw2)) ? Number(raw2) : 0);
+  return t1 + t2;
 }
 
 /** Chicks amount + feed amount for this sale. */
@@ -2586,6 +2591,27 @@ function populateChChickenFeedTypes(brand) {
   syncChEmployeeBundledFeedAmount();
 }
 
+function populateChChickenFeedTypes2(brand) {
+  if (!chFeedType2) return;
+  const cur = chFeedType2.value;
+  const brandKey = resolveBrandKey(brand);
+  chFeedType2.innerHTML = '<option value="">Select feed type</option>';
+  if (!brandKey || !state.catalog[brandKey]) {
+    chFeedType2.disabled = true;
+    syncChEmployeeBundledFeedAmount2();
+    return;
+  }
+  state.catalog[brandKey].forEach((item) => {
+    const option = document.createElement("option");
+    option.value = item.type;
+    option.textContent = displayFeedType(item.type);
+    chFeedType2.appendChild(option);
+  });
+  chFeedType2.disabled = false;
+  if (cur && [...chFeedType2.options].some((o) => o.value === cur)) chFeedType2.value = cur;
+  syncChEmployeeBundledFeedAmount2();
+}
+
 function syncChEmployeeBundledFeedAmount() {
   if (!chFeedBrand || !chFeedType || !chFeedBagQty || !chFeedLineTotal) return;
   if (state.user?.role !== "employee") return;
@@ -2616,6 +2642,38 @@ function syncChEmployeeBundledFeedAmount() {
     return;
   }
   chFeedLineTotal.value = (bags * unit).toFixed(2);
+}
+
+function syncChEmployeeBundledFeedAmount2() {
+  if (!chFeedBrand2 || !chFeedType2 || !chFeedBagQty2 || !chFeedLineTotal2) return;
+  if (state.user?.role !== "employee") return;
+  const brand = String(chFeedBrand2.value || "").trim();
+  const ft = String(chFeedType2.value || "").trim();
+  const bags = Math.floor(Number(chFeedBagQty2.value || 0));
+  if (!Number.isFinite(bags) || bags < 0) {
+    chFeedLineTotal2.value = "";
+    return;
+  }
+  if (!brand || !ft) {
+    chFeedLineTotal2.value = "";
+    return;
+  }
+  const bs = bagSizeFor(brand, ft);
+  if (!Number.isFinite(bs) || bs <= 0) {
+    chFeedLineTotal2.value = "";
+    return;
+  }
+  const inv = findLatestInventoryRowForCatalogLine(chickenFeedInventoryRowsForPriceLookup(), brand, ft, bs);
+  if (!inv) {
+    chFeedLineTotal2.value = "";
+    return;
+  }
+  const unit = Number(inv.selling_price);
+  if (!Number.isFinite(unit)) {
+    chFeedLineTotal2.value = "";
+    return;
+  }
+  chFeedLineTotal2.value = (bags * unit).toFixed(2);
 }
 
 function wireDatePicker(dateDisplay, dateInput, openBtn) {
@@ -4230,16 +4288,33 @@ function chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow) {
   if (isOwnerInventoryRow) {
     return "<td>—</td><td>—</td><td>—</td><td>—</td>";
   }
-  const fb = row.feed_brand && String(row.feed_brand).trim();
-  const ft = row.feed_type && String(row.feed_type).trim();
-  const qtyRaw = row.feed_bag_qty;
-  const qty = qtyRaw === "" || qtyRaw == null ? NaN : Math.floor(Number(qtyRaw));
-  const totalRaw = row.feed_line_total;
-  const total = totalRaw === "" || totalRaw == null ? NaN : Number(totalRaw);
-  const brandCell = fb ? escapeHtmlCell(displayBrand(fb)) : "—";
-  const ftCell = ft ? escapeHtmlCell(displayFeedType(ft)) : "—";
-  const qtyCell = Number.isFinite(qty) ? escapeHtmlCell(String(qty)) : "—";
-  const amtCell = Number.isFinite(total) ? currency(total) : "—";
+  function feedLineText(brandRaw, typeRaw, qtyRaw, totalRaw) {
+    const fb = brandRaw && String(brandRaw).trim();
+    const ft = typeRaw && String(typeRaw).trim();
+    const qty = qtyRaw === "" || qtyRaw == null ? NaN : Math.floor(Number(qtyRaw));
+    const total = totalRaw === "" || totalRaw == null ? NaN : Number(totalRaw);
+    return {
+      brand: fb ? escapeHtmlCell(displayBrand(fb)) : null,
+      type: ft ? escapeHtmlCell(displayFeedType(ft)) : null,
+      qty: Number.isFinite(qty) ? escapeHtmlCell(String(qty)) : null,
+      amt: Number.isFinite(total) ? currency(total) : null,
+    };
+  }
+  const f1 = feedLineText(row.feed_brand, row.feed_type, row.feed_bag_qty, row.feed_line_total);
+  const f2 = feedLineText(row.feed_brand2, row.feed_type2, row.feed_bag_qty2, row.feed_line_total2);
+  const hasFeed2 = f2.brand || f2.type;
+  const brandCell = hasFeed2
+    ? `${f1.brand || "—"}<br><span style="color:var(--text-muted,#888);font-size:0.85em">${f2.brand || "—"}</span>`
+    : (f1.brand || "—");
+  const ftCell = hasFeed2
+    ? `${f1.type || "—"}<br><span style="color:var(--text-muted,#888);font-size:0.85em">${f2.type || "—"}</span>`
+    : (f1.type || "—");
+  const qtyCell = hasFeed2
+    ? `${f1.qty || "—"}<br><span style="color:var(--text-muted,#888);font-size:0.85em">${f2.qty || "—"}</span>`
+    : (f1.qty || "—");
+  const amtCell = hasFeed2
+    ? `${f1.amt || "—"}<br><span style="color:var(--text-muted,#888);font-size:0.85em">${f2.amt || "—"}</span>`
+    : (f1.amt || "—");
   return `<td>${brandCell}</td><td>${ftCell}</td><td>${qtyCell}</td><td>${amtCell}</td>`;
 }
 
@@ -4541,6 +4616,13 @@ function resetChickenForm() {
     }
     if (chFeedBagQty) chFeedBagQty.value = "0";
     if (chFeedLineTotal) chFeedLineTotal.value = "";
+    if (chFeedBrand2) populateBrandSelect(chFeedBrand2);
+    if (chFeedType2) {
+      chFeedType2.innerHTML = '<option value="">Select feed type</option>';
+      chFeedType2.disabled = true;
+    }
+    if (chFeedBagQty2) chFeedBagQty2.value = "0";
+    if (chFeedLineTotal2) chFeedLineTotal2.value = "";
   }
   const chSave = document.getElementById("chSaveBtn");
   if (chSave) chSave.textContent = state.user?.role === "owner" ? "Save inventory" : "Save sale";
@@ -4821,6 +4903,7 @@ async function loadAllData() {
     populateBrandSelect(skBrand);
     if (rfBrand) populateBrandSelect(rfBrand);
     if (chFeedBrand) populateBrandSelect(chFeedBrand);
+    if (chFeedBrand2) populateBrandSelect(chFeedBrand2);
     catalogInitialized = true;
   }
 
@@ -5454,6 +5537,11 @@ chFeedBrand?.addEventListener("change", () => {
 });
 chFeedType?.addEventListener("change", () => syncChEmployeeBundledFeedAmount());
 chFeedBagQty?.addEventListener("input", () => syncChEmployeeBundledFeedAmount());
+chFeedBrand2?.addEventListener("change", () => {
+  populateChChickenFeedTypes2(chFeedBrand2.value);
+});
+chFeedType2?.addEventListener("change", () => syncChEmployeeBundledFeedAmount2());
+chFeedBagQty2?.addEventListener("input", () => syncChEmployeeBundledFeedAmount2());
 if (fdDateDisplay && fdDate && fdOpenCalendarBtn) wireDatePicker(fdDateDisplay, fdDate, fdOpenCalendarBtn);
 if (medDateDisplay && medDate && medOpenCalendarBtn) wireDatePicker(medDateDisplay, medDate, medOpenCalendarBtn);
 if (gasDateDisplay && gasDate && gasOpenCalendarBtn) wireDatePicker(gasDateDisplay, gasDate, gasOpenCalendarBtn);
@@ -6746,6 +6834,16 @@ chickenForm.addEventListener("submit", async (event) => {
     payload.feed_brand = fb || "";
     payload.feed_type = ft || "";
     payload.feed_bag_qty = Number.isFinite(fbags) && fbags > 0 ? fbags : 0;
+    const fb2 = String(chFeedBrand2?.value || "").trim();
+    const ft2 = String(chFeedType2?.value || "").trim();
+    const fbags2 = Math.floor(Number(chFeedBagQty2?.value ?? 0));
+    if (Number.isFinite(fbags2) && fbags2 < 0) {
+      alert("Feed 2 quantity (bags) must be a whole number zero or greater.");
+      return;
+    }
+    payload.feed_brand2 = fb2 || "";
+    payload.feed_type2 = ft2 || "";
+    payload.feed_bag_qty2 = Number.isFinite(fbags2) && fbags2 > 0 ? fbags2 : 0;
     const unitForLine = Number(payload.unit_price);
     const lineTotal = qty * unitForLine;
     const moneyPaid = Number(document.getElementById("chMoneyPaid")?.value || 0);
@@ -7060,6 +7158,12 @@ document.getElementById("ufaray-chicken-sales-body")?.addEventListener("click", 
         row.feed_bag_qty != null && row.feed_bag_qty !== ""
           ? Math.floor(Number(row.feed_bag_qty))
           : 0,
+      feed_brand2: String(row.feed_brand2 || "").trim(),
+      feed_type2: String(row.feed_type2 || "").trim(),
+      feed_bag_qty2:
+        row.feed_bag_qty2 != null && row.feed_bag_qty2 !== ""
+          ? Math.floor(Number(row.feed_bag_qty2))
+          : 0,
       customer_name: row.customer_name || "",
       customer_phone: row.customer_phone || "",
       money_paid: Number(row.money_paid) || 0,
@@ -7241,6 +7345,23 @@ function wireChickenTableClicks(tbody) {
               row.feed_bag_qty != null && row.feed_bag_qty !== "" ? String(Math.floor(Number(row.feed_bag_qty))) : "0";
           }
           syncChEmployeeBundledFeedAmount();
+          if (chFeedBrand2) {
+            populateBrandSelect(chFeedBrand2);
+            const bk2 = row.feed_brand2 ? resolveBrandKey(String(row.feed_brand2)) : "";
+            if (bk2 && [...chFeedBrand2.options].some((o) => o.value === bk2)) chFeedBrand2.value = bk2;
+            else if (row.feed_brand2) chFeedBrand2.value = String(row.feed_brand2);
+            populateChChickenFeedTypes2(chFeedBrand2.value);
+            if (chFeedType2 && row.feed_type2) {
+              const want2 = feedTypeCatalogValue(resolveBrandKey(chFeedBrand2.value), String(row.feed_type2));
+              if ([...chFeedType2.options].some((o) => o.value === want2)) chFeedType2.value = want2;
+              else if ([...chFeedType2.options].some((o) => o.value === row.feed_type2)) chFeedType2.value = String(row.feed_type2);
+            }
+            if (chFeedBagQty2) {
+              chFeedBagQty2.value =
+                row.feed_bag_qty2 != null && row.feed_bag_qty2 !== "" ? String(Math.floor(Number(row.feed_bag_qty2))) : "0";
+            }
+            syncChEmployeeBundledFeedAmount2();
+          }
         }
         updateChickenCustomerAmounts();
       }
