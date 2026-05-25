@@ -146,6 +146,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "rose-inventory",
   "nahashon-records",
   "cess-accounts",
+  "credit",
   "pigs",
   "calculator",
   "expenditure",
@@ -4194,13 +4195,20 @@ function renderCreditDashboard() {
     grid.innerHTML = '<p class="field-hint" style="margin:0;">No credit accounts yet. Click <strong>+</strong> to add one.</p>';
     return;
   }
+  const isOwner = state.user?.role === "owner";
   grid.innerHTML = accounts
     .map((acc) => {
       const entryCount = (state.creditEntries || []).filter((e) => Number(e.account_id) === acc.id).length;
-      return `<button type="button" class="portal-option" data-kind="credit-acc-open" data-account-id="${acc.id}" style="min-width:160px;max-width:220px;">
-        <span class="portal-option-title">${escapeHtmlCell(acc.name)}</span>
-        <span class="portal-option-sub">${entryCount} entr${entryCount === 1 ? "y" : "ies"}</span>
-      </button>`;
+      const deleteBtn = isOwner
+        ? `<button type="button" class="danger" data-kind="credit-acc-delete" data-account-id="${acc.id}" style="margin-top:6px;font-size:0.78em;padding:2px 10px;" title="Delete ${escapeHtmlCell(acc.name)} account">Delete</button>`
+        : "";
+      return `<div style="display:flex;flex-direction:column;align-items:stretch;min-width:160px;max-width:220px;">
+        <button type="button" class="portal-option" data-kind="credit-acc-open" data-account-id="${acc.id}" style="flex:1;">
+          <span class="portal-option-title">${escapeHtmlCell(acc.name)}</span>
+          <span class="portal-option-sub">${entryCount} entr${entryCount === 1 ? "y" : "ies"}</span>
+        </button>
+        ${deleteBtn}
+      </div>`;
     })
     .join("");
 }
@@ -6818,11 +6826,27 @@ document.getElementById("credit-new-account-form")?.addEventListener("submit", a
   }
 });
 
-/* Credit dashboard — open account on card click */
-document.getElementById("credit-accounts-grid")?.addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-kind='credit-acc-open']");
-  if (!btn) return;
-  openCreditAccount(btn.dataset.accountId);
+/* Credit dashboard — open or delete account */
+document.getElementById("credit-accounts-grid")?.addEventListener("click", async (event) => {
+  const openBtn = event.target.closest("[data-kind='credit-acc-open']");
+  if (openBtn) {
+    openCreditAccount(openBtn.dataset.accountId);
+    return;
+  }
+  const delBtn = event.target.closest("[data-kind='credit-acc-delete']");
+  if (delBtn) {
+    const accId = delBtn.dataset.accountId;
+    const acc = (state.creditAccounts || []).find((a) => String(a.id) === String(accId));
+    const name = acc?.name || "this account";
+    if (!window.confirm(`Delete "${name}" and all its entries? This cannot be undone.`)) return;
+    try {
+      await api(`/api/credit-accounts/${accId}`, { method: "DELETE" });
+      await loadAllData();
+      renderCreditDashboard();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
 });
 
 document.getElementById("creditBackBtn")?.addEventListener("click", () => {
