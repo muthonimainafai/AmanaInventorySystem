@@ -2028,7 +2028,7 @@ function chickenSaleCustomerCellsHtml(row) {
   const name = row.customer_name ? escapeHtmlCell(row.customer_name) : "—";
   const phone = row.customer_phone ? escapeHtmlCell(row.customer_phone) : "—";
   const paid = currency(Number(row.money_paid) || 0);
-  const total = saleLineTotalChicken(row);
+  const total = chickenSaleLineCombinedTotal(row);
   const bal = total - (Number(row.money_paid) || 0);
   const balStr = currency(bal);
   const isOwnerStaffRow = state.user?.role === "owner" && !isChickenRowOwnerInventory(row);
@@ -4422,7 +4422,7 @@ function downloadChickenSalesPdf() {
     totalRevenue += lineTotal;
     totalCombined += combined;
     const paid = Number(r.money_paid) || 0;
-    const balance = lineTotal - paid;
+    const balance = combined - paid;
     return [
       formatDateDMY(r.date),
       r.breed || "—",
