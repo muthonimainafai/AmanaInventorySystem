@@ -1765,6 +1765,26 @@
         </div>
 
         <div id="page-credit" class="app-page hidden">
+
+          <!-- Credit dashboard -->
+          <div id="credit-dashboard">
+            <div class="card">
+              <h3 class="card-title">Credit</h3>
+              <p class="field-hint">Select an account to view and manage its records.</p>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;">
+                <button type="button" id="creditOpenHadifaBtn" class="portal-option" style="min-width:180px;max-width:240px;">
+                  <span class="portal-option-title">Hadifa</span>
+                  <span class="portal-option-sub">Hadifa account — money in &amp; out</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hadifa account section (shown after clicking Hadifa on dashboard) -->
+          <div id="hadifa-account-section" class="hidden">
+            <div style="margin-bottom:8px;">
+              <button type="button" id="creditBackBtn" class="secondary">← Back to Credit</button>
+            </div>
           <div class="card">
             <h3 class="card-title">Hadifa Account</h3>
             <p class="field-hint">Track Hadifa account lines with money in, money out, and running balance.</p>
@@ -1797,14 +1817,6 @@
                 <label>
                   Money out
                   <input type="number" id="hadifaAccMoneyOut" min="0" step="0.01" />
-                </label>
-                <label>
-                  Sale via
-                  <select id="hadifaAccSaleVia">
-                    <option value="Shop">Shop</option>
-                    <option value="Terry">Terry</option>
-                    <option value="Hadifa">Hadifa</option>
-                  </select>
                 </label>
               </div>
               <div class="actions">
@@ -1844,6 +1856,7 @@
               </table>
             </div>
           </div>
+          </div><!-- end hadifa-account-section -->
         </div>
 
         <div id="page-pigs" class="app-page hidden">

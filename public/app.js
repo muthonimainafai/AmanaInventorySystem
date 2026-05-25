@@ -4189,8 +4189,6 @@ function resetHadifaAccountsForm() {
   state.editHadifaAccountsId = null;
   if (hadifaAccDate) hadifaAccDate.value = "";
   if (hadifaAccDateDisplay) hadifaAccDateDisplay.value = "";
-  const via = document.getElementById("hadifaAccSaleVia");
-  if (via) via.value = "Shop";
   const saveBtn = document.getElementById("hadifaAccSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
   applyEmployeeSalesDateRules();
@@ -4863,7 +4861,11 @@ function showPage(page) {
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
-  if (page === "credit") renderHadifaAccountsTable();
+  if (page === "credit") {
+    document.getElementById("credit-dashboard")?.classList.remove("hidden");
+    document.getElementById("hadifa-account-section")?.classList.add("hidden");
+    renderHadifaAccountsTable();
+  }
   if (page === "pigs") renderPigsTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
@@ -6726,7 +6728,6 @@ hadifaAccountsForm?.addEventListener("submit", async (event) => {
     unit_price: Number(document.getElementById("hadifaAccUnitPrice")?.value || 0),
     money_in: Number(document.getElementById("hadifaAccMoneyIn")?.value || 0),
     money_out: Number(document.getElementById("hadifaAccMoneyOut")?.value || 0),
-    sale_via: String(document.getElementById("hadifaAccSaleVia")?.value || "Shop").trim(),
   };
   try {
     if (state.editHadifaAccountsId) {
@@ -6742,6 +6743,17 @@ hadifaAccountsForm?.addEventListener("submit", async (event) => {
 });
 
 document.getElementById("hadifaAccClearBtn")?.addEventListener("click", () => resetHadifaAccountsForm());
+
+document.getElementById("creditOpenHadifaBtn")?.addEventListener("click", () => {
+  document.getElementById("credit-dashboard")?.classList.add("hidden");
+  document.getElementById("hadifa-account-section")?.classList.remove("hidden");
+  renderHadifaAccountsTable();
+});
+
+document.getElementById("creditBackBtn")?.addEventListener("click", () => {
+  document.getElementById("hadifa-account-section")?.classList.add("hidden");
+  document.getElementById("credit-dashboard")?.classList.remove("hidden");
+});
 
 nahashonForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -7963,13 +7975,11 @@ hadifaAccountsBody?.addEventListener("click", async (event) => {
     const unit = document.getElementById("hadifaAccUnitPrice");
     const min = document.getElementById("hadifaAccMoneyIn");
     const mout = document.getElementById("hadifaAccMoneyOut");
-    const via = document.getElementById("hadifaAccSaleVia");
     if (desc) desc.value = row.description || "";
     if (qty) qty.value = row.quantity ?? 0;
     if (unit) unit.value = row.unit_price ?? 0;
     if (min) min.value = row.money_in ?? 0;
     if (mout) mout.value = row.money_out ?? 0;
-    if (via) via.value = row.sale_via || "Shop";
     const saveBtn = document.getElementById("hadifaAccSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
     return;
