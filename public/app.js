@@ -4413,18 +4413,14 @@ function downloadChickenSalesPdf() {
   let totalChicks = 0;
   let totalRevenue = 0;
   let totalCombined = 0;
-  let totalProfit = 0;
   const body = filtered.map((r) => {
     const qty = Number(r.quantity_birds) || 0;
     const lineTotal = saleLineTotalChicken(r);
     const feedTotal = chickenSaleLineFeedTotal(r);
     const combined = lineTotal + feedTotal;
-    const profit = chickenSaleLineProfit(r);
     totalChicks += qty;
     totalRevenue += lineTotal;
     totalCombined += combined;
-    totalProfit += profit;
-    const via = String(r.through_party || "").trim();
     const paid = Number(r.money_paid) || 0;
     const balance = lineTotal - paid;
     return [
@@ -4440,10 +4436,6 @@ function downloadChickenSalesPdf() {
       currency(paid),
       currency(balance),
       chickenSalePaymentStatusLabel(r),
-      chickenSaleDeliveryStatusLabel(r),
-      currency(profit),
-      via ? `By ${via}` : "—",
-      r.created_by || "—",
     ];
   });
 
@@ -4457,37 +4449,28 @@ function downloadChickenSalesPdf() {
     "",
     "",
     "",
-    "",
-    "",
-    { content: currency(totalProfit), styles: { fontStyle: "bold", halign: "right" } },
-    "",
-    "",
   ]);
 
   autoFn.call(doc, {
-    head: [["Date", "Breed", "Notes", "Chicks", "Price/chick", "Chicks Amount", "Combined Total", "Customer", "Phone", "Paid", "Balance", "Payment", "Delivery", "Profit", "Via", "By"]],
+    head: [["Date", "Breed", "Notes", "Chicks", "Price/chick", "Chicks Amount", "Combined Total", "Customer", "Phone", "Paid", "Balance", "Payment"]],
     body,
     startY: y,
     margin: { left: margin, right: margin },
     styles: { font: "helvetica", fontSize: 7.5, cellPadding: { top: 4, bottom: 4, left: 5, right: 5 }, valign: "middle", lineColor: G.edge, lineWidth: 0.2, textColor: [33, 33, 33], overflow: "linebreak" },
     headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", fontSize: 7.5 },
     columnStyles: {
-      0: { cellWidth: 48 },
-      1: { cellWidth: 46 },
-      2: { cellWidth: 46 },
-      3: { halign: "right", cellWidth: 32 },
-      4: { halign: "right", cellWidth: 46 },
-      5: { halign: "right", cellWidth: 52 },
-      6: { halign: "right", cellWidth: 54 },
-      7: { cellWidth: 48 },
-      8: { cellWidth: 46 },
-      9: { halign: "right", cellWidth: 46 },
-      10: { halign: "right", cellWidth: 46 },
-      11: { halign: "center", cellWidth: 42 },
-      12: { halign: "center", cellWidth: 42 },
-      13: { halign: "right", cellWidth: 48 },
-      14: { cellWidth: 36 },
-      15: { cellWidth: 36 },
+      0: { cellWidth: 52 },
+      1: { cellWidth: 50 },
+      2: { cellWidth: 50 },
+      3: { halign: "right", cellWidth: 36 },
+      4: { halign: "right", cellWidth: 52 },
+      5: { halign: "right", cellWidth: 58 },
+      6: { halign: "right", cellWidth: 60 },
+      7: { cellWidth: 55 },
+      8: { cellWidth: 52 },
+      9: { halign: "right", cellWidth: 52 },
+      10: { halign: "right", cellWidth: 52 },
+      11: { halign: "center", cellWidth: 50 },
     },
     alternateRowStyles: { fillColor: [252, 255, 253] },
     theme: "plain",
