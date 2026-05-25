@@ -381,7 +381,7 @@ function applyAppTheme() {
       : isRose
         ? "Rose Inventory - Desktop Inventory"
         : isNahah
-          ? "Nahah Feeds Inventory System - Desktop Inventory"
+          ? "Faith Inventory - Desktop Inventory"
         : "Amana Kuku Feeds - Desktop Inventory";
   const portalSiteTitle = document.getElementById("portalSiteTitle");
   if (portalSiteTitle) {
@@ -394,7 +394,7 @@ function applyAppTheme() {
         : isRose
           ? "ROSE INVENTORY"
           : isNahah
-            ? "NAHAH FEEDS INVENTORY SYSTEM"
+            ? "FAITH INVENTORY"
             : "AMANA KUKU FEEDS";
   }
   const loginTitle = document.getElementById("loginCardTitle");
