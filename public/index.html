@@ -1770,23 +1770,27 @@
           <div id="credit-dashboard">
             <div class="card">
               <h3 class="card-title">Credit</h3>
-              <p class="field-hint">Select an account to view and manage its records.</p>
-              <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;">
-                <button type="button" id="creditOpenHadifaBtn" class="portal-option" style="min-width:180px;max-width:240px;">
-                  <span class="portal-option-title">Hadifa</span>
-                  <span class="portal-option-sub">Hadifa account — money in &amp; out</span>
-                </button>
+              <p class="field-hint">Select an account to open it, or click <strong>+</strong> to create a new one.</p>
+              <div id="credit-accounts-grid" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;"></div>
+              <div style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <button type="button" id="showAddCreditAccountBtn" title="Add new credit account" style="width:44px;height:44px;border-radius:50%;font-size:1.5em;display:flex;align-items:center;justify-content:center;padding:0;">+</button>
               </div>
+              <form id="credit-new-account-form" class="hidden" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="text" id="newCreditAccountName" placeholder="Account name" required style="max-width:220px;" />
+                <button type="submit">Create</button>
+                <button type="button" id="cancelAddCreditAccountBtn" class="secondary">Cancel</button>
+              </form>
             </div>
           </div>
 
-          <!-- Hadifa account section (shown after clicking Hadifa on dashboard) -->
+          <!-- Credit account section (shown after clicking an account on dashboard) -->
           <div id="hadifa-account-section" class="hidden">
-            <div style="margin-bottom:8px;">
+            <div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
               <button type="button" id="creditBackBtn" class="secondary">← Back to Credit</button>
+              <span id="creditAccountSectionTitle" style="font-weight:600;font-size:1.1em;"></span>
             </div>
           <div class="card">
-            <h3 class="card-title">Hadifa Account</h3>
+            <h3 class="card-title" id="creditAccountCardTitle">Account</h3>
             <p class="field-hint">Track Hadifa account lines with money in, money out, and running balance.</p>
             <form id="hadifa-accounts-form">
               <div class="grid">

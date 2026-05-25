@@ -63,6 +63,9 @@ const state = {
   editCessAccountsId: null,
   hadifalAccountsEntries: [],
   editHadifaAccountsId: null,
+  creditAccounts: [],
+  creditEntries: [],
+  activeCreditAccountId: null,
   nahashonEntries: [],
   editNahashonId: null,
   pigsEntries: [],
@@ -4183,6 +4186,38 @@ function renderCessAccountsTable() {
   if (outEl) outEl.textContent = String(sumOut);
 }
 
+function renderCreditDashboard() {
+  const grid = document.getElementById("credit-accounts-grid");
+  if (!grid) return;
+  const accounts = state.creditAccounts || [];
+  if (!accounts.length) {
+    grid.innerHTML = '<p class="field-hint" style="margin:0;">No credit accounts yet. Click <strong>+</strong> to add one.</p>';
+    return;
+  }
+  grid.innerHTML = accounts
+    .map((acc) => {
+      const entryCount = (state.creditEntries || []).filter((e) => Number(e.account_id) === acc.id).length;
+      return `<button type="button" class="portal-option" data-kind="credit-acc-open" data-account-id="${acc.id}" style="min-width:160px;max-width:220px;">
+        <span class="portal-option-title">${escapeHtmlCell(acc.name)}</span>
+        <span class="portal-option-sub">${entryCount} entr${entryCount === 1 ? "y" : "ies"}</span>
+      </button>`;
+    })
+    .join("");
+}
+
+function openCreditAccount(accountId) {
+  const acc = (state.creditAccounts || []).find((a) => a.id === Number(accountId));
+  if (!acc) return;
+  state.activeCreditAccountId = acc.id;
+  document.getElementById("credit-dashboard")?.classList.add("hidden");
+  document.getElementById("hadifa-account-section")?.classList.remove("hidden");
+  const titleEl = document.getElementById("creditAccountSectionTitle");
+  const cardTitleEl = document.getElementById("creditAccountCardTitle");
+  if (titleEl) titleEl.textContent = acc.name;
+  if (cardTitleEl) cardTitleEl.textContent = `${acc.name} Account`;
+  renderHadifaAccountsTable();
+}
+
 function resetHadifaAccountsForm() {
   if (!hadifaAccountsForm) return;
   hadifaAccountsForm.reset();
@@ -4196,7 +4231,11 @@ function resetHadifaAccountsForm() {
 
 function renderHadifaAccountsTable() {
   if (!hadifaAccountsBody) return;
-  const rows = sortRowsLatestFirst(state.hadifalAccountsEntries || []);
+  const allEntries = state.creditEntries || state.hadifalAccountsEntries || [];
+  const filtered = state.activeCreditAccountId
+    ? allEntries.filter((e) => Number(e.account_id) === state.activeCreditAccountId)
+    : allEntries;
+  const rows = sortRowsLatestFirst(filtered);
   if (!rows.length) {
     hadifaAccountsBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
     const inEl = document.getElementById("hadifaAccTotalMoneyIn");
@@ -4862,9 +4901,11 @@ function showPage(page) {
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
   if (page === "credit") {
+    state.activeCreditAccountId = null;
     document.getElementById("credit-dashboard")?.classList.remove("hidden");
     document.getElementById("hadifa-account-section")?.classList.add("hidden");
-    renderHadifaAccountsTable();
+    document.getElementById("credit-new-account-form")?.classList.add("hidden");
+    renderCreditDashboard();
   }
   if (page === "pigs") renderPigsTable();
   if (page === "calculator") {
@@ -5095,7 +5136,8 @@ async function loadAllData() {
     api("/api/nahashon-accounts"),
     api("/api/cess-accounts"),
     api("/api/pigs"),
-    api("/api/hadifa-accounts"),
+    api("/api/credit-accounts"),
+    api("/api/credit-entries"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -5113,7 +5155,8 @@ async function loadAllData() {
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
   state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
   state.pigsEntries = extras[15].status === "fulfilled" ? extras[15].value : [];
-  state.hadifalAccountsEntries = extras[16].status === "fulfilled" ? extras[16].value : [];
+  state.creditAccounts = extras[16].status === "fulfilled" ? extras[16].value : [];
+  state.creditEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -5150,6 +5193,7 @@ async function loadAllData() {
   renderExpenditureTable();
   renderRoseTable();
   renderCessAccountsTable();
+  renderCreditDashboard();
   renderHadifaAccountsTable();
   renderNahashonTable();
   renderPigsTable();
@@ -6721,7 +6765,9 @@ hadifaAccountsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = hadifaAccDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  if (!state.activeCreditAccountId) return alert("No credit account selected.");
   const payload = {
+    account_id: state.activeCreditAccountId,
     date: dateValue,
     description: String(document.getElementById("hadifaAccDescription")?.value || "").trim(),
     quantity: Number(document.getElementById("hadifaAccQuantity")?.value || 0),
@@ -6731,12 +6777,13 @@ hadifaAccountsForm?.addEventListener("submit", async (event) => {
   };
   try {
     if (state.editHadifaAccountsId) {
-      await api(`/api/hadifa-accounts/${state.editHadifaAccountsId}`, { method: "PUT", body: JSON.stringify(payload) });
+      await api(`/api/credit-entries/${state.editHadifaAccountsId}`, { method: "PUT", body: JSON.stringify(payload) });
     } else {
-      await api("/api/hadifa-accounts", { method: "POST", body: JSON.stringify(payload) });
+      await api("/api/credit-entries", { method: "POST", body: JSON.stringify(payload) });
     }
     resetHadifaAccountsForm();
     await loadAllData();
+    renderHadifaAccountsTable();
   } catch (error) {
     alert(error.message);
   }
@@ -6744,15 +6791,45 @@ hadifaAccountsForm?.addEventListener("submit", async (event) => {
 
 document.getElementById("hadifaAccClearBtn")?.addEventListener("click", () => resetHadifaAccountsForm());
 
-document.getElementById("creditOpenHadifaBtn")?.addEventListener("click", () => {
-  document.getElementById("credit-dashboard")?.classList.add("hidden");
-  document.getElementById("hadifa-account-section")?.classList.remove("hidden");
-  renderHadifaAccountsTable();
+/* Credit dashboard — show add-account form */
+document.getElementById("showAddCreditAccountBtn")?.addEventListener("click", () => {
+  document.getElementById("credit-new-account-form")?.classList.remove("hidden");
+  document.getElementById("newCreditAccountName")?.focus();
+});
+document.getElementById("cancelAddCreditAccountBtn")?.addEventListener("click", () => {
+  document.getElementById("credit-new-account-form")?.classList.add("hidden");
+  const nameInput = document.getElementById("newCreditAccountName");
+  if (nameInput) nameInput.value = "";
+});
+document.getElementById("credit-new-account-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = String(document.getElementById("newCreditAccountName")?.value || "").trim();
+  if (!name) return;
+  try {
+    const result = await api("/api/credit-accounts", { method: "POST", body: JSON.stringify({ name }) });
+    document.getElementById("credit-new-account-form")?.classList.add("hidden");
+    const nameInput = document.getElementById("newCreditAccountName");
+    if (nameInput) nameInput.value = "";
+    await loadAllData();
+    renderCreditDashboard();
+    if (result?.id) openCreditAccount(result.id);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+/* Credit dashboard — open account on card click */
+document.getElementById("credit-accounts-grid")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-kind='credit-acc-open']");
+  if (!btn) return;
+  openCreditAccount(btn.dataset.accountId);
 });
 
 document.getElementById("creditBackBtn")?.addEventListener("click", () => {
+  state.activeCreditAccountId = null;
   document.getElementById("hadifa-account-section")?.classList.add("hidden");
   document.getElementById("credit-dashboard")?.classList.remove("hidden");
+  renderCreditDashboard();
 });
 
 nahashonForm?.addEventListener("submit", async (event) => {
@@ -7964,7 +8041,8 @@ hadifaAccountsBody?.addEventListener("click", async (event) => {
   const action = target.dataset.action;
   const kind = target.dataset.kind;
   if (!id || !action || kind !== "hadifa-acc") return;
-  const row = state.hadifalAccountsEntries.find((r) => String(r.id) === String(id));
+  const allEntries = state.creditEntries || state.hadifalAccountsEntries || [];
+  const row = allEntries.find((r) => String(r.id) === String(id));
   if (!row) return;
   if (action === "edit") {
     state.editHadifaAccountsId = row.id;
@@ -7987,8 +8065,9 @@ hadifaAccountsBody?.addEventListener("click", async (event) => {
   if (action === "delete") {
     if (!window.confirm("Delete this entry?")) return;
     try {
-      await api(`/api/hadifa-accounts/${id}`, { method: "DELETE" });
+      await api(`/api/credit-entries/${id}`, { method: "DELETE" });
       await loadAllData();
+      renderHadifaAccountsTable();
     } catch (error) {
       alert(error.message);
     }

@@ -928,6 +928,46 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS credit_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT 'owner',
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS credit_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      quantity REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      money_in REAL NOT NULL DEFAULT 0,
+      money_out REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  /* Seed: if credit_accounts is empty, create "Hadifa" and migrate any existing hadifa_accounts_entries */
+  const creditAccCount = await get("SELECT COUNT(*) AS n FROM credit_accounts");
+  if (!creditAccCount || creditAccCount.n === 0) {
+    const nowIso = new Date().toISOString();
+    await run(`INSERT INTO credit_accounts (name, created_by, created_at) VALUES (?, ?, ?)`, ["Hadifa", "owner", nowIso]);
+    const hadifahRows = await all("SELECT * FROM hadifa_accounts_entries ORDER BY id ASC");
+    for (const r of hadifahRows) {
+      await run(
+        `INSERT INTO credit_entries (account_id, date, description, quantity, unit_price, money_in, money_out, created_by, created_at, updated_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [r.date, r.description || "", r.quantity || 0, r.unit_price || 0, r.money_in || 0, r.money_out || 0, r.created_by || "owner", r.created_at || nowIso, r.updated_at || nowIso]
+      );
+    }
+  }
+
+  await run(`
     CREATE TABLE IF NOT EXISTS pigs_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
@@ -4263,22 +4303,49 @@ app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), asyn
   res.json({ ok: true });
 });
 
-/* ── Hadifa Accounts (Ufaray – owner and employee) ─────────────────── */
+/* ── Credit Accounts (Ufaray – owner and employee) ──────────────────── */
 
-app.get("/api/hadifa-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
-  const rows =
-    req.user.role === "owner"
-      ? await all("SELECT * FROM hadifa_accounts_entries ORDER BY id DESC")
-      : await all("SELECT * FROM hadifa_accounts_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+app.get("/api/credit-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows = await all("SELECT * FROM credit_accounts ORDER BY id ASC");
   res.json(rows);
 });
 
-app.post("/api/hadifa-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.post("/api/credit-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Account name is required." });
+  const nowIso = new Date().toISOString();
+  const result = await run(
+    `INSERT INTO credit_accounts (name, created_by, created_at) VALUES (?, ?, ?)`,
+    [name, req.user.username, nowIso]
+  );
+  res.json({ ok: true, id: result.lastID });
+});
+
+app.delete("/api/credit-accounts/:id", auth, allowRoles("owner"), async (req, res) => {
+  const id = Number(req.params.id);
+  await run("DELETE FROM credit_entries WHERE account_id = ?", [id]);
+  const result = await run("DELETE FROM credit_accounts WHERE id = ?", [id]);
+  if (result.changes === 0) return res.status(404).json({ error: "Account not found." });
+  res.json({ ok: true });
+});
+
+app.get("/api/credit-entries", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM credit_entries ORDER BY id DESC")
+      : await all("SELECT * FROM credit_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/credit-entries", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body || {};
+  const accountId = Number(p.account_id);
+  if (!Number.isFinite(accountId) || accountId < 1) return res.status(400).json({ error: "Valid account_id is required." });
+  const account = await get("SELECT id FROM credit_accounts WHERE id = ?", [accountId]);
+  if (!account) return res.status(400).json({ error: "Credit account not found." });
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
-  const saleVia = String(p.sale_via || "Shop").trim() || "Shop";
   let quantity, unitPrice, moneyIn, moneyOut;
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
@@ -4290,25 +4357,24 @@ app.post("/api/hadifa-accounts", auth, allowRoles("owner", "employee"), async (r
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO hadifa_accounts_entries (date, description, quantity, unit_price, money_in, money_out, sale_via, created_by, created_at, updated_at)
+    `INSERT INTO credit_entries (account_id, date, description, quantity, unit_price, money_in, money_out, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, saleVia, req.user.username, nowIso, nowIso]
+    [accountId, dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
 
-app.put("/api/hadifa-accounts/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.put("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
   const existing =
     req.user.role === "owner"
-      ? await get("SELECT * FROM hadifa_accounts_entries WHERE id = ?", [id])
-      : await get("SELECT * FROM hadifa_accounts_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+      ? await get("SELECT * FROM credit_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM credit_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
   if (!existing) return res.status(404).json({ error: "Record not found." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
-  const saleVia = String(p.sale_via || "Shop").trim() || "Shop";
   let quantity, unitPrice, moneyIn, moneyOut;
   try {
     quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
@@ -4319,19 +4385,17 @@ app.put("/api/hadifa-accounts/:id", auth, allowRoles("owner", "employee"), async
     return res.status(400).json({ error: err.message });
   }
   await run(
-    `UPDATE hadifa_accounts_entries
-     SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, sale_via = ?, updated_at = ?
-     WHERE id = ?`,
-    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, saleVia, new Date().toISOString(), id]
+    `UPDATE credit_entries SET date=?, description=?, quantity=?, unit_price=?, money_in=?, money_out=?, updated_at=? WHERE id=?`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, new Date().toISOString(), id]
   );
   res.json({ ok: true });
 });
 
-app.delete("/api/hadifa-accounts/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.delete("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const result =
     req.user.role === "owner"
-      ? await run("DELETE FROM hadifa_accounts_entries WHERE id = ?", [Number(req.params.id)])
-      : await run("DELETE FROM hadifa_accounts_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+      ? await run("DELETE FROM credit_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM credit_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });
