@@ -61,6 +61,8 @@ const state = {
   editRoseId: null,
   cessAccountsEntries: [],
   editCessAccountsId: null,
+  hadifalAccountsEntries: [],
+  editHadifaAccountsId: null,
   nahashonEntries: [],
   editNahashonId: null,
   pigsEntries: [],
@@ -80,6 +82,7 @@ const PAGE_HEADINGS = {
   "rose-inventory": "Rose Inventory",
   "nahashon-records": "Nahashon Records",
   "cess-accounts": "Cess Accounts",
+  "hadifa-accounts": "Hadifa Accounts",
   calculator: "Calculator",
   pigs: "Pigs Page",
   expenditure: "Expenditure",
@@ -304,6 +307,11 @@ const cessAccountsBody = document.getElementById("cess-accounts-body");
 const cessAccDateDisplay = document.getElementById("cessAccDateDisplay");
 const cessAccDate = document.getElementById("cessAccDate");
 const cessAccOpenCalendarBtn = document.getElementById("cessAccOpenCalendarBtn");
+const hadifaAccountsForm = document.getElementById("hadifa-accounts-form");
+const hadifaAccountsBody = document.getElementById("hadifa-accounts-body");
+const hadifaAccDateDisplay = document.getElementById("hadifaAccDateDisplay");
+const hadifaAccDate = document.getElementById("hadifaAccDate");
+const hadifaAccOpenCalendarBtn = document.getElementById("hadifaAccOpenCalendarBtn");
 const nahashonForm = document.getElementById("nahashon-form");
 const nahashonBody = document.getElementById("nahashon-body");
 const nahashonDateDisplay = document.getElementById("nahashonDateDisplay");
@@ -2346,6 +2354,9 @@ function showLoggedIn() {
     if (page === "cess-accounts") {
       shouldShow = state.appInstance === "amana" && isOwner;
     }
+    if (page === "hadifa-accounts") {
+      shouldShow = state.appInstance === "ufaray";
+    }
     if (page === "nahashon-records") {
       shouldShow = state.appInstance === "terry";
     }
@@ -4172,6 +4183,74 @@ function renderCessAccountsTable() {
   if (outEl) outEl.textContent = String(sumOut);
 }
 
+function resetHadifaAccountsForm() {
+  if (!hadifaAccountsForm) return;
+  hadifaAccountsForm.reset();
+  state.editHadifaAccountsId = null;
+  if (hadifaAccDate) hadifaAccDate.value = "";
+  if (hadifaAccDateDisplay) hadifaAccDateDisplay.value = "";
+  const via = document.getElementById("hadifaAccSaleVia");
+  if (via) via.value = "Shop";
+  const saveBtn = document.getElementById("hadifaAccSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function renderHadifaAccountsTable() {
+  if (!hadifaAccountsBody) return;
+  const rows = sortRowsLatestFirst(state.hadifalAccountsEntries || []);
+  if (!rows.length) {
+    hadifaAccountsBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
+    const inEl = document.getElementById("hadifaAccTotalMoneyIn");
+    const outEl = document.getElementById("hadifaAccTotalMoneyOut");
+    const balEl = document.getElementById("hadifaAccTotalBalance");
+    if (inEl) inEl.textContent = "0";
+    if (outEl) outEl.textContent = "0";
+    if (balEl) balEl.textContent = "0";
+    return;
+  }
+  let sumIn = 0;
+  let sumOut = 0;
+  hadifaAccountsBody.innerHTML = rows
+    .map((row, idx) => {
+      const moneyIn = Number(row.money_in || 0);
+      const moneyOut = Number(row.money_out || 0);
+      const balance = moneyIn - moneyOut;
+      sumIn += moneyIn;
+      sumOut += moneyOut;
+      const balClass = balance < 0 ? ' style="color:var(--danger,#d32f2f)"' : '';
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${Number(row.quantity || 0)}</td>
+        <td>${Number(row.unit_price || 0)}</td>
+        <td>${currency(moneyIn)}</td>
+        <td>${currency(moneyOut)}</td>
+        <td${balClass}>${currency(balance)}</td>
+        <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="hadifa-acc" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="hadifa-acc" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const totalBal = sumIn - sumOut;
+  const inEl = document.getElementById("hadifaAccTotalMoneyIn");
+  const outEl = document.getElementById("hadifaAccTotalMoneyOut");
+  const balEl = document.getElementById("hadifaAccTotalBalance");
+  if (inEl) inEl.textContent = currency(sumIn);
+  if (outEl) outEl.textContent = currency(sumOut);
+  if (balEl) {
+    balEl.textContent = currency(totalBal);
+    balEl.style.color = totalBal < 0 ? "var(--danger,#d32f2f)" : "";
+  }
+}
+
 function resetNahashonForm() {
   if (!nahashonForm) return;
   nahashonForm.reset();
@@ -4669,6 +4748,9 @@ function showPage(page) {
       return showPage("sales-bags");
     }
   }
+  if (page === "hadifa-accounts" && state.appInstance !== "ufaray") {
+    return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+  }
   if (page === "pigs" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
@@ -4781,6 +4863,7 @@ function showPage(page) {
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
+  if (page === "hadifa-accounts") renderHadifaAccountsTable();
   if (page === "pigs") renderPigsTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
@@ -5010,6 +5093,7 @@ async function loadAllData() {
     api("/api/nahashon-accounts"),
     api("/api/cess-accounts"),
     api("/api/pigs"),
+    api("/api/hadifa-accounts"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -5027,6 +5111,7 @@ async function loadAllData() {
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
   state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
   state.pigsEntries = extras[15].status === "fulfilled" ? extras[15].value : [];
+  state.hadifalAccountsEntries = extras[16].status === "fulfilled" ? extras[16].value : [];
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -5063,6 +5148,7 @@ async function loadAllData() {
   renderExpenditureTable();
   renderRoseTable();
   renderCessAccountsTable();
+  renderHadifaAccountsTable();
   renderNahashonTable();
   renderPigsTable();
   if (state.currentPage === "monthly-report") renderMonthlyReport();
@@ -5473,6 +5559,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
       if (!staffMayUseCalculator) return;
     }
     if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return;
+    if (page === "hadifa-accounts" && state.appInstance !== "ufaray") return;
     if (page === "nahashon-records" && state.appInstance !== "terry") return;
     showPage(page);
   });
@@ -5558,6 +5645,9 @@ if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
 }
 if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
   wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
+}
+if (hadifaAccDateDisplay && hadifaAccDate && hadifaAccOpenCalendarBtn) {
+  wireDatePicker(hadifaAccDateDisplay, hadifaAccDate, hadifaAccOpenCalendarBtn);
 }
 if (pigsDateDisplay && pigsDate && pigsOpenCalendarBtn) {
   wireDatePicker(pigsDateDisplay, pigsDate, pigsOpenCalendarBtn);
@@ -6624,6 +6714,34 @@ cessAccountsForm?.addEventListener("submit", async (event) => {
     alert(error.message);
   }
 });
+
+hadifaAccountsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = hadifaAccDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("hadifaAccDescription")?.value || "").trim(),
+    quantity: Number(document.getElementById("hadifaAccQuantity")?.value || 0),
+    unit_price: Number(document.getElementById("hadifaAccUnitPrice")?.value || 0),
+    money_in: Number(document.getElementById("hadifaAccMoneyIn")?.value || 0),
+    money_out: Number(document.getElementById("hadifaAccMoneyOut")?.value || 0),
+    sale_via: String(document.getElementById("hadifaAccSaleVia")?.value || "Shop").trim(),
+  };
+  try {
+    if (state.editHadifaAccountsId) {
+      await api(`/api/hadifa-accounts/${state.editHadifaAccountsId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/hadifa-accounts", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetHadifaAccountsForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+document.getElementById("hadifaAccClearBtn")?.addEventListener("click", () => resetHadifaAccountsForm());
 
 nahashonForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -7820,6 +7938,46 @@ cessAccountsBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/cess-accounts/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+hadifaAccountsBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "hadifa-acc") return;
+  const row = state.hadifalAccountsEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editHadifaAccountsId = row.id;
+    if (hadifaAccDate) hadifaAccDate.value = toIsoDate(row.date);
+    if (hadifaAccDateDisplay) hadifaAccDateDisplay.value = formatDateDMY(row.date);
+    const desc = document.getElementById("hadifaAccDescription");
+    const qty = document.getElementById("hadifaAccQuantity");
+    const unit = document.getElementById("hadifaAccUnitPrice");
+    const min = document.getElementById("hadifaAccMoneyIn");
+    const mout = document.getElementById("hadifaAccMoneyOut");
+    const via = document.getElementById("hadifaAccSaleVia");
+    if (desc) desc.value = row.description || "";
+    if (qty) qty.value = row.quantity ?? 0;
+    if (unit) unit.value = row.unit_price ?? 0;
+    if (min) min.value = row.money_in ?? 0;
+    if (mout) mout.value = row.money_out ?? 0;
+    if (via) via.value = row.sale_via || "Shop";
+    const saveBtn = document.getElementById("hadifaAccSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/hadifa-accounts/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);

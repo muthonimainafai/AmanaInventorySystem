@@ -912,6 +912,22 @@ async function initDb() {
   await run("ALTER TABLE cess_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
 
   await run(`
+    CREATE TABLE IF NOT EXISTS hadifa_accounts_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      quantity REAL NOT NULL DEFAULT 0,
+      unit_price REAL NOT NULL DEFAULT 0,
+      money_in REAL NOT NULL DEFAULT 0,
+      money_out REAL NOT NULL DEFAULT 0,
+      sale_via TEXT NOT NULL DEFAULT 'Shop',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS pigs_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
@@ -4243,6 +4259,79 @@ app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), asyn
     req.user.role === "owner"
       ? await run("DELETE FROM cess_accounts_entries WHERE id = ?", [Number(req.params.id)])
       : await run("DELETE FROM cess_accounts_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
+/* ── Hadifa Accounts (Ufaray – owner and employee) ─────────────────── */
+
+app.get("/api/hadifa-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM hadifa_accounts_entries ORDER BY id DESC")
+      : await all("SELECT * FROM hadifa_accounts_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/hadifa-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  const saleVia = String(p.sale_via || "Shop").trim() || "Shop";
+  let quantity, unitPrice, moneyIn, moneyOut;
+  try {
+    quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
+    unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO hadifa_accounts_entries (date, description, quantity, unit_price, money_in, money_out, sale_via, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, saleVia, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/hadifa-accounts/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM hadifa_accounts_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM hadifa_accounts_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  const saleVia = String(p.sale_via || "Shop").trim() || "Shop";
+  let quantity, unitPrice, moneyIn, moneyOut;
+  try {
+    quantity = parseRoseNonNegativeField(p.quantity, "Quantity");
+    unitPrice = parseRoseNonNegativeField(p.unit_price, "Unit price");
+    moneyIn = parseRoseNonNegativeField(p.money_in, "Money in");
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  await run(
+    `UPDATE hadifa_accounts_entries
+     SET date = ?, description = ?, quantity = ?, unit_price = ?, money_in = ?, money_out = ?, sale_via = ?, updated_at = ?
+     WHERE id = ?`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, saleVia, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/hadifa-accounts/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM hadifa_accounts_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM hadifa_accounts_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });
