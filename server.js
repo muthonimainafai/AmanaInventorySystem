@@ -2732,7 +2732,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
         const nextQty = Number(current.quantity_in_stock || 0) + addQty;
         const nextAcc = Math.max(0, Number(current.accumulated_bags || 0) + addQty);
         const totalStock = bagSize * nextQty;
-        const nextBagsBought = Math.max(0, Number(current.bags_bought || 0) + addQty);
+        const nextBagsBought = addQty;
         await run(
           `UPDATE inventory SET
            date = ?, brand = ?, feed_type = ?, bag_size = ?,
@@ -2833,11 +2833,10 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
     const carryQty = allProduct.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0);
     const carryAcc =
       allProduct.length > 0 ? Math.max(...allProduct.map((r) => Number(r.accumulated_bags ?? 0))) : 0;
-    const carryBagsBought = allProduct.reduce((s, r) => s + Number(r.bags_bought || 0), 0);
     const carryProfit = allProduct.reduce((s, r) => s + Number(r.accumulated_profit || 0), 0);
     const newQty = carryQty + addQty;
     const newAcc = carryAcc + addQty;
-    const newBagsBought = carryBagsBought + addQty;
+    const newBagsBought = addQty;
     const totalStock = bagSize * newQty;
     await run("BEGIN TRANSACTION");
     try {
