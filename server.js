@@ -952,18 +952,20 @@ async function initDb() {
     )
   `);
 
-  /* Seed: if credit_accounts is empty, create "Hadifa" and migrate any existing hadifa_accounts_entries */
-  const creditAccCount = await get("SELECT COUNT(*) AS n FROM credit_accounts");
-  if (!creditAccCount || creditAccCount.n === 0) {
-    const nowIso = new Date().toISOString();
-    await run(`INSERT INTO credit_accounts (name, created_by, created_at) VALUES (?, ?, ?)`, ["Hadifa", "owner", nowIso]);
-    const hadifahRows = await all("SELECT * FROM hadifa_accounts_entries ORDER BY id ASC");
-    for (const r of hadifahRows) {
-      await run(
-        `INSERT INTO credit_entries (account_id, date, description, quantity, unit_price, money_in, money_out, created_by, created_at, updated_at)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [r.date, r.description || "", r.quantity || 0, r.unit_price || 0, r.money_in || 0, r.money_out || 0, r.created_by || "owner", r.created_at || nowIso, r.updated_at || nowIso]
-      );
+  /* Seed: if credit_accounts is empty and this is the ufaray tenant, create "Hadifa" and migrate any existing hadifa_accounts_entries */
+  if (activeTenant() === "ufaray") {
+    const creditAccCount = await get("SELECT COUNT(*) AS n FROM credit_accounts");
+    if (!creditAccCount || creditAccCount.n === 0) {
+      const nowIso = new Date().toISOString();
+      await run(`INSERT INTO credit_accounts (name, created_by, created_at) VALUES (?, ?, ?)`, ["Hadifa", "owner", nowIso]);
+      const hadifahRows = await all("SELECT * FROM hadifa_accounts_entries ORDER BY id ASC");
+      for (const r of hadifahRows) {
+        await run(
+          `INSERT INTO credit_entries (account_id, date, description, quantity, unit_price, money_in, money_out, created_by, created_at, updated_at)
+           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [r.date, r.description || "", r.quantity || 0, r.unit_price || 0, r.money_in || 0, r.money_out || 0, r.created_by || "owner", r.created_at || nowIso, r.updated_at || nowIso]
+        );
+      }
     }
   }
 
