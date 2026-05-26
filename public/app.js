@@ -1058,6 +1058,11 @@ function updateBalanceBanner() {
     const formatted = currency(Math.abs(remaining));
     const isNegative = remaining < 0;
     el.textContent = isNegative ? `- ${formatted}` : formatted;
+    const banner = el.closest(".profit-highlight-above-table");
+    if (banner) {
+      banner.classList.toggle("balance-negative", isNegative);
+      banner.classList.toggle("balance-positive", !isNegative);
+    }
   });
   const cycleNote = lastOpPaymentDmy
     ? `Current cycle since ${cycleStartDmy} (last Operational costs payment ${lastOpPaymentDmy})`
