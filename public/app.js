@@ -176,6 +176,10 @@ function balanceDailyOperationalCostKes() {
   return BALANCE_PAGE_DAILY_OPERATIONAL_COST_KES_AMANA;
 }
 
+function creditTenantEnabled() {
+  return state.appInstance === "amana" || state.appInstance === "ufaray";
+}
+
 const BUSINESS_OPENED_DMY = "04/05/2026";
 
 /** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
@@ -2392,7 +2396,7 @@ function showLoggedIn() {
       shouldShow = state.appInstance === "amana" && isOwner;
     }
     if (page === "credit") {
-      shouldShow = state.appInstance === "ufaray" || state.appInstance === "amana";
+      shouldShow = creditTenantEnabled();
     }
     if (page === "nahashon-records") {
       shouldShow = state.appInstance === "terry";
@@ -4826,7 +4830,7 @@ function showPage(page) {
       return showPage("sales-bags");
     }
   }
-  if (page === "credit" && state.appInstance !== "ufaray" && state.appInstance !== "amana") {
+  if (page === "credit" && !creditTenantEnabled()) {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
   if (page === "pigs" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
@@ -5646,7 +5650,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
       if (!staffMayUseCalculator) return;
     }
     if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return;
-    if (page === "credit" && state.appInstance !== "ufaray" && state.appInstance !== "amana") return;
+    if (page === "credit" && !creditTenantEnabled()) return;
     if (page === "nahashon-records" && state.appInstance !== "terry") return;
     showPage(page);
   });

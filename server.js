@@ -4304,7 +4304,7 @@ app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), asyn
   res.json({ ok: true });
 });
 
-/* ── Credit Accounts (Ufaray – owner and employee) ──────────────────── */
+/* ── Credit Accounts (Amana & Ufaray – owner and employee) ──────────── */
 
 app.get("/api/credit-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
   const rows = await all("SELECT * FROM credit_accounts ORDER BY id ASC");
@@ -4330,11 +4330,8 @@ app.delete("/api/credit-accounts/:id", auth, allowRoles("owner"), async (req, re
   res.json({ ok: true });
 });
 
-app.get("/api/credit-entries", auth, allowRoles("owner", "employee"), async (req, res) => {
-  const rows =
-    req.user.role === "owner"
-      ? await all("SELECT * FROM credit_entries ORDER BY id DESC")
-      : await all("SELECT * FROM credit_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+app.get("/api/credit-entries", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  const rows = await all("SELECT * FROM credit_entries ORDER BY id DESC");
   res.json(rows);
 });
 
@@ -4367,10 +4364,7 @@ app.post("/api/credit-entries", auth, allowRoles("owner", "employee"), async (re
 
 app.put("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const id = Number(req.params.id);
-  const existing =
-    req.user.role === "owner"
-      ? await get("SELECT * FROM credit_entries WHERE id = ?", [id])
-      : await get("SELECT * FROM credit_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const existing = await get("SELECT * FROM credit_entries WHERE id = ?", [id]);
   if (!existing) return res.status(404).json({ error: "Record not found." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
@@ -4393,10 +4387,7 @@ app.put("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), async 
 });
 
 app.delete("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
-  const result =
-    req.user.role === "owner"
-      ? await run("DELETE FROM credit_entries WHERE id = ?", [Number(req.params.id)])
-      : await run("DELETE FROM credit_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  const result = await run("DELETE FROM credit_entries WHERE id = ?", [Number(req.params.id)]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });
