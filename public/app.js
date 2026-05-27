@@ -153,8 +153,19 @@ const OWNER_ALLOWED_PAGES = new Set([
   "monthly-report",
   "balance",
 ]);
-/** Owner pages that show the combined accumulated profit footer at the bottom. */
-const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set(["inventory", "retail-inventory", "chicken-inventory"]);
+/** Owner pages that show the combined accumulated profit footer (Amana & Ufaray). */
+const OWNER_PAGES_WITH_COMBINED_PROFIT = new Set([
+  "inventory",
+  "retail-inventory",
+  "sales-bags",
+  "sales-kg",
+  "chicken-inventory",
+  "feeders-drinkers",
+  "medicaments",
+  "gas",
+  "balance",
+  "pigs",
+]);
 
 /** Balance page only: daily operational cost (KES) per shop — Amana vs Ufaray are independent. */
 const BALANCE_PAGE_DAILY_OPERATIONAL_COST_KES_AMANA = 540;
@@ -677,7 +688,7 @@ function updateChickenProfitDisplay() {
 }
 
 function updateFeedersDrinkersProfitDisplay() {
-  const total = (state.feedersDrinkersInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const total = feedersDrinkersAccumulatedProfitTotal();
   const val = currency(total);
   document.querySelectorAll(".js-fd-accumulated-profit-value").forEach((el) => {
     el.textContent = val;
@@ -691,7 +702,7 @@ function updateFeedersDrinkersProfitDisplay() {
 }
 
 function updateMedicamentsProfitDisplay() {
-  const total = (state.medicamentsInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const total = medicamentsAccumulatedProfitTotal();
   const val = currency(total);
   document.querySelectorAll(".js-med-accumulated-profit-value").forEach((el) => {
     el.textContent = val;
@@ -954,7 +965,7 @@ function getCalcPaidAmountForPdf() {
 }
 
 function updateGasProfitDisplay() {
-  const total = (state.gasInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const total = gasAccumulatedProfitTotal();
   const val = currency(total);
   document.querySelectorAll(".js-gas-accumulated-profit-value").forEach((el) => {
     el.textContent = val;
@@ -967,15 +978,29 @@ function updateGasProfitDisplay() {
   });
 }
 
+function feedersDrinkersAccumulatedProfitTotal() {
+  return (state.feedersDrinkersInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+}
+
+function medicamentsAccumulatedProfitTotal() {
+  return (state.medicamentsInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+}
+
+function gasAccumulatedProfitTotal() {
+  return (state.gasInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+}
+
 function updateOwnerCombinedProfitDockVisibility() {
   const dock = document.getElementById("ownerCombinedProfitDock");
   if (!dock) return;
   const show =
-    state.user?.role === "owner" && OWNER_PAGES_WITH_COMBINED_PROFIT.has(state.currentPage);
+    state.user?.role === "owner" &&
+    (state.appInstance === "amana" || state.appInstance === "ufaray") &&
+    OWNER_PAGES_WITH_COMBINED_PROFIT.has(state.currentPage);
   dock.classList.toggle("hidden", !show);
 }
 
-/** Owner: Feed bag cumulative + retail kg cumulative + staff chicken margin cumulative. */
+/** Owner: all-time profit across every inventory module (feed, retail, chicken, FD, medicaments, gas). */
 function updateOwnerCombinedProfitDisplay() {
   if (state.user?.role !== "owner") return;
   const sum = getOwnerCombinedProfitTotal();
@@ -988,7 +1013,10 @@ function getOwnerCombinedProfitTotal() {
   const feed = Number(state.cumulativeFeedBagProfit) || 0;
   const retail = Number(state.cumulativeRetailKgProfit) || 0;
   const chicken = Number(state.chickenProfitSummary?.cumulativeProfit) || 0;
-  return feed + retail + chicken;
+  const fd = feedersDrinkersAccumulatedProfitTotal();
+  const med = medicamentsAccumulatedProfitTotal();
+  const gas = gasAccumulatedProfitTotal();
+  return feed + retail + chicken + fd + med + gas;
 }
 
 function inclusiveBusinessDaysFromOpen(openedDmy, todayDmy) {
