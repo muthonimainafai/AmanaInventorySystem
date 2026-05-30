@@ -984,6 +984,19 @@ async function initDb() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS monthly_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      month_key TEXT NOT NULL UNIQUE,
+      month_label TEXT NOT NULL,
+      combined_profit REAL NOT NULL DEFAULT 0,
+      expenditure REAL NOT NULL DEFAULT 0,
+      balance REAL NOT NULL DEFAULT 0,
+      closed_at TEXT NOT NULL,
+      created_by TEXT NOT NULL
+    )
+  `);
+
   const accBagsMigrated = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_bags_v1"]);
   if (!accBagsMigrated || accBagsMigrated.value !== "1") {
     await run(`UPDATE inventory SET accumulated_bags = quantity_in_stock`);
@@ -3989,6 +4002,127 @@ function normalizeExpenditureCategory(val) {
   return "Other";
 }
 
+const BUSINESS_OPENED_DMY = "04/05/2026";
+const BALANCE_DAILY_OPS_AMANA = 540;
+const BALANCE_DAILY_OPS_UFARAY = 180;
+
+function balanceDailyOperationalCostKesServer() {
+  return activeTenant() === "ufaray" ? BALANCE_DAILY_OPS_UFARAY : BALANCE_DAILY_OPS_AMANA;
+}
+
+function monthKeyFromDMY(dmy) {
+  const parts = parseSaleDateDMY(dmy);
+  if (!parts) return null;
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}`;
+}
+
+function monthShortLabelFromKey(monthKey) {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthKey || "");
+  if (!m) return monthKey || "";
+  const mo = Number(m[2]);
+  const names = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  return names[mo - 1] || monthKey;
+}
+
+function inclusiveBusinessDaysFromOpenDMY(openedDmy, todayDmy) {
+  const from = parseSaleDateDMY(openedDmy);
+  const to = parseSaleDateDMY(todayDmy);
+  if (!from || !to) return 0;
+  const utcFrom = Date.UTC(from.y, from.m - 1, from.d);
+  const utcTo = Date.UTC(to.y, to.m - 1, to.d);
+  const diff = Math.floor((utcTo - utcFrom) / 86400000);
+  return diff >= 0 ? diff + 1 : 0;
+}
+
+async function findLastOperationalCostsPaymentDateDMY() {
+  const rows = await all("SELECT date, category FROM employee_expenditure");
+  let latestDmy = null;
+  let latestKey = null;
+  for (const row of rows) {
+    if (normalizeExpenditureCategory(row.category) !== "Operational costs") continue;
+    const dmy = normalizeInventoryDate(row.date) || String(row.date || "").trim();
+    const parts = parseSaleDateDMY(dmy);
+    if (!parts) continue;
+    const key = Date.UTC(parts.y, parts.m - 1, parts.d);
+    if (latestKey == null || key > latestKey) {
+      latestKey = key;
+      latestDmy = dmy;
+    }
+  }
+  return latestDmy;
+}
+
+async function computeCombinedAccumulatedProfitTotal() {
+  const feed = Number((await computeCumulativeFeedBagSalesProfit()).totalProfit) || 0;
+  const retail = Number((await computeCumulativeRetailKgProfit()).totalProfit) || 0;
+  const chicken = Number((await computeChickenProfitSummary(null)).cumulativeProfit) || 0;
+  const fdRow = await get("SELECT COALESCE(SUM(accumulated_profit), 0) AS t FROM feeders_drinkers_inventory");
+  const medRow = await get("SELECT COALESCE(SUM(accumulated_profit), 0) AS t FROM medicaments_inventory");
+  const gasRow = await get("SELECT COALESCE(SUM(accumulated_profit), 0) AS t FROM gas_inventory");
+  return (
+    feed +
+    retail +
+    chicken +
+    (Number(fdRow?.t) || 0) +
+    (Number(medRow?.t) || 0) +
+    (Number(gasRow?.t) || 0)
+  );
+}
+
+async function computeTotalExpenditureMoneyOut() {
+  const row = await get("SELECT COALESCE(SUM(money_out), 0) AS t FROM employee_expenditure");
+  return Number(row?.t) || 0;
+}
+
+async function computeOwnerBalanceRemaining() {
+  const combined = await computeCombinedAccumulatedProfitTotal();
+  const totalExpenditure = await computeTotalExpenditureMoneyOut();
+  const today = todayDMY();
+  const dailyOps = balanceDailyOperationalCostKesServer();
+  const lastOpPaymentDmy = await findLastOperationalCostsPaymentDateDMY();
+  const totalDays = inclusiveBusinessDaysFromOpenDMY(BUSINESS_OPENED_DMY, today);
+  let daysUncovered = totalDays;
+  if (lastOpPaymentDmy) {
+    const lastParts = parseSaleDateDMY(lastOpPaymentDmy);
+    const todayParts = parseSaleDateDMY(today);
+    if (lastParts && todayParts) {
+      const utcLast = Date.UTC(lastParts.y, lastParts.m - 1, lastParts.d);
+      const utcToday = Date.UTC(todayParts.y, todayParts.m - 1, todayParts.d);
+      const diff = Math.floor((utcToday - utcLast) / 86400000);
+      daysUncovered = diff > 0 ? diff : 0;
+    } else {
+      daysUncovered = 0;
+    }
+  }
+  const operational = daysUncovered * dailyOps;
+  return combined - operational - totalExpenditure;
+}
+
+async function computeMonthlyRecordsSnapshot() {
+  return {
+    combinedProfit: roundMoney(await computeCombinedAccumulatedProfitTotal()),
+    expenditure: roundMoney(await computeTotalExpenditureMoneyOut()),
+    balance: roundMoney(await computeOwnerBalanceRemaining()),
+  };
+}
+
+function monthlyRecordsTenantAllowed() {
+  return activeTenant() === "amana" || activeTenant() === "ufaray";
+}
+
 app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
@@ -4390,6 +4524,90 @@ app.delete("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), asy
   const result = await run("DELETE FROM credit_entries WHERE id = ?", [Number(req.params.id)]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
+});
+
+/* ── Monthly Records (Amana & Ufaray – owner only) ─────────────────── */
+
+app.get("/api/monthly-records", auth, allowRoles("owner"), async (_req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) {
+      return res.json({
+        records: [],
+        currentMonthKey: null,
+        currentMonthLabel: null,
+        currentClosed: false,
+        preview: null,
+      });
+    }
+    const records = await all("SELECT * FROM monthly_records ORDER BY month_key DESC");
+    const today = todayDMY();
+    const currentMonthKey = monthKeyFromDMY(today);
+    const currentMonthLabel = currentMonthKey ? monthShortLabelFromKey(currentMonthKey) : null;
+    const existing = currentMonthKey
+      ? await get("SELECT id FROM monthly_records WHERE month_key = ?", [currentMonthKey])
+      : null;
+    const preview = await computeMonthlyRecordsSnapshot();
+    res.json({
+      records,
+      currentMonthKey,
+      currentMonthLabel,
+      currentClosed: !!existing,
+      preview,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not load monthly records." });
+  }
+});
+
+app.post("/api/monthly-records/close", auth, allowRoles("owner"), async (req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) {
+      return res.status(400).json({ error: "Monthly records are only available for Amana and Ufaray." });
+    }
+    const today = todayDMY();
+    let monthKey = String(req.body?.month_key || "").trim();
+    if (!monthKey) monthKey = monthKeyFromDMY(today);
+    if (!monthKey) return res.status(400).json({ error: "Could not determine month to close." });
+    const dup = await get("SELECT id FROM monthly_records WHERE month_key = ?", [monthKey]);
+    if (dup) {
+      return res.status(400).json({
+        error: `${monthShortLabelFromKey(monthKey)} is already closed and saved.`,
+      });
+    }
+    const snap = await computeMonthlyRecordsSnapshot();
+    const nowIso = new Date().toISOString();
+    const result = await run(
+      `INSERT INTO monthly_records (month_key, month_label, combined_profit, expenditure, balance, closed_at, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        monthKey,
+        monthShortLabelFromKey(monthKey),
+        snap.combinedProfit,
+        snap.expenditure,
+        snap.balance,
+        nowIso,
+        req.user.username,
+      ]
+    );
+    res.json({
+      ok: true,
+      id: result.lastID,
+      record: {
+        month_key: monthKey,
+        month_label: monthShortLabelFromKey(monthKey),
+        combined_profit: snap.combinedProfit,
+        expenditure: snap.expenditure,
+        balance: snap.balance,
+        closed_at: nowIso,
+      },
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not close monthly records." });
+  }
 });
 
 app.get("/api/pigs", auth, allowRoles("owner", "employee"), async (req, res) => {

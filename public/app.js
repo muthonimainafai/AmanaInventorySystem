@@ -66,6 +66,13 @@ const state = {
   creditAccounts: [],
   creditEntries: [],
   activeCreditAccountId: null,
+  monthlyRecordsPayload: {
+    records: [],
+    currentMonthKey: null,
+    currentMonthLabel: null,
+    currentClosed: false,
+    preview: null,
+  },
   nahashonEntries: [],
   editNahashonId: null,
   pigsEntries: [],
@@ -90,6 +97,7 @@ const PAGE_HEADINGS = {
   pigs: "Pigs Page",
   expenditure: "Expenditure",
   "monthly-report": "Monthly Report",
+  "monthly-records": "Monthly Records",
   balance: "Balance",
 };
 
@@ -133,7 +141,7 @@ function isTerryOrCessTenant() {
 }
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
-const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance", "monthly-report"]);
+const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance", "monthly-report", "monthly-records"]);
 const OWNER_ALLOWED_PAGES = new Set([
   "inventory",
   "retail-inventory",
@@ -151,6 +159,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "calculator",
   "expenditure",
   "monthly-report",
+  "monthly-records",
   "balance",
 ]);
 /** Owner pages that show the combined accumulated profit footer (Amana & Ufaray). */
@@ -178,6 +187,10 @@ function balanceDailyOperationalCostKes() {
 
 function creditTenantEnabled() {
   return state.appInstance === "amana" || state.appInstance === "ufaray";
+}
+
+function monthlyRecordsTenantEnabled() {
+  return state.user?.role === "owner" && creditTenantEnabled();
 }
 
 const BUSINESS_OPENED_DMY = "04/05/2026";
@@ -1395,6 +1408,94 @@ function renderMonthlyReport() {
   }
 }
 
+async function loadMonthlyRecordsData() {
+  if (!monthlyRecordsTenantEnabled()) {
+    state.monthlyRecordsPayload = {
+      records: [],
+      currentMonthKey: null,
+      currentMonthLabel: null,
+      currentClosed: false,
+      preview: null,
+    };
+    return;
+  }
+  try {
+    state.monthlyRecordsPayload = await api("/api/monthly-records");
+  } catch {
+    state.monthlyRecordsPayload = {
+      records: [],
+      currentMonthKey: null,
+      currentMonthLabel: null,
+      currentClosed: false,
+      preview: null,
+    };
+  }
+}
+
+function renderMonthlyRecords() {
+  if (state.currentPage !== "monthly-records") return;
+  if (!monthlyRecordsTenantEnabled()) return;
+  const payload = state.monthlyRecordsPayload || {};
+  const records = payload.records || [];
+  const preview = payload.preview || {};
+  const titleEl = document.getElementById("monthlyRecordsCurrentTitle");
+  const subEl = document.getElementById("monthlyRecordsCurrentSub");
+  const balEl = document.getElementById("monthlyRecordsCurrentBalance");
+  const metaEl = document.getElementById("monthlyRecordsCurrentMeta");
+  const closeBtn = document.getElementById("monthlyRecordsCloseBtn");
+  const panel = document.getElementById("monthlyRecordsCurrentPanel");
+  const monthLabel = payload.currentMonthLabel || "This month";
+  if (titleEl) {
+    titleEl.textContent = payload.currentClosed
+      ? `${monthLabel} — closed`
+      : `Current month — ${monthLabel}`;
+  }
+  if (subEl) {
+    subEl.textContent = payload.currentClosed
+      ? "This month has already been saved. Totals below show live figures for reference only."
+      : "These are the totals that will be saved when you close the books for this month.";
+  }
+  const balanceVal = Number(preview.balance ?? 0);
+  if (balEl) {
+    const formatted = currency(Math.abs(balanceVal));
+    balEl.textContent = balanceVal < 0 ? `- ${formatted}` : formatted;
+    if (panel) {
+      panel.classList.toggle("balance-negative", balanceVal < 0);
+      panel.classList.toggle("balance-positive", balanceVal >= 0);
+    }
+  }
+  if (metaEl) {
+    metaEl.textContent = `Combined profits: ${currency(preview.combinedProfit ?? 0)} · Expenditure: ${currency(
+      preview.expenditure ?? 0
+    )} · Balance: ${currency(balanceVal)}`;
+  }
+  if (closeBtn) {
+    closeBtn.disabled = !!payload.currentClosed;
+    closeBtn.textContent = payload.currentClosed
+      ? `${monthLabel} already closed`
+      : `Close books for ${monthLabel}`;
+  }
+  const body = document.getElementById("monthly-records-body");
+  if (!body) return;
+  if (!records.length) {
+    body.innerHTML = '<tr><td colspan="4" class="empty">No closed months yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = records
+    .map((row) => {
+      const bal = Number(row.balance ?? 0);
+      const balClass = bal < 0 ? ' style="color:var(--danger,#d32f2f)"' : "";
+      const balText = bal < 0 ? `- ${currency(Math.abs(bal))}` : currency(bal);
+      return `<tr>
+        <td>${escapeHtmlCell(row.month_label || row.month_key || "—")}</td>
+        <td>${currency(row.combined_profit ?? 0)}</td>
+        <td>${currency(row.expenditure ?? 0)}</td>
+        <td${balClass}>${balText}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
 /** Strip HTML tags from advice strings for PDF rendering. */
 function stripHtmlForPdf(html) {
   return String(html || "")
@@ -2406,6 +2507,9 @@ function showLoggedIn() {
     }
     if (page === "monthly-report") {
       shouldShow = isOwner && (state.appInstance === "amana" || state.appInstance === "ufaray");
+    }
+    if (page === "monthly-records") {
+      shouldShow = monthlyRecordsTenantEnabled();
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -4865,6 +4969,10 @@ function showPage(page) {
       return showPage("inventory");
     }
   }
+  if (page === "monthly-records") {
+    if (state.user?.role !== "owner") return showPage("sales-bags");
+    if (!creditTenantEnabled()) return showPage("inventory");
+  }
   state.currentPage = page;
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
@@ -4963,6 +5071,7 @@ function showPage(page) {
   if (page === "expenditure") renderExpenditureTable();
   if (page === "balance") updateBalanceBanner();
   if (page === "monthly-report") renderMonthlyReport();
+  if (page === "monthly-records") renderMonthlyRecords();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -5203,6 +5312,8 @@ async function loadAllData() {
   state.creditAccounts = extras[16].status === "fulfilled" ? extras[16].value : [];
   state.creditEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
 
+  await loadMonthlyRecordsData();
+
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
   updateChickenProfitDisplay();
@@ -5243,6 +5354,7 @@ async function loadAllData() {
   renderNahashonTable();
   renderPigsTable();
   if (state.currentPage === "monthly-report") renderMonthlyReport();
+  if (state.currentPage === "monthly-records") renderMonthlyRecords();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
   restoreInventoryFormDraft(inventoryDraft);
@@ -5754,6 +5866,27 @@ document.getElementById("mrDownloadPdfBtn")?.addEventListener("click", () => {
   } catch (err) {
     console.error("Monthly report PDF failed", err);
     alert("Could not generate the Monthly Report PDF. Refresh and try again.");
+  }
+});
+document.getElementById("monthlyRecordsCloseBtn")?.addEventListener("click", async () => {
+  const payload = state.monthlyRecordsPayload || {};
+  const label = payload.currentMonthLabel || "this month";
+  if (payload.currentClosed) return;
+  if (
+    !window.confirm(
+      `Close books for ${label}? This permanently saves combined accumulated profits, expenditure, and balance for ${label}.`
+    )
+  ) {
+    return;
+  }
+  try {
+    await api("/api/monthly-records/close", {
+      method: "POST",
+      body: JSON.stringify({ month_key: payload.currentMonthKey || null }),
+    });
+    await loadAllData();
+  } catch (err) {
+    alert(err.message);
   }
 });
 fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);

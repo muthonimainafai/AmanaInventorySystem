@@ -140,6 +140,7 @@
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="monthly-report">Monthly Report</button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="monthly-records">Monthly Records</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="balance">Balance</button>
         </nav>
 
@@ -2074,6 +2075,48 @@
             <ul id="mrAdvice" class="advice-list">
               <li class="empty">Pick a month above to generate advice.</li>
             </ul>
+          </div>
+        </div>
+
+        <div id="page-monthly-records" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Monthly Records</h3>
+            <p class="field-hint">
+              Close the books at month-end to save a permanent snapshot of combined accumulated profits, total expenditure, and balance. Saved records stay in the table even after a new month starts.
+            </p>
+            <div id="monthlyRecordsCurrentPanel" class="profit-highlight-above-table" aria-live="polite">
+              <div class="profit-highlight-inner">
+                <div class="profit-highlight-text">
+                  <p class="profit-highlight-title" id="monthlyRecordsCurrentTitle">Current month</p>
+                  <p class="profit-highlight-sub" id="monthlyRecordsCurrentSub">Loading current totals…</p>
+                </div>
+                <div class="profit-highlight-amount-col">
+                  <span class="profit-highlight-amount" id="monthlyRecordsCurrentBalance">KES 0</span>
+                </div>
+              </div>
+              <p class="profit-highlight-example" id="monthlyRecordsCurrentMeta"></p>
+              <div class="actions" style="margin-top:12px;">
+                <button type="button" id="monthlyRecordsCloseBtn">Close books for this month</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Closed months</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Combined Accumulated Profits</th>
+                    <th>Expenditure</th>
+                    <th>Balance</th>
+                  </tr>
+                </thead>
+                <tbody id="monthly-records-body">
+                  <tr><td colspan="4" class="empty">No closed months yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
