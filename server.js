@@ -448,7 +448,14 @@ app.use(async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
-  return tenantContext.run({ tenant }, () => next());
+  return tenantContext.run({ tenant }, async () => {
+    try {
+      await ensureCurrentBusinessMonth();
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
 });
 
 function run(sql, params = []) {
@@ -1182,6 +1189,10 @@ async function initDb() {
   await run("DELETE FROM vehicle_users WHERE role = 'staff'");
   await zeroOwnerChickenSaleMarginSnaps();
   await migrateChickenBreedAccumulatedProfitClearedOnlyV1();
+  await ensureCurrentBusinessMonth().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error(`[${activeTenant()}] Business month rollover failed:`, err);
+  });
 }
 
 /** One-time: align per-breed accumulated_profit with delivered/cleared staff sales only (pending no longer counts). */
@@ -1920,20 +1931,25 @@ function employeeSaleDateAllowed(req, res, dateStr) {
 
 /**
  * Per inventory line (brand + feed + bag size): cumulative profit from shop Sales Per Bags only
- * (SUM(bags_sold) × current margin). Rows with through_party set (e.g. By Ufaray) are excluded. Kg sales excluded.
+ * (SUM(bags_sold) × current margin) for the current calendar month. Rows with through_party set are excluded.
  */
-async function cumulativeBagSalesProfitByInventoryLines() {
+async function cumulativeBagSalesProfitByInventoryLines(monthKey = null) {
+  const mk = monthKey || monthKeyFromDMY(todayDMY());
   const invRows = await all("SELECT brand, feed_type, bag_size, profit_margin_per_bag FROM inventory");
   const marginMap = new Map();
   for (const inv of invRows) {
     marginMap.set(inventoryProfitKey(inv.brand, inv.feed_type, inv.bag_size), Number(inv.profit_margin_per_bag) || 0);
   }
   const sbRows = await all(
-    `SELECT brand, feed_type, bag_size, bags_sold FROM sales_bags
+    `SELECT brand, feed_type, bag_size, bags_sold, date FROM sales_bags
      WHERE through_party IS NULL OR TRIM(COALESCE(through_party, '')) = ''`
   );
   const bagTotalsByKey = new Map();
   for (const row of sbRows) {
+    if (mk) {
+      const rowMonth = monthKeyFromDMY(normalizeInventoryDate(row.date) || row.date);
+      if (rowMonth !== mk) continue;
+    }
     const key = inventoryProfitKey(row.brand, row.feed_type, row.bag_size);
     const add = Number(row.bags_sold) || 0;
     bagTotalsByKey.set(key, (bagTotalsByKey.get(key) || 0) + add);
@@ -1961,9 +1977,9 @@ async function passThroughBagTotalsByInventoryLines() {
   return totals;
 }
 
-/** Sum of cumulative bag-sales profit across all inventory lines (for Feed Inventory highlight). */
-async function computeCumulativeFeedBagSalesProfit() {
-  const lineMap = await cumulativeBagSalesProfitByInventoryLines();
+/** Sum of cumulative bag-sales profit across all inventory lines (current calendar month by default). */
+async function computeCumulativeFeedBagSalesProfit(monthKey = null) {
+  const lineMap = await cumulativeBagSalesProfitByInventoryLines(monthKey);
   let total = 0;
   for (const v of lineMap.values()) total += v;
   const today = todayDMY();
@@ -2467,8 +2483,9 @@ function isChickenFeedInventoryStockError(err) {
  * Staff margin totals: only rows with Payment status = Delivered (pending counts as 0).
  * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
  */
-async function computeChickenProfitSummary(employeeUsernameOnly) {
+async function computeChickenProfitSummary(employeeUsernameOnly, monthKey = null) {
   const today = todayDMY();
+  const mk = monthKey || monthKeyFromDMY(today);
   const clearedCond = `LOWER(TRIM(COALESCE(cs.payment_status, 'pending'))) IN ('delivered','cleared')`;
   const baseJoin = `FROM chicken_sales cs
      INNER JOIN users u ON u.username = cs.created_by AND u.role = 'employee'`;
@@ -2488,12 +2505,19 @@ async function computeChickenProfitSummary(employeeUsernameOnly) {
     whereCum += " AND cs.created_by = ?";
     paramsCum.push(employeeUsernameOnly);
   }
-  const cumRow = await get(
-    `SELECT COALESCE(SUM(cs.quantity_birds * COALESCE(cs.margin_snap, 0)), 0) AS c ${baseJoin} ${whereCum}`,
+  const cumRows = await all(
+    `SELECT cs.quantity_birds, cs.margin_snap, cs.date ${baseJoin} ${whereCum}`,
     paramsCum
   );
+  let cumulativeProfit = 0;
+  for (const r of cumRows) {
+    if (mk) {
+      const rowMonth = monthKeyFromDMY(normalizeInventoryDate(r.date) || r.date);
+      if (rowMonth !== mk) continue;
+    }
+    cumulativeProfit += (Number(r.quantity_birds) || 0) * (Number(r.margin_snap) || 0);
+  }
   const todayProfit = Number(row?.t) || 0;
-  const cumulativeProfit = Number(cumRow?.c) || 0;
   return { todayProfit, cumulativeProfit, today, timeZone: AMANA_TZ };
 }
 
@@ -2660,7 +2684,7 @@ app.get("/api/catalog", (_req, res) => {
   res.json(catalogForActiveTenant());
 });
 
-/** Cumulative profit from all Sales Per Bags (per-line: all-time bags sold × current margin). `today` is shop day for UI only. */
+/** Cumulative profit from Sales Per Bags for the current calendar month. `today` is shop day for UI only. */
 app.get("/api/sales/today-profit", auth, async (_req, res) => {
   try {
     const data = await computeCumulativeFeedBagSalesProfit();
@@ -3991,9 +4015,13 @@ app.delete("/api/gas/:id", auth, allowRoles("owner"), async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.get("/api/expenditure", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  const monthKey = monthKeyFromDMY(todayDMY());
   const rows = await all("SELECT * FROM employee_expenditure ORDER BY id DESC");
-  res.json(rows);
+  const filtered = monthKey
+    ? rows.filter((r) => monthKeyFromDMY(normalizeInventoryDate(r.date) || r.date) === monthKey)
+    : rows;
+  res.json(filtered);
 });
 
 function normalizeExpenditureCategory(val) {
@@ -4002,7 +4030,6 @@ function normalizeExpenditureCategory(val) {
   return "Other";
 }
 
-const BUSINESS_OPENED_DMY = "04/05/2026";
 const BALANCE_DAILY_OPS_AMANA = 540;
 const BALANCE_DAILY_OPS_UFARAY = 180;
 
@@ -4037,38 +4064,123 @@ function monthShortLabelFromKey(monthKey) {
   return names[mo - 1] || monthKey;
 }
 
-function inclusiveBusinessDaysFromOpenDMY(openedDmy, todayDmy) {
-  const from = parseSaleDateDMY(openedDmy);
-  const to = parseSaleDateDMY(todayDmy);
-  if (!from || !to) return 0;
-  const utcFrom = Date.UTC(from.y, from.m - 1, from.d);
-  const utcTo = Date.UTC(to.y, to.m - 1, to.d);
-  const diff = Math.floor((utcTo - utcFrom) / 86400000);
-  return diff >= 0 ? diff + 1 : 0;
+/** Inclusive operational days: 1st of the calendar month through today (shop day). */
+function calendarMonthOperationalDays(dmy) {
+  const parts = parseSaleDateDMY(dmy);
+  if (!parts) return 0;
+  return parts.d;
 }
 
-async function findLastOperationalCostsPaymentDateDMY() {
-  const rows = await all("SELECT date, category FROM employee_expenditure");
-  let latestDmy = null;
-  let latestKey = null;
-  for (const row of rows) {
-    if (normalizeExpenditureCategory(row.category) !== "Operational costs") continue;
-    const dmy = normalizeInventoryDate(row.date) || String(row.date || "").trim();
-    const parts = parseSaleDateDMY(dmy);
-    if (!parts) continue;
-    const key = Date.UTC(parts.y, parts.m - 1, parts.d);
-    if (latestKey == null || key > latestKey) {
-      latestKey = key;
-      latestDmy = dmy;
-    }
+function calendarMonthCycleLabel(dmy) {
+  const parts = parseSaleDateDMY(dmy);
+  if (!parts) return "";
+  const monthName = monthShortLabelFromKey(`${parts.y}-${String(parts.m).padStart(2, "0")}`);
+  const lastDay = new Date(Date.UTC(parts.y, parts.m, 0)).getUTCDate();
+  return `${monthName} (day ${parts.d} of ${lastDay})`;
+}
+
+function monthlyRecordsTenantAllowed() {
+  return activeTenant() === "amana" || activeTenant() === "ufaray";
+}
+
+async function performBusinessMonthReset() {
+  await run("UPDATE inventory SET accumulated_profit = 0");
+  await run("UPDATE retail_feed_pricing SET accumulated_profit = 0");
+  await run("UPDATE chicken_breeds SET accumulated_profit = 0");
+  await run("UPDATE feeders_drinkers_inventory SET accumulated_profit = 0");
+  await run("UPDATE medicaments_inventory SET accumulated_profit = 0");
+  await run("UPDATE gas_inventory SET accumulated_profit = 0");
+  await run("DELETE FROM employee_expenditure");
+}
+
+/** When the calendar month changes, save the prior month (if needed) and reset profits/expenditure. */
+async function ensureCurrentBusinessMonth() {
+  if (!monthlyRecordsTenantAllowed()) return;
+
+  const today = todayDMY();
+  const currentKey = monthKeyFromDMY(today);
+  if (!currentKey) return;
+
+  const row = await get("SELECT value FROM app_meta WHERE key = ?", ["business_month_key"]);
+  const storedKey = String(row?.value || "").trim() || null;
+
+  if (!storedKey) {
+    await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, [
+      "business_month_key",
+      currentKey,
+    ]);
+    return;
   }
-  return latestDmy;
+
+  if (storedKey === currentKey) return;
+
+  await run("BEGIN TRANSACTION");
+  try {
+    const dup = await get("SELECT id FROM monthly_records WHERE month_key = ?", [storedKey]);
+    if (!dup) {
+      const snap = await computeMonthlyRecordsSnapshot(storedKey);
+      const nowIso = new Date().toISOString();
+      await run(
+        `INSERT INTO monthly_records (month_key, month_label, combined_profit, expenditure, balance, closed_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          storedKey,
+          monthShortLabelFromKey(storedKey),
+          snap.combinedProfit,
+          snap.expenditure,
+          snap.balance,
+          nowIso,
+          "system",
+        ]
+      );
+    }
+    await performBusinessMonthReset();
+    await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, [
+      "business_month_key",
+      currentKey,
+    ]);
+    await run("COMMIT");
+  } catch (err) {
+    await run("ROLLBACK").catch(() => {});
+    throw err;
+  }
 }
 
-async function computeCombinedAccumulatedProfitTotal() {
-  const feed = Number((await computeCumulativeFeedBagSalesProfit()).totalProfit) || 0;
+function parseMonthKeyParts(monthKey) {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthKey || "");
+  if (!m) return null;
+  return { y: Number(m[1]), m: Number(m[2]) };
+}
+
+/** Operational days for balance: current month uses day-of-month; closed months use full month length. */
+function calendarMonthOperationalDaysForMonthKey(monthKey, todayDmy) {
+  const todayKey = monthKeyFromDMY(todayDmy);
+  const parts = parseMonthKeyParts(monthKey);
+  if (!parts) return 0;
+  if (monthKey === todayKey) return calendarMonthOperationalDays(todayDmy);
+  if (monthKey < todayKey) return new Date(Date.UTC(parts.y, parts.m, 0)).getUTCDate();
+  return 0;
+}
+
+function calendarMonthCycleLabelForMonthKey(monthKey, todayDmy) {
+  const parts = parseMonthKeyParts(monthKey);
+  if (!parts) return "";
+  const monthName = monthShortLabelFromKey(monthKey);
+  const lastDay = new Date(Date.UTC(parts.y, parts.m, 0)).getUTCDate();
+  const todayKey = monthKeyFromDMY(todayDmy);
+  if (monthKey === todayKey) {
+    const todayParts = parseSaleDateDMY(todayDmy);
+    const dayNum = todayParts?.d || 0;
+    return `${monthName} (day ${dayNum} of ${lastDay})`;
+  }
+  return `${monthName} (${lastDay} days)`;
+}
+
+async function computeCombinedAccumulatedProfitTotal(monthKey = null) {
+  const mk = monthKey || monthKeyFromDMY(todayDMY());
+  const feed = Number((await computeCumulativeFeedBagSalesProfit(mk)).totalProfit) || 0;
   const retail = Number((await computeCumulativeRetailKgProfit()).totalProfit) || 0;
-  const chicken = Number((await computeChickenProfitSummary(null)).cumulativeProfit) || 0;
+  const chicken = Number((await computeChickenProfitSummary(null, mk)).cumulativeProfit) || 0;
   const fdRow = await get("SELECT COALESCE(SUM(accumulated_profit), 0) AS t FROM feeders_drinkers_inventory");
   const medRow = await get("SELECT COALESCE(SUM(accumulated_profit), 0) AS t FROM medicaments_inventory");
   const gasRow = await get("SELECT COALESCE(SUM(accumulated_profit), 0) AS t FROM gas_inventory");
@@ -4082,45 +4194,38 @@ async function computeCombinedAccumulatedProfitTotal() {
   );
 }
 
-async function computeTotalExpenditureMoneyOut() {
-  const row = await get("SELECT COALESCE(SUM(money_out), 0) AS t FROM employee_expenditure");
-  return Number(row?.t) || 0;
+async function computeTotalExpenditureMoneyOut(monthKey = null) {
+  const mk = monthKey || monthKeyFromDMY(todayDMY());
+  const rows = await all("SELECT money_out, date FROM employee_expenditure");
+  let total = 0;
+  for (const r of rows) {
+    if (mk) {
+      const rowMonth = monthKeyFromDMY(normalizeInventoryDate(r.date) || r.date);
+      if (rowMonth !== mk) continue;
+    }
+    total += Number(r.money_out) || 0;
+  }
+  return total;
 }
 
-async function computeOwnerBalanceRemaining() {
-  const combined = await computeCombinedAccumulatedProfitTotal();
-  const totalExpenditure = await computeTotalExpenditureMoneyOut();
+async function computeOwnerBalanceRemaining(monthKey = null) {
+  const mk = monthKey || monthKeyFromDMY(todayDMY());
+  const combined = await computeCombinedAccumulatedProfitTotal(mk);
+  const totalExpenditure = await computeTotalExpenditureMoneyOut(mk);
   const today = todayDMY();
   const dailyOps = balanceDailyOperationalCostKesServer();
-  const lastOpPaymentDmy = await findLastOperationalCostsPaymentDateDMY();
-  const totalDays = inclusiveBusinessDaysFromOpenDMY(BUSINESS_OPENED_DMY, today);
-  let daysUncovered = totalDays;
-  if (lastOpPaymentDmy) {
-    const lastParts = parseSaleDateDMY(lastOpPaymentDmy);
-    const todayParts = parseSaleDateDMY(today);
-    if (lastParts && todayParts) {
-      const utcLast = Date.UTC(lastParts.y, lastParts.m - 1, lastParts.d);
-      const utcToday = Date.UTC(todayParts.y, todayParts.m - 1, todayParts.d);
-      const diff = Math.floor((utcToday - utcLast) / 86400000);
-      daysUncovered = diff > 0 ? diff : 0;
-    } else {
-      daysUncovered = 0;
-    }
-  }
-  const operational = daysUncovered * dailyOps;
+  const daysInMonth = calendarMonthOperationalDaysForMonthKey(mk, today);
+  const operational = daysInMonth * dailyOps;
   return combined - operational - totalExpenditure;
 }
 
-async function computeMonthlyRecordsSnapshot() {
+async function computeMonthlyRecordsSnapshot(forMonthKey = null) {
+  const monthKey = forMonthKey || monthKeyFromDMY(todayDMY());
   return {
-    combinedProfit: roundMoney(await computeCombinedAccumulatedProfitTotal()),
-    expenditure: roundMoney(await computeTotalExpenditureMoneyOut()),
-    balance: roundMoney(await computeOwnerBalanceRemaining()),
+    combinedProfit: roundMoney(await computeCombinedAccumulatedProfitTotal(monthKey)),
+    expenditure: roundMoney(await computeTotalExpenditureMoneyOut(monthKey)),
+    balance: roundMoney(await computeOwnerBalanceRemaining(monthKey)),
   };
-}
-
-function monthlyRecordsTenantAllowed() {
-  return activeTenant() === "amana" || activeTenant() === "ufaray";
 }
 
 app.post("/api/expenditure", auth, allowRoles("owner", "employee"), async (req, res) => {

@@ -2082,7 +2082,7 @@
           <div class="card">
             <h3 class="card-title">Monthly Records</h3>
             <p class="field-hint">
-              Close the books at month-end to save a permanent snapshot of combined accumulated profits, total expenditure, and balance. Saved records stay in the table even after a new month starts.
+              Close the books at month-end to save a permanent snapshot of combined accumulated profits, total expenditure, and balance. Saved records stay in the table even after a new month starts. When a new calendar month begins, profits and expenditure reset automatically and the prior month is saved here if not already closed.
             </p>
             <div id="monthlyRecordsCurrentPanel" class="profit-highlight-above-table" aria-live="polite">
               <div class="profit-highlight-inner">
@@ -2128,7 +2128,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Remaining balance after daily operational costs</p>
                   <p class="profit-highlight-sub">
-                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for the current operational cycle (since the day after the last <em>Operational costs</em> payment, or the opening date if none yet), and minus total recorded expenditures.
+                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for each day of the current calendar month (1st through today), minus this month's recorded expenditure. All totals reset at the start of each new month.
                   </p>
                 </div>
                 <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>

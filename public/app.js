@@ -193,8 +193,6 @@ function monthlyRecordsTenantEnabled() {
   return state.user?.role === "owner" && creditTenantEnabled();
 }
 
-const BUSINESS_OPENED_DMY = "04/05/2026";
-
 /** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
 const DEFAULT_CHICKEN_BREED_NAMES = [
   "Irvines",
@@ -666,7 +664,7 @@ function updateTodayProfitDisplay() {
     el.textContent = val;
   });
   const meta = state.shopToday
-    ? `Shop day ${state.shopToday}. Total is cumulative profit from all Sales Per Bags (all dates), using each line’s current margin × total bags sold. Resets only if bag sales are deleted.`
+    ? `Shop day ${state.shopToday}. Total is cumulative profit from Sales Per Bags this calendar month only. Resets at the start of each new month.`
     : "";
   document.querySelectorAll(".js-today-profit-meta").forEach((el) => {
     el.textContent = meta;
@@ -679,7 +677,7 @@ function updateRetailCumulativeProfitDisplay() {
     el.textContent = val;
   });
   const meta = state.shopToday
-    ? `Shop day ${state.shopToday}. This total is not reset daily: it is the sum of every line’s accumulated retail kg profit (all past sales plus new sales).`
+    ? `Shop day ${state.shopToday}. Sum of accumulated retail kg profit for this calendar month. Resets at the start of each new month.`
     : "";
   document.querySelectorAll(".js-retail-today-profit-meta").forEach((el) => {
     el.textContent = meta;
@@ -697,7 +695,7 @@ function updateChickenProfitDisplay() {
   });
   const shop = state.chickenProfitSummary?.today || state.shopToday || "";
   const meta = shop
-    ? `Shop day ${shop}. Cumulative and today count staff chick sales with Delivery status = Delivered only (pending delivery shows KES 0). Your inventory lines do not add to these totals.`
+    ? `Shop day ${shop}. Cumulative profit is for this calendar month only (Delivered sales). Resets at the start of each new month. Today counts staff chick sales with Delivery status = Delivered only.`
     : "";
   document.querySelectorAll(".js-chicken-profit-meta").forEach((el) => {
     el.textContent = meta;
@@ -711,8 +709,8 @@ function updateFeedersDrinkersProfitDisplay() {
     el.textContent = val;
   });
   const meta = state.shopToday
-    ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of item accumulated profits).`
-    : "Cumulative profit from employee sales only (sum of item accumulated profits).";
+    ? `Shop day ${state.shopToday}. Cumulative profit from employee sales this calendar month. Resets at the start of each new month.`
+    : "Cumulative profit from employee sales this calendar month.";
   document.querySelectorAll(".js-fd-accumulated-profit-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -725,8 +723,8 @@ function updateMedicamentsProfitDisplay() {
     el.textContent = val;
   });
   const meta = state.shopToday
-    ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of item accumulated profits).`
-    : "Cumulative profit from employee sales only (sum of item accumulated profits).";
+    ? `Shop day ${state.shopToday}. Cumulative profit from employee sales this calendar month. Resets at the start of each new month.`
+    : "Cumulative profit from employee sales this calendar month.";
   document.querySelectorAll(".js-med-accumulated-profit-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -741,8 +739,8 @@ function updateExpenditureAccumulatedDisplay() {
   });
   const meta =
     rows.length === 0
-      ? "No records yet."
-      : `${rows.length} record${rows.length === 1 ? "" : "s"} · Sum of money out: ${currency(sumMoneyOut)}`;
+      ? "No records yet for this calendar month."
+      : `${rows.length} record${rows.length === 1 ? "" : "s"} this month · Sum of money out: ${currency(sumMoneyOut)}. Resets at the start of each new month.`;
   document.querySelectorAll(".js-exp-expenditure-total-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -988,8 +986,8 @@ function updateGasProfitDisplay() {
     el.textContent = val;
   });
   const meta = state.shopToday
-    ? `Shop day ${state.shopToday}. This is cumulative profit from employee sales only (sum of size accumulated profits).`
-    : "Cumulative profit from employee sales only (sum of size accumulated profits).";
+    ? `Shop day ${state.shopToday}. Cumulative profit from employee sales this calendar month. Resets at the start of each new month.`
+    : "Cumulative profit from employee sales this calendar month.";
   document.querySelectorAll(".js-gas-accumulated-profit-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -1017,7 +1015,7 @@ function updateOwnerCombinedProfitDockVisibility() {
   dock.classList.toggle("hidden", !show);
 }
 
-/** Owner: all-time profit across every inventory module (feed, retail, chicken, FD, medicaments, gas). */
+/** Owner: combined profit across every inventory module for the current calendar month. */
 function updateOwnerCombinedProfitDisplay() {
   if (state.user?.role !== "owner") return;
   const sum = getOwnerCombinedProfitTotal();
@@ -1036,33 +1034,31 @@ function getOwnerCombinedProfitTotal() {
   return feed + retail + chicken + fd + med + gas;
 }
 
-function inclusiveBusinessDaysFromOpen(openedDmy, todayDmy) {
-  const from = parseDMYParts(openedDmy);
-  const to = parseDMYParts(todayDmy);
-  if (!from || !to) return 0;
-  const utcFrom = Date.UTC(from.y, from.m - 1, from.d);
-  const utcTo = Date.UTC(to.y, to.m - 1, to.d);
-  const diff = Math.floor((utcTo - utcFrom) / 86400000);
-  return diff >= 0 ? diff + 1 : 0;
+function calendarMonthOperationalDays(dmy) {
+  const parts = parseDMYParts(dmy);
+  if (!parts) return 0;
+  return parts.d;
 }
 
-/** Latest expenditure entry tagged "Operational costs" (returns its DD/MM/YYYY date, or null). */
-function findLastOperationalCostsPaymentDate() {
-  const rows = state.expenditureEntries || [];
-  let latestDmy = null;
-  let latestKey = null;
-  for (const row of rows) {
-    if (normalizeExpenditureCategory(row.category) !== "Operational costs") continue;
-    const dmy = formatDateDMY(row.date);
-    const parts = parseDMYParts(dmy);
-    if (!parts) continue;
-    const key = Date.UTC(parts.y, parts.m - 1, parts.d);
-    if (latestKey == null || key > latestKey) {
-      latestKey = key;
-      latestDmy = dmy;
-    }
-  }
-  return latestDmy;
+function calendarMonthCycleLabel(dmy) {
+  const parts = parseDMYParts(dmy);
+  if (!parts) return "";
+  const names = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const lastDay = new Date(Date.UTC(parts.y, parts.m, 0)).getUTCDate();
+  return `${names[parts.m - 1] || ""} (day ${parts.d} of ${lastDay})`;
 }
 
 function updateBalanceBanner() {
@@ -1072,31 +1068,8 @@ function updateBalanceBanner() {
   const dailyOps = balanceDailyOperationalCostKes();
   const expRows = state.expenditureEntries || [];
   const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
-
-  const lastOpPaymentDmy = findLastOperationalCostsPaymentDate();
-  const totalDays = inclusiveBusinessDaysFromOpen(BUSINESS_OPENED_DMY, today);
-  let cycleStartDmy = BUSINESS_OPENED_DMY;
-  let daysUncovered = totalDays;
-  if (lastOpPaymentDmy) {
-    const lastParts = parseDMYParts(lastOpPaymentDmy);
-    if (lastParts) {
-      const dayAfter = new Date(Date.UTC(lastParts.y, lastParts.m - 1, lastParts.d + 1));
-      const dd = String(dayAfter.getUTCDate()).padStart(2, "0");
-      const mm = String(dayAfter.getUTCMonth() + 1).padStart(2, "0");
-      const yy = dayAfter.getUTCFullYear();
-      cycleStartDmy = `${dd}/${mm}/${yy}`;
-    }
-    const todayParts = parseDMYParts(today);
-    if (lastParts && todayParts) {
-      const utcLast = Date.UTC(lastParts.y, lastParts.m - 1, lastParts.d);
-      const utcToday = Date.UTC(todayParts.y, todayParts.m - 1, todayParts.d);
-      const diff = Math.floor((utcToday - utcLast) / 86400000);
-      daysUncovered = diff > 0 ? diff : 0;
-    } else {
-      daysUncovered = 0;
-    }
-  }
-  const operational = daysUncovered * dailyOps;
+  const daysInMonth = calendarMonthOperationalDays(today);
+  const operational = daysInMonth * dailyOps;
   const remaining = combined - operational - totalExpenditure;
 
   document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
@@ -1109,12 +1082,10 @@ function updateBalanceBanner() {
       banner.classList.toggle("balance-positive", !isNegative);
     }
   });
-  const cycleNote = lastOpPaymentDmy
-    ? `Current cycle since ${cycleStartDmy} (last Operational costs payment ${lastOpPaymentDmy})`
-    : `Current cycle since ${BUSINESS_OPENED_DMY} (no Operational costs payment recorded yet)`;
-  const meta = `${currency(combined)} - (${currency(dailyOps)} × ${daysUncovered} day${daysUncovered === 1 ? "" : "s"}) - ${currency(
+  const cycleNote = `Calendar month: ${calendarMonthCycleLabel(today)}`;
+  const meta = `${currency(combined)} - (${currency(dailyOps)} × ${daysInMonth} day${daysInMonth === 1 ? "" : "s"}) - ${currency(
     totalExpenditure
-  )} (expenditure) = ${currency(remaining)} · ${cycleNote}`;
+  )} (expenditure) = ${currency(remaining)} · ${cycleNote}. Profits and expenditure reset at the start of each new month.`;
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
     el.textContent = meta;
   });
