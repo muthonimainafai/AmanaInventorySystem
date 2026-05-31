@@ -4016,12 +4016,8 @@ app.delete("/api/gas/:id", auth, allowRoles("owner"), async (req, res) => {
 });
 
 app.get("/api/expenditure", auth, allowRoles("owner", "employee"), async (_req, res) => {
-  const monthKey = monthKeyFromDMY(todayDMY());
-  const rows = await all("SELECT * FROM employee_expenditure ORDER BY id DESC");
-  const filtered = monthKey
-    ? rows.filter((r) => monthKeyFromDMY(normalizeInventoryDate(r.date) || r.date) === monthKey)
-    : rows;
-  res.json(filtered);
+  const rows = await all("SELECT * FROM employee_expenditure ORDER BY date DESC, id DESC");
+  res.json(rows);
 });
 
 function normalizeExpenditureCategory(val) {
@@ -4090,10 +4086,9 @@ async function performBusinessMonthReset() {
   await run("UPDATE feeders_drinkers_inventory SET accumulated_profit = 0");
   await run("UPDATE medicaments_inventory SET accumulated_profit = 0");
   await run("UPDATE gas_inventory SET accumulated_profit = 0");
-  await run("DELETE FROM employee_expenditure");
 }
 
-/** When the calendar month changes, save the prior month (if needed) and reset profits/expenditure. */
+/** When the calendar month changes, save the prior month (if needed) and reset accumulated profits. */
 async function ensureCurrentBusinessMonth() {
   if (!monthlyRecordsTenantAllowed()) return;
 

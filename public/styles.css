@@ -574,6 +574,18 @@ button.danger {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.page-download-pdf-btn {
+  background: #0f5132;
+  color: #fff;
+  border: none;
+  font-weight: 600;
+}
+
+.page-download-pdf-btn:hover {
+  filter: brightness(1.08);
 }
 
 .grid {

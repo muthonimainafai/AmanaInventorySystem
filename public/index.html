@@ -147,6 +147,7 @@
         <div class="top-bar card top-bar-flush">
           <h2 class="page-title" id="pageHeading">Feed Inventory</h2>
           <div class="user-pill">
+            <button type="button" id="pageDownloadPdfBtn" class="page-download-pdf-btn">Download PDF</button>
             <span id="userInfo"></span>
             <button type="button" class="secondary" id="logoutBtn">Logout</button>
           </div>
@@ -1946,7 +1947,7 @@
                   Category
                   <select id="expCategory" required>
                     <option value="Other">Other</option>
-                    <option value="Operational costs">Operational costs (resets the 540/day counter)</option>
+                    <option value="Operational costs">Operational costs</option>
                   </select>
                 </label>
                 <label>
@@ -1955,8 +1956,7 @@
                 </label>
               </div>
               <p class="field-hint" style="margin-top: 0.5rem">
-                Use <strong>Operational costs</strong> when you make the monthly payment for daily operational costs (rent, salaries, etc.).
-                Recording one resets the running 540/day counter on the Balance page from the day after the payment date. Use <strong>Other</strong> for any other money going out.
+                Use <strong>Operational costs</strong> for rent, salaries, and other fixed monthly running costs. Use <strong>Other</strong> for any other money going out.
               </p>
               <div class="actions">
                 <button type="submit" id="expSaveBtn">Save entry</button>
@@ -1970,12 +1970,20 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Total expenditure</p>
                   <p class="profit-highlight-sub">
-                    Sum of money out from every saved line on this page (shared owner + employee expenditure records).
+                    Full expenditure statement — filter by month below or view all months. Balance page uses the current month only.
                   </p>
                 </div>
                 <span class="js-exp-expenditure-total-value profit-highlight-amount">KES 0</span>
               </div>
               <p class="profit-highlight-example js-exp-expenditure-total-meta"></p>
+            </div>
+            <div class="grid" style="margin-bottom: 12px;">
+              <label>
+                Statement month
+                <select id="expStatementMonth">
+                  <option value="">All months (full statement)</option>
+                </select>
+              </label>
             </div>
             <div class="table-wrap">
               <table>
@@ -2082,7 +2090,7 @@
           <div class="card">
             <h3 class="card-title">Monthly Records</h3>
             <p class="field-hint">
-              Close the books at month-end to save a permanent snapshot of combined accumulated profits, total expenditure, and balance. Saved records stay in the table even after a new month starts. When a new calendar month begins, profits and expenditure reset automatically and the prior month is saved here if not already closed.
+              Close the books at month-end to save a permanent snapshot of combined accumulated profits, total expenditure, and balance. Saved records stay in the table even after a new month starts. When a new calendar month begins, accumulated profits reset automatically and the prior month is saved here if not already closed. Expenditure entries remain on the Expenditure page for all past months.
             </p>
             <div id="monthlyRecordsCurrentPanel" class="profit-highlight-above-table" aria-live="polite">
               <div class="profit-highlight-inner">
@@ -2128,7 +2136,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Remaining balance after daily operational costs</p>
                   <p class="profit-highlight-sub">
-                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for each day of the current calendar month (1st through today), minus this month's recorded expenditure. All totals reset at the start of each new month.
+                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for each day of the current calendar month (1st through today), minus this month's recorded expenditure. Accumulated profits reset each month; expenditure records are kept as a permanent statement.
                   </p>
                 </div>
                 <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>

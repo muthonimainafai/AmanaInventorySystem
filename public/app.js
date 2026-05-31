@@ -56,6 +56,7 @@ const state = {
   editMedicamentId: null,
   editGasId: null,
   expenditureEntries: [],
+  expenditureMonthFilter: "",
   editExpenditureId: null,
   roseEntries: [],
   editRoseId: null,
@@ -731,16 +732,20 @@ function updateMedicamentsProfitDisplay() {
 }
 
 function updateExpenditureAccumulatedDisplay() {
-  const rows = state.expenditureEntries || [];
+  const rows = expenditureRowsForDisplay();
   const sumMoneyOut = rows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
   const val = currency(sumMoneyOut);
   document.querySelectorAll(".js-exp-expenditure-total-value").forEach((el) => {
     el.textContent = val;
   });
+  const filter = state.expenditureMonthFilter || "";
+  const scopeLabel = filter ? monthLabelFromKeyClient(filter) : "all months";
   const meta =
     rows.length === 0
-      ? "No records yet for this calendar month."
-      : `${rows.length} record${rows.length === 1 ? "" : "s"} this month · Sum of money out: ${currency(sumMoneyOut)}. Resets at the start of each new month.`;
+      ? filter
+        ? `No expenditure records for ${scopeLabel}.`
+        : "No expenditure records yet."
+      : `${rows.length} record${rows.length === 1 ? "" : "s"} · ${scopeLabel} · Sum of money out: ${currency(sumMoneyOut)}`;
   document.querySelectorAll(".js-exp-expenditure-total-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -1061,12 +1066,71 @@ function calendarMonthCycleLabel(dmy) {
   return `${names[parts.m - 1] || ""} (day ${parts.d} of ${lastDay})`;
 }
 
+function monthKeyFromDMYClient(dmy) {
+  const parts = parseDMYParts(dmy);
+  if (!parts) return null;
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}`;
+}
+
+function monthLabelFromKeyClient(monthKey) {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthKey || "");
+  if (!m) return monthKey || "";
+  const names = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  return `${names[Number(m[2]) - 1] || ""} ${m[1]}`;
+}
+
+function expenditureRowsForDisplay() {
+  const all = state.expenditureEntries || [];
+  const filter = state.expenditureMonthFilter || "";
+  if (!filter) return all;
+  return all.filter((r) => monthKeyFromDMYClient(formatDateDMY(r.date)) === filter);
+}
+
+function expenditureEntriesForCurrentMonth() {
+  const mk = monthKeyFromDMYClient(state.shopToday || clientShopTodayDMY());
+  if (!mk) return [];
+  return (state.expenditureEntries || []).filter(
+    (r) => monthKeyFromDMYClient(formatDateDMY(r.date)) === mk
+  );
+}
+
+function populateExpenditureMonthFilter() {
+  const sel = document.getElementById("expStatementMonth");
+  if (!(sel instanceof HTMLSelectElement)) return;
+  const prev = state.expenditureMonthFilter || sel.value || "";
+  const keys = new Set();
+  for (const r of state.expenditureEntries || []) {
+    const mk = monthKeyFromDMYClient(formatDateDMY(r.date));
+    if (mk) keys.add(mk);
+  }
+  const sorted = [...keys].sort((a, b) => b.localeCompare(a));
+  sel.innerHTML =
+    `<option value="">All months (full statement)</option>` +
+    sorted.map((k) => `<option value="${k}">${monthLabelFromKeyClient(k)}</option>`).join("");
+  if (prev === "" || sorted.includes(prev)) sel.value = prev;
+  else sel.value = "";
+  state.expenditureMonthFilter = sel.value;
+}
+
 function updateBalanceBanner() {
   if (state.user?.role !== "owner") return;
   const combined = getOwnerCombinedProfitTotal();
   const today = state.shopToday || clientShopTodayDMY();
   const dailyOps = balanceDailyOperationalCostKes();
-  const expRows = state.expenditureEntries || [];
+  const expRows = expenditureEntriesForCurrentMonth();
   const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
   const daysInMonth = calendarMonthOperationalDays(today);
   const operational = daysInMonth * dailyOps;
@@ -1085,7 +1149,7 @@ function updateBalanceBanner() {
   const cycleNote = `Calendar month: ${calendarMonthCycleLabel(today)}`;
   const meta = `${currency(combined)} - (${currency(dailyOps)} × ${daysInMonth} day${daysInMonth === 1 ? "" : "s"}) - ${currency(
     totalExpenditure
-  )} (expenditure) = ${currency(remaining)} · ${cycleNote}. Profits and expenditure reset at the start of each new month.`;
+  )} (expenditure) = ${currency(remaining)} · ${cycleNote}. Accumulated profits reset at the start of each new month; expenditure history is kept on the Expenditure page.`;
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -1465,6 +1529,337 @@ function renderMonthlyRecords() {
       </tr>`;
     })
     .join("");
+}
+
+const PDF_PAGE_THEME = {
+  dark: [14, 92, 58],
+  accent: [39, 150, 99],
+  mint: [234, 248, 240],
+  edge: [186, 222, 198],
+};
+
+function ensureJsPdfReady() {
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return null;
+  }
+  const probe = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  const autoTableFn = probe.autoTable || jsPdfNs?.autoTable;
+  if (typeof autoTableFn !== "function") {
+    alert("PDF table helper is not loaded. Refresh and try again.");
+    return null;
+  }
+  return { jsPdfNs, JsPdfCtor, autoTableFn };
+}
+
+function pdfBusinessTitle() {
+  if (state.appInstance === "ufaray") return "Ufaray Feeds";
+  if (state.appInstance === "maina-faith-cess") return "Faith Inventory";
+  if (state.appInstance === "terry") return "Terry Records";
+  if (state.appInstance === "cess" || state.appInstance === "terry-and-cess") return "Rose Inventory";
+  return "Amana Kuku Feeds";
+}
+
+function pdfSafeSlug(text) {
+  return String(text || "page")
+    .replace(/[^a-z0-9-]/gi, "-")
+    .toLowerCase()
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function drawStandardPagePdfHeader(doc, { pageTitle, subtitle }) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 36;
+  doc.setFillColor(...PDF_PAGE_THEME.dark);
+  doc.rect(0, 0, pageW, 58, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.text(pdfBusinessTitle().toUpperCase(), margin, 24);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(String(pageTitle || "PAGE").toUpperCase(), margin, 42);
+  if (subtitle) {
+    doc.setFontSize(9);
+    doc.text(String(subtitle), pageW - margin, 42, { align: "right" });
+  }
+  return 74;
+}
+
+function tableElementToPdfData(table) {
+  if (!(table instanceof HTMLTableElement)) return null;
+  const ths = [...table.querySelectorAll("thead th")];
+  if (!ths.length) return null;
+  let headers = ths.map((th) => th.textContent.trim().replace(/\s+/g, " "));
+  const actionIdx = headers.findIndex((h) => /^actions?$/i.test(h));
+  if (actionIdx >= 0) headers = headers.filter((_, i) => i !== actionIdx);
+  const body = [];
+  for (const tr of table.querySelectorAll("tbody tr")) {
+    if (tr.querySelector("td.empty")) continue;
+    const cells = [...tr.querySelectorAll("td")].filter((td) => !td.querySelector(".row-actions"));
+    if (!cells.length) continue;
+    let row = cells.map((td) => td.textContent.trim().replace(/\s+/g, " "));
+    while (row.length > headers.length) row.pop();
+    while (row.length < headers.length) row.push("");
+    body.push(row);
+  }
+  return { headers, body };
+}
+
+function downloadStandardPageTablePdf({ pageTitle, subtitle, filename, sections, landscape = false }) {
+  const ctx = ensureJsPdfReady();
+  if (!ctx) return;
+  const { jsPdfNs, JsPdfCtor } = ctx;
+  const doc = new JsPdfCtor({ orientation: landscape ? "landscape" : "portrait", unit: "pt", format: "a4" });
+  const margin = 36;
+  const autoFn = doc.autoTable || jsPdfNs?.autoTable;
+  let y = drawStandardPagePdfHeader(doc, { pageTitle, subtitle });
+  const allSections = (Array.isArray(sections) ? sections : [sections]).filter(Boolean);
+  let wroteRows = false;
+
+  for (const sec of allSections) {
+    if (!sec?.headers?.length || !sec?.body?.length) continue;
+    wroteRows = true;
+    if (sec.title) {
+      doc.setTextColor(...PDF_PAGE_THEME.dark);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(sec.title, margin, y);
+      y += 14;
+    }
+    autoFn.call(doc, {
+      startY: y,
+      head: [sec.headers],
+      body: sec.body,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
+      headStyles: { fillColor: PDF_PAGE_THEME.dark, textColor: 255 },
+      alternateRowStyles: { fillColor: PDF_PAGE_THEME.mint },
+      theme: "grid",
+    });
+    y = (doc.lastAutoTable?.finalY || y) + 22;
+  }
+
+  if (!wroteRows) {
+    doc.setTextColor(...PDF_PAGE_THEME.dark);
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(10);
+    doc.text("No records to export on this page.", margin, y + 10);
+  }
+  doc.save(filename);
+}
+
+function pdfSectionsFromPageElement(pageEl) {
+  const sections = [];
+  pageEl.querySelectorAll(".table-wrap table").forEach((table) => {
+    const data = tableElementToPdfData(table);
+    if (!data || !data.body.length) return;
+    const card = table.closest(".card");
+    const title =
+      card?.querySelector(".card-title")?.textContent?.trim() ||
+      card?.querySelector("h3")?.textContent?.trim() ||
+      "";
+    sections.push({ title, ...data });
+  });
+  return sections;
+}
+
+function downloadGenericCurrentPagePdf() {
+  const page = state.currentPage;
+  const pageTitle = PAGE_HEADINGS[page] || pageHeading?.textContent || "Page";
+  const pageEl = document.getElementById(`page-${page}`);
+  if (!pageEl) {
+    alert("Nothing to export on this page.");
+    return;
+  }
+  const sections = pdfSectionsFromPageElement(pageEl);
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  const widePages = new Set([
+    "inventory",
+    "sales-bags",
+    "sales-kg",
+    "chicken-inventory",
+    "retail-inventory",
+    "feeders-drinkers",
+    "medicaments",
+    "gas",
+    "rose-inventory",
+    "nahashon-records",
+    "cess-accounts",
+    "credit",
+    "pigs",
+  ]);
+  downloadStandardPageTablePdf({
+    pageTitle,
+    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`,
+    sections,
+    landscape: widePages.has(page),
+  });
+}
+
+function downloadExpenditurePagePdf() {
+  const rows = sortRowsLatestFirst(expenditureRowsForDisplay());
+  const filter = state.expenditureMonthFilter || "";
+  const subtitle = filter ? monthLabelFromKeyClient(filter) : "All months";
+  const body = rows.map((r) => [
+    formatDateDMY(r.date),
+    r.description || "",
+    normalizeExpenditureCategory(r.category),
+    currency(r.money_out),
+  ]);
+  const total = rows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
+  if (body.length) {
+    body.push([
+      { content: "TOTAL", colSpan: 3, styles: { fontStyle: "bold", halign: "right" } },
+      { content: currency(total), styles: { fontStyle: "bold", halign: "right" } },
+    ]);
+  }
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle: "Expenditure",
+    subtitle,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-expenditure-${filter || "all"}-${today || "export"}.pdf`,
+    sections: { headers: ["Date", "Description", "Category", "Money out"], body },
+  });
+}
+
+function downloadBalancePagePdf() {
+  const ctx = ensureJsPdfReady();
+  if (!ctx) return;
+  const combined = getOwnerCombinedProfitTotal();
+  const today = state.shopToday || clientShopTodayDMY();
+  const dailyOps = balanceDailyOperationalCostKes();
+  const totalExpenditure = expenditureEntriesForCurrentMonth().reduce(
+    (s, r) => s + (Number(r.money_out) || 0),
+    0
+  );
+  const daysInMonth = calendarMonthOperationalDays(today);
+  const operational = daysInMonth * dailyOps;
+  const remaining = combined - operational - totalExpenditure;
+  const { jsPdfNs, JsPdfCtor } = ctx;
+  const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  const margin = 36;
+  const autoFn = doc.autoTable || jsPdfNs?.autoTable;
+  let y = drawStandardPagePdfHeader(doc, { pageTitle: "Balance", subtitle: calendarMonthCycleLabel(today) });
+  autoFn.call(doc, {
+    startY: y,
+    head: [["Item", "Amount"]],
+    body: [
+      ["Combined accumulated profits", currency(combined)],
+      [`Operational costs (${currency(dailyOps)} × ${daysInMonth} days)`, currency(operational)],
+      ["Expenditure (current month)", currency(totalExpenditure)],
+      ["Remaining balance", currency(remaining)],
+    ],
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: PDF_PAGE_THEME.dark, textColor: 255 },
+    alternateRowStyles: { fillColor: PDF_PAGE_THEME.mint },
+    theme: "grid",
+  });
+  doc.save(`${pdfSafeSlug(pdfBusinessTitle())}-balance-${today.replace(/\//g, "")}.pdf`);
+}
+
+function downloadMonthlyRecordsPagePdf() {
+  const payload = state.monthlyRecordsPayload || {};
+  const preview = payload.preview || {};
+  const records = payload.records || [];
+  const sections = [];
+  if (payload.currentMonthLabel) {
+    sections.push({
+      title: payload.currentClosed
+        ? `${payload.currentMonthLabel} — closed`
+        : `Current month — ${payload.currentMonthLabel}`,
+      headers: ["Metric", "Amount"],
+      body: [
+        ["Combined accumulated profits", currency(preview.combinedProfit ?? 0)],
+        ["Expenditure", currency(preview.expenditure ?? 0)],
+        ["Balance", currency(preview.balance ?? 0)],
+      ],
+    });
+  }
+  sections.push({
+    title: "Closed months",
+    headers: ["Month", "Combined profits", "Expenditure", "Balance"],
+    body: records.map((r) => [
+      r.month_label || r.month_key || "—",
+      currency(r.combined_profit ?? 0),
+      currency(r.expenditure ?? 0),
+      currency(r.balance ?? 0),
+    ]),
+  });
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle: "Monthly Records",
+    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-monthly-records-${today || "export"}.pdf`,
+    sections,
+  });
+}
+
+function downloadCreditPagePdf() {
+  const accountOpen = !document.getElementById("hadifa-account-section")?.classList.contains("hidden");
+  if (accountOpen && state.activeCreditAccountId) {
+    const acc = (state.creditAccounts || []).find((a) => a.id === Number(state.activeCreditAccountId));
+    const table = document.querySelector("#hadifa-account-section .table-wrap table");
+    const data = tableElementToPdfData(table);
+    const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+    downloadStandardPageTablePdf({
+      pageTitle: "Credit",
+      subtitle: acc?.name || "Account",
+      filename: `${pdfSafeSlug(pdfBusinessTitle())}-credit-${pdfSafeSlug(acc?.name || "account")}-${today || "export"}.pdf`,
+      sections: data ? { title: acc?.name || "Account entries", ...data } : [],
+    });
+    return;
+  }
+  const accounts = state.creditAccounts || [];
+  const body = accounts.map((acc) => {
+    const count = (state.creditEntries || []).filter((e) => Number(e.account_id) === acc.id).length;
+    return [acc.name || "—", String(count)];
+  });
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle: "Credit",
+    subtitle: "All accounts",
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-credit-accounts-${today || "export"}.pdf`,
+    sections: { headers: ["Account", "Entries"], body },
+  });
+}
+
+function downloadCurrentPagePdf() {
+  const page = state.currentPage;
+  if (page === "calculator") {
+    downloadCalculatorPdf("calculator");
+    return;
+  }
+  if (page === "chicken-inventory" && state.user?.role === "owner") {
+    downloadChickenSalesPdf();
+    return;
+  }
+  if (page === "monthly-report") {
+    downloadMonthlyReportPdf();
+    return;
+  }
+  if (page === "expenditure") {
+    downloadExpenditurePagePdf();
+    return;
+  }
+  if (page === "balance") {
+    downloadBalancePagePdf();
+    return;
+  }
+  if (page === "monthly-records") {
+    downloadMonthlyRecordsPagePdf();
+    return;
+  }
+  if (page === "credit") {
+    downloadCreditPagePdf();
+    return;
+  }
+  downloadGenericCurrentPagePdf();
 }
 
 /** Strip HTML tags from advice strings for PDF rendering. */
@@ -4072,7 +4467,7 @@ function normalizeExpenditureCategory(value) {
 
 function renderExpenditureTable() {
   if (!expBody) return;
-  const rows = state.expenditureEntries || [];
+  const rows = sortRowsLatestFirst(expenditureRowsForDisplay());
   const colSpan = 5;
   if (!rows.length) {
     expBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
@@ -5039,7 +5434,10 @@ function showPage(page) {
     updateCalcChickenTotalDisplay();
     renderCalculatorTable();
   }
-  if (page === "expenditure") renderExpenditureTable();
+  if (page === "expenditure") {
+    populateExpenditureMonthFilter();
+    renderExpenditureTable();
+  }
   if (page === "balance") updateBalanceBanner();
   if (page === "monthly-report") renderMonthlyReport();
   if (page === "monthly-records") renderMonthlyRecords();
@@ -5276,6 +5674,7 @@ async function loadAllData() {
   state.gasEmployeeItems = extras[9].status === "fulfilled" ? extras[9].value : [];
   state.gasSales = extras[10].status === "fulfilled" ? extras[10].value : [];
   state.expenditureEntries = extras[11].status === "fulfilled" ? extras[11].value : [];
+  populateExpenditureMonthFilter();
   state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
   state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
@@ -5785,6 +6184,22 @@ if (chPdfDateFromDisplay && chPdfDateFrom && chPdfOpenCalendarFromBtn) {
 if (chPdfDateToDisplay && chPdfDateTo && chPdfOpenCalendarToBtn) {
   wireDatePicker(chPdfDateToDisplay, chPdfDateTo, chPdfOpenCalendarToBtn);
 }
+document.getElementById("pageDownloadPdfBtn")?.addEventListener("click", () => {
+  try {
+    downloadCurrentPagePdf();
+  } catch (err) {
+    console.error(err);
+    alert(err?.message || "Could not generate PDF. Please try again.");
+  }
+});
+
+document.getElementById("expStatementMonth")?.addEventListener("change", (event) => {
+  const sel = event.target;
+  if (!(sel instanceof HTMLSelectElement)) return;
+  state.expenditureMonthFilter = sel.value;
+  renderExpenditureTable();
+});
+
 document.getElementById("chDownloadPdfBtn")?.addEventListener("click", () => {
   try {
     downloadChickenSalesPdf();
