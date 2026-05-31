@@ -1289,17 +1289,361 @@ function catalogLinesWithNoBagSales(bagAgg) {
   return dormant;
 }
 
-function buildMonthlyAdvice(ym, bagAgg, kgAgg) {
+function computeFeedBagProfitForMonth(ym) {
+  const marginMap = new Map();
+  for (const inv of state.records || []) {
+    const key = `${displayBrand(inv.brand)}|||${displayFeedType(inv.feed_type)}|||${Number(inv.bag_size)}`;
+    marginMap.set(key, Number(inv.profit_margin_per_bag) || 0);
+  }
+  let profit = 0;
+  for (const r of state.salesBags || []) {
+    if (!rowMatchesYM(r, ym)) continue;
+    if (String(r.through_party || "").trim()) continue;
+    const key = `${displayBrand(r.brand)}|||${displayFeedType(r.feed_type)}|||${Number(r.bag_size)}`;
+    profit += (Number(r.bags_sold) || 0) * (marginMap.get(key) || 0);
+  }
+  return profit;
+}
+
+function computeRetailKgProfitForMonth(ym) {
+  let profit = 0;
+  for (const r of state.salesKg || []) {
+    if (!rowMatchesYM(r, ym)) continue;
+    if (String(r.through_party || "").trim()) continue;
+    const m = Number(r.retail_margin_per_kg);
+    if (Number.isFinite(m)) profit += (Number(r.kg_sold) || 0) * m;
+  }
+  return profit;
+}
+
+function computeItemSalesProfitForMonth(salesRows, inventoryRows, ym, nameField) {
+  const marginMap = new Map();
+  for (const inv of inventoryRows || []) {
+    marginMap.set(String(inv[nameField] || ""), Number(inv.profit_margin) || 0);
+  }
+  let profit = 0;
+  for (const r of salesRows || []) {
+    if (!rowMatchesYM(r, ym)) continue;
+    if (String(r.through_party || "").trim()) continue;
+    profit += (Number(r.quantity_sold) || 0) * (marginMap.get(String(r.item_name || "")) || 0);
+  }
+  return profit;
+}
+
+function computeGasSalesProfitForMonth(ym) {
+  const marginMap = new Map();
+  for (const inv of state.gasInventory || []) {
+    marginMap.set(Number(inv.size_kg), Number(inv.profit_margin) || 0);
+  }
+  let profit = 0;
+  for (const r of state.gasSales || []) {
+    if (!rowMatchesYM(r, ym)) continue;
+    if (String(r.through_party || "").trim()) continue;
+    profit += (Number(r.quantity_sold) || 0) * (marginMap.get(Number(r.size_kg)) || 0);
+  }
+  return profit;
+}
+
+function aggregateChickenSalesForMonth(ym) {
+  const rows = (state.chickenSales || []).filter((r) => rowMatchesYM(r, ym) && !isChickenRowOwnerInventory(r));
+  const map = new Map();
+  let totalBirds = 0;
+  let totalRevenue = 0;
+  let totalProfit = 0;
+  for (const r of rows) {
+    const breed = r.breed || "—";
+    const chicks = Number(r.quantity_birds) || 0;
+    const rev = chickenSaleLineCombinedTotal(r);
+    const prof = chickenSaleLineProfit(r);
+    if (!map.has(breed)) map.set(breed, { breed, birds: 0, revenue: 0, profit: 0 });
+    const entry = map.get(breed);
+    entry.birds += chicks;
+    entry.revenue += rev;
+    entry.profit += prof;
+    totalBirds += chicks;
+    totalRevenue += rev;
+    totalProfit += prof;
+  }
+  return {
+    rows: Array.from(map.values()).sort((a, b) => b.profit - a.profit || b.revenue - a.revenue),
+    totalBirds,
+    totalRevenue,
+    totalProfit,
+    rowCount: rows.length,
+  };
+}
+
+function aggregateEmployeeItemSalesForMonth(salesRows, ym, groupLabelFn) {
+  const rows = (salesRows || []).filter((r) => rowMatchesYM(r, ym));
+  const map = new Map();
+  let totalQty = 0;
+  let totalRevenue = 0;
+  for (const r of rows) {
+    const label = groupLabelFn(r);
+    const qty = Number(r.quantity_sold) || 0;
+    const rev = Number.isFinite(Number(r.total_amount))
+      ? Number(r.total_amount)
+      : qty * (Number(r.price_per_item) || 0);
+    if (!map.has(label)) map.set(label, { label, qty: 0, revenue: 0 });
+    const entry = map.get(label);
+    entry.qty += qty;
+    entry.revenue += rev;
+    totalQty += qty;
+    totalRevenue += rev;
+  }
+  return {
+    rows: Array.from(map.values()).sort((a, b) => b.revenue - a.revenue || b.qty - a.qty),
+    totalQty,
+    totalRevenue,
+    rowCount: rows.length,
+  };
+}
+
+function aggregateExpenditureForMonth(ym) {
+  const rows = (state.expenditureEntries || []).filter(
+    (r) => monthKeyFromDMYClient(formatDateDMY(r.date)) === ym
+  );
+  let total = 0;
+  const byCat = new Map();
+  for (const r of rows) {
+    const cat = normalizeExpenditureCategory(r.category);
+    const amt = Number(r.money_out) || 0;
+    total += amt;
+    byCat.set(cat, (byCat.get(cat) || 0) + amt);
+  }
+  return {
+    total,
+    rowCount: rows.length,
+    byCategory: Array.from(byCat.entries())
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount),
+  };
+}
+
+function aggregatePigsForMonth(ym) {
+  const rows = (state.pigsEntries || []).filter((r) => rowMatchesYM(r, ym));
+  let moneyIn = 0;
+  let moneyOut = 0;
+  let numPigs = 0;
+  for (const r of rows) {
+    moneyIn += Number(r.money_in) || 0;
+    moneyOut += Number(r.money_out) || 0;
+    numPigs += Number(r.num_pigs) || 0;
+  }
+  return { rowCount: rows.length, moneyIn, moneyOut, numPigs };
+}
+
+function aggregateCreditForMonth(ym) {
+  const rows = (state.creditEntries || []).filter((r) => rowMatchesYM(r, ym));
+  const map = new Map();
+  let moneyIn = 0;
+  let moneyOut = 0;
+  for (const r of rows) {
+    const acc = (state.creditAccounts || []).find((a) => a.id === Number(r.account_id));
+    const name = acc?.name || `Account #${r.account_id}`;
+    const mi = Number(r.money_in) || 0;
+    const mo = Number(r.money_out) || 0;
+    moneyIn += mi;
+    moneyOut += mo;
+    if (!map.has(name)) map.set(name, { name, moneyIn: 0, moneyOut: 0, entries: 0 });
+    const entry = map.get(name);
+    entry.moneyIn += mi;
+    entry.moneyOut += mo;
+    entry.entries += 1;
+  }
+  return {
+    rowCount: rows.length,
+    moneyIn,
+    moneyOut,
+    accounts: Array.from(map.values()).sort((a, b) => b.moneyIn + b.moneyOut - (a.moneyIn + a.moneyOut)),
+  };
+}
+
+function buildMonthlyReportSnapshot(ym) {
+  const bagAgg = aggregateBagSalesForMonth(ym);
+  const kgAgg = aggregateKgSalesForMonth(ym);
+  const chickenAgg = aggregateChickenSalesForMonth(ym);
+  const fdAgg = aggregateEmployeeItemSalesForMonth(
+    state.feedersDrinkersSales,
+    ym,
+    (r) => r.item_name || "—"
+  );
+  const medAgg = aggregateEmployeeItemSalesForMonth(state.medicamentsSales, ym, (r) => r.item_name || "—");
+  const gasAgg = aggregateEmployeeItemSalesForMonth(
+    state.gasSales,
+    ym,
+    (r) => `${Number(r.size_kg) || 0} kg cylinder`
+  );
+  const expAgg = aggregateExpenditureForMonth(ym);
+  const pigsAgg = aggregatePigsForMonth(ym);
+  const creditAgg = aggregateCreditForMonth(ym);
+  const profits = {
+    feedBags: computeFeedBagProfitForMonth(ym),
+    retailKg: computeRetailKgProfitForMonth(ym),
+    chicken: chickenAgg.totalProfit,
+    feedersDrinkers: computeItemSalesProfitForMonth(
+      state.feedersDrinkersSales,
+      state.feedersDrinkersInventory,
+      ym,
+      "item_name"
+    ),
+    medicaments: computeItemSalesProfitForMonth(
+      state.medicamentsSales,
+      state.medicamentsInventory,
+      ym,
+      "item_name"
+    ),
+    gas: computeGasSalesProfitForMonth(ym),
+  };
+  const totalRevenue =
+    bagAgg.totalRevenue +
+    kgAgg.totalRevenue +
+    chickenAgg.totalRevenue +
+    fdAgg.totalRevenue +
+    medAgg.totalRevenue +
+    gasAgg.totalRevenue;
+  const totalProfit =
+    profits.feedBags +
+    profits.retailKg +
+    profits.chicken +
+    profits.feedersDrinkers +
+    profits.medicaments +
+    profits.gas;
+  const moduleOverview = [
+    {
+      module: "Sales Per Bags",
+      sales: bagAgg.totalBags,
+      unit: "bags",
+      revenue: bagAgg.totalRevenue,
+      profit: profits.feedBags,
+    },
+    {
+      module: "Sales Per Kg (Retail)",
+      sales: kgAgg.totalKg,
+      unit: "kg",
+      revenue: kgAgg.totalRevenue,
+      profit: profits.retailKg,
+    },
+    {
+      module: "Chicken Sales",
+      sales: chickenAgg.totalBirds,
+      unit: "chicks",
+      revenue: chickenAgg.totalRevenue,
+      profit: profits.chicken,
+    },
+    {
+      module: "Feeders & Drinkers",
+      sales: fdAgg.totalQty,
+      unit: "items",
+      revenue: fdAgg.totalRevenue,
+      profit: profits.feedersDrinkers,
+    },
+    {
+      module: "Medicaments",
+      sales: medAgg.totalQty,
+      unit: "items",
+      revenue: medAgg.totalRevenue,
+      profit: profits.medicaments,
+    },
+    {
+      module: "Gas",
+      sales: gasAgg.totalQty,
+      unit: "cylinders",
+      revenue: gasAgg.totalRevenue,
+      profit: profits.gas,
+    },
+    {
+      module: "Expenditure",
+      sales: expAgg.rowCount,
+      unit: "entries",
+      revenue: 0,
+      profit: -expAgg.total,
+      isExpense: true,
+    },
+  ];
+  if (pigsAgg.rowCount > 0) {
+    moduleOverview.push({
+      module: "Pigs Page",
+      sales: pigsAgg.numPigs,
+      unit: "pigs",
+      revenue: pigsAgg.moneyIn,
+      profit: pigsAgg.moneyIn - pigsAgg.moneyOut,
+      extra: `${currency(pigsAgg.moneyOut)} out`,
+    });
+  }
+  if (creditAgg.rowCount > 0) {
+    moduleOverview.push({
+      module: "Credit",
+      sales: creditAgg.rowCount,
+      unit: "entries",
+      revenue: creditAgg.moneyIn,
+      profit: creditAgg.moneyIn - creditAgg.moneyOut,
+      extra: `${currency(creditAgg.moneyOut)} out`,
+    });
+  }
+  return {
+    ym,
+    bagAgg,
+    kgAgg,
+    chickenAgg,
+    fdAgg,
+    medAgg,
+    gasAgg,
+    expAgg,
+    pigsAgg,
+    creditAgg,
+    profits,
+    totalRevenue,
+    totalProfit,
+    moduleOverview,
+  };
+}
+
+function fillMonthlyReportTable(bodyId, colSpan, emptyText, rows, rowHtmlFn) {
+  const body = document.getElementById(bodyId);
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="${colSpan}" class="empty">${emptyText}</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.slice(0, 10).map(rowHtmlFn).join("");
+}
+
+function buildMonthlyAdvice(ym, snap) {
+  const bagAgg = snap.bagAgg;
+  const kgAgg = snap.kgAgg;
+  const chickenAgg = snap.chickenAgg;
+  const fdAgg = snap.fdAgg;
+  const medAgg = snap.medAgg;
+  const gasAgg = snap.gasAgg;
+  const expAgg = snap.expAgg;
+  const { totalRevenue, totalProfit } = snap;
   const advice = [];
   const monthName = monthLabel(ym);
   const prevYm = previousYM(ym);
   const prevBag = prevYm ? aggregateBagSalesForMonth(prevYm) : null;
   const prevKg = prevYm ? aggregateKgSalesForMonth(prevYm) : null;
+  const prevSnap = prevYm ? buildMonthlyReportSnapshot(prevYm) : null;
 
-  if (bagAgg.totalBags === 0 && kgAgg.totalKg === 0) {
-    advice.push(`No sales recorded for ${monthName}. Make sure staff are recording sales on the Sales Per Bags and Sales Per Kg pages.`);
+  const anyActivity =
+    bagAgg.totalBags > 0 ||
+    kgAgg.totalKg > 0 ||
+    chickenAgg.totalBirds > 0 ||
+    fdAgg.totalQty > 0 ||
+    medAgg.totalQty > 0 ||
+    gasAgg.totalQty > 0 ||
+    expAgg.rowCount > 0;
+
+  if (!anyActivity) {
+    advice.push(
+      `No activity recorded for ${monthName} across feed, chicken, feeders & drinkers, medicaments, gas, or expenditure. Make sure staff are recording sales on every page.`
+    );
     return advice;
   }
+
+  advice.push(
+    `<strong>All-module summary:</strong> ${currency(totalRevenue)} recorded revenue and ${currency(totalProfit)} estimated profit across every sales page${expAgg.total > 0 ? `; expenditure ${currency(expAgg.total)}` : ""}.`
+  );
 
   const topBag = bagAgg.rows[0];
   if (topBag) {
@@ -1337,6 +1681,45 @@ function buildMonthlyAdvice(ym, bagAgg, kgAgg) {
     }
   }
 
+  const topChicken = chickenAgg.rows[0];
+  if (topChicken && topChicken.birds > 0) {
+    advice.push(
+      `<strong>Chicken sales:</strong> ${chickenAgg.totalBirds} chick${chickenAgg.totalBirds === 1 ? "" : "s"} (${currency(chickenAgg.totalProfit)} profit). Top breed: ${topChicken.breed} (${topChicken.birds} chicks).`
+    );
+  } else if (chickenAgg.rowCount === 0 && (bagAgg.totalBags > 0 || kgAgg.totalKg > 0)) {
+    advice.push("No staff chicken sales this month — consider promoting chick orders alongside feed sales.");
+  }
+
+  const topFd = fdAgg.rows[0];
+  if (topFd && topFd.qty > 0) {
+    advice.push(`<strong>Feeders & drinkers:</strong> ${topFd.label} led with ${topFd.qty} sold (${currency(topFd.revenue)}).`);
+  }
+  const topMed = medAgg.rows[0];
+  if (topMed && topMed.qty > 0) {
+    advice.push(`<strong>Medicaments:</strong> ${topMed.label} led with ${topMed.qty} sold (${currency(topMed.revenue)}).`);
+  }
+  const topGas = gasAgg.rows[0];
+  if (topGas && topGas.qty > 0) {
+    advice.push(`<strong>Gas:</strong> ${topGas.label} led with ${topGas.qty} sold (${currency(topGas.revenue)}).`);
+  }
+
+  if (expAgg.total > 0 && totalRevenue > 0) {
+    const share = Math.round((expAgg.total / totalRevenue) * 100);
+    advice.push(
+      `Expenditure was ${currency(expAgg.total)} (${share}% of recorded revenue). ${share >= 50 ? "Review costs — spending is high relative to sales." : "Keep tracking money out on the Expenditure page."}`
+    );
+  }
+
+  if (prevSnap && prevSnap.totalProfit > 0) {
+    const diff = totalProfit - prevSnap.totalProfit;
+    const pct = Math.round((diff / prevSnap.totalProfit) * 100);
+    if (diff > 0) {
+      advice.push(`Estimated profit across all modules is up ${pct}% versus ${monthLabel(prevYm)}.`);
+    } else if (diff < 0) {
+      advice.push(`Estimated profit across all modules dropped ${Math.abs(pct)}% versus ${monthLabel(prevYm)}. Check slow lines and expenditure.`);
+    }
+  }
+
   if (bagAgg.passThroughBags > 0) {
     const total = bagAgg.totalBags || 1;
     const share = Math.round((bagAgg.passThroughBags / total) * 100);
@@ -1355,17 +1738,21 @@ function buildMonthlyAdvice(ym, bagAgg, kgAgg) {
     advice.push(`${dormant.length} feed lines had zero bag sales this month. Trim slow-moving stock and put the cash into the top sellers.`);
   }
 
-  const monthRows = (state.salesBags || []).filter((r) => rowMatchesYM(r, ym))
-    .concat((state.salesKg || []).filter((r) => rowMatchesYM(r, ym)));
+  const monthRows = (state.salesBags || [])
+    .filter((r) => rowMatchesYM(r, ym))
+    .concat((state.salesKg || []).filter((r) => rowMatchesYM(r, ym)))
+    .concat((state.chickenSales || []).filter((r) => rowMatchesYM(r, ym)))
+    .concat((state.feedersDrinkersSales || []).filter((r) => rowMatchesYM(r, ym)))
+    .concat((state.medicamentsSales || []).filter((r) => rowMatchesYM(r, ym)))
+    .concat((state.gasSales || []).filter((r) => rowMatchesYM(r, ym)));
   const activeDays = new Set();
   for (const r of monthRows) {
     const p = parseDMYParts(r.date);
     if (p) activeDays.add(`${p.y}-${p.m}-${p.d}`);
   }
   if (activeDays.size > 0) {
-    const totalRevenue = bagAgg.totalRevenue + kgAgg.totalRevenue;
     const avg = totalRevenue / activeDays.size;
-    advice.push(`Average sales per active day this month: ${currency(avg)} across ${activeDays.size} day${activeDays.size === 1 ? "" : "s"}. Aim a bit higher next month — even 10% extra adds up.`);
+    advice.push(`Average recorded revenue per active day: ${currency(avg)} across ${activeDays.size} day${activeDays.size === 1 ? "" : "s"} (all modules).`);
   }
 
   return advice;
@@ -1381,68 +1768,147 @@ function renderMonthlyReport() {
     monthInput.value = monthlyReportSelectedYM();
   }
   const ym = monthlyReportSelectedYM();
-
-  const bagAgg = aggregateBagSalesForMonth(ym);
-  const kgAgg = aggregateKgSalesForMonth(ym);
+  const snap = buildMonthlyReportSnapshot(ym);
+  const { bagAgg, kgAgg, chickenAgg, fdAgg, medAgg, gasAgg, expAgg, moduleOverview, totalRevenue, totalProfit } =
+    snap;
   const monthName = monthLabel(ym);
-  const totalRevenue = bagAgg.totalRevenue + kgAgg.totalRevenue;
 
   const titleEl = document.getElementById("mrSummaryTitle");
-  if (titleEl) titleEl.textContent = `${monthName} — total recorded revenue`;
+  if (titleEl) titleEl.textContent = `${monthName} — all-module summary`;
   const subEl = document.getElementById("mrSummarySub");
   if (subEl) {
-    subEl.textContent = `Combined revenue from every bag and kg sale recorded in ${monthName}.`;
+    subEl.textContent = `Combined revenue and estimated profit from every page: feed, retail, chicken, feeders & drinkers, medicaments, gas, and expenditure.`;
   }
   const amtEl = document.getElementById("mrSummaryAmount");
   if (amtEl) amtEl.textContent = currency(totalRevenue);
   const metaEl = document.getElementById("mrSummaryMeta");
   if (metaEl) {
     const kgPretty = Number(kgAgg.totalKg).toFixed(2);
-    metaEl.textContent = `${bagAgg.totalBags} bag${bagAgg.totalBags === 1 ? "" : "s"} sold (${currency(bagAgg.totalRevenue)}) · ${kgPretty} kg sold (${currency(kgAgg.totalRevenue)})`;
+    metaEl.textContent = `${currency(totalRevenue)} revenue · ${currency(totalProfit)} est. profit · ${bagAgg.totalBags} bags · ${kgPretty} kg · ${chickenAgg.totalBirds} chicks · expenditure ${currency(expAgg.total)}`;
   }
 
-  const bagsBody = document.getElementById("mr-bags-body");
-  if (bagsBody) {
-    if (bagAgg.rows.length === 0) {
-      bagsBody.innerHTML = `<tr><td colspan="6" class="empty">No bag sales for ${monthName}.</td></tr>`;
-    } else {
-      bagsBody.innerHTML = bagAgg.rows
-        .slice(0, 10)
-        .map((row, idx) => `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${escapeHtmlCell(row.brand)}</td>
-            <td>${escapeHtmlCell(row.feed)}</td>
-            <td>${row.bagSize} kg</td>
-            <td>${row.bagsSold}</td>
-            <td>${currency(row.revenue)}</td>
-          </tr>`)
-        .join("");
+  fillMonthlyReportTable(
+    "mr-modules-body",
+    5,
+    `No module activity for ${monthName}.`,
+    moduleOverview.filter((m) => (m.isExpense ? m.sales > 0 || m.profit !== 0 : m.sales > 0)),
+    (row, idx) => {
+      const salesLabel =
+        row.unit === "kg"
+          ? Number(row.sales).toFixed(2)
+          : row.isExpense
+            ? String(row.sales)
+            : String(row.sales);
+      const profitCell = row.isExpense
+        ? currency(-Math.abs(row.profit))
+        : currency(row.profit);
+      const extra = row.extra ? ` · ${row.extra}` : "";
+      return `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.module)}</td>
+        <td>${salesLabel} ${escapeHtmlCell(row.unit)}</td>
+        <td>${row.isExpense ? "—" : currency(row.revenue)}${extra}</td>
+        <td>${profitCell}</td>
+      </tr>`;
     }
-  }
+  );
 
-  const kgBody = document.getElementById("mr-kg-body");
-  if (kgBody) {
-    if (kgAgg.rows.length === 0) {
-      kgBody.innerHTML = `<tr><td colspan="5" class="empty">No kg sales for ${monthName}.</td></tr>`;
-    } else {
-      kgBody.innerHTML = kgAgg.rows
-        .slice(0, 10)
-        .map((row, idx) => `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${escapeHtmlCell(row.brand)}</td>
-            <td>${escapeHtmlCell(row.feed)}</td>
-            <td>${Number(row.kg).toFixed(2)}</td>
-            <td>${currency(row.revenue)}</td>
-          </tr>`)
-        .join("");
-    }
-  }
+  fillMonthlyReportTable(
+    "mr-bags-body",
+    6,
+    `No bag sales for ${monthName}.`,
+    bagAgg.rows,
+    (row, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.brand)}</td>
+        <td>${escapeHtmlCell(row.feed)}</td>
+        <td>${row.bagSize} kg</td>
+        <td>${row.bagsSold}</td>
+        <td>${currency(row.revenue)}</td>
+      </tr>`
+  );
+
+  fillMonthlyReportTable(
+    "mr-kg-body",
+    5,
+    `No kg sales for ${monthName}.`,
+    kgAgg.rows,
+    (row, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.brand)}</td>
+        <td>${escapeHtmlCell(row.feed)}</td>
+        <td>${Number(row.kg).toFixed(2)}</td>
+        <td>${currency(row.revenue)}</td>
+      </tr>`
+  );
+
+  fillMonthlyReportTable(
+    "mr-chicken-body",
+    5,
+    `No staff chicken sales for ${monthName}.`,
+    chickenAgg.rows,
+    (row, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.breed)}</td>
+        <td>${row.birds}</td>
+        <td>${currency(row.revenue)}</td>
+        <td>${currency(row.profit)}</td>
+      </tr>`
+  );
+
+  fillMonthlyReportTable(
+    "mr-fd-body",
+    4,
+    `No feeders & drinkers sales for ${monthName}.`,
+    fdAgg.rows,
+    (row, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.label)}</td>
+        <td>${row.qty}</td>
+        <td>${currency(row.revenue)}</td>
+      </tr>`
+  );
+
+  fillMonthlyReportTable(
+    "mr-med-body",
+    4,
+    `No medicaments sales for ${monthName}.`,
+    medAgg.rows,
+    (row, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.label)}</td>
+        <td>${row.qty}</td>
+        <td>${currency(row.revenue)}</td>
+      </tr>`
+  );
+
+  fillMonthlyReportTable(
+    "mr-gas-body",
+    4,
+    `No gas sales for ${monthName}.`,
+    gasAgg.rows,
+    (row, idx) => `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtmlCell(row.label)}</td>
+        <td>${row.qty}</td>
+        <td>${currency(row.revenue)}</td>
+      </tr>`
+  );
+
+  fillMonthlyReportTable(
+    "mr-exp-body",
+    2,
+    `No expenditure for ${monthName}.`,
+    expAgg.byCategory,
+    (row) => `<tr>
+        <td>${escapeHtmlCell(row.category)}</td>
+        <td>${currency(row.amount)}</td>
+      </tr>`
+  );
 
   const adviceEl = document.getElementById("mrAdvice");
   if (adviceEl) {
-    const items = buildMonthlyAdvice(ym, bagAgg, kgAgg);
+    const items = buildMonthlyAdvice(ym, snap);
     if (items.length === 0) {
       adviceEl.innerHTML = `<li class="empty">No advice available for ${monthName} yet.</li>`;
     } else {
@@ -1883,6 +2349,40 @@ function stripHtmlForPdf(html) {
 }
 
 /** Generates a PDF snapshot of the Monthly Report for the currently selected month. */
+function appendMonthlyReportPdfTable(doc, autoTableFn, { margin, tableW, G, title, head, body, startY, columnStyles }) {
+  let y = startY;
+  if (y > 700) {
+    doc.addPage();
+    y = 60;
+  }
+  doc.setTextColor(...G.dark);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text(title, margin, y);
+  y += 6;
+  autoTableFn.call(doc, {
+    head: [head],
+    body,
+    startY: y + 6,
+    margin: { left: margin, right: margin },
+    tableWidth: tableW,
+    styles: {
+      font: "helvetica",
+      fontSize: 9.5,
+      cellPadding: { top: 6, bottom: 6, left: 8, right: 8 },
+      valign: "middle",
+      lineColor: G.edge,
+      lineWidth: 0.2,
+      textColor: [33, 33, 33],
+    },
+    headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", valign: "middle", fontSize: 9 },
+    columnStyles: columnStyles || {},
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
+  });
+  return (doc.lastAutoTable?.finalY || y) + 22;
+}
+
 function downloadMonthlyReportPdf() {
   if (state.user?.role !== "owner") return;
   if (state.appInstance !== "amana" && state.appInstance !== "ufaray") return;
@@ -1894,10 +2394,10 @@ function downloadMonthlyReportPdf() {
   }
 
   const ym = monthlyReportSelectedYM();
-  const bagAgg = aggregateBagSalesForMonth(ym);
-  const kgAgg = aggregateKgSalesForMonth(ym);
+  const snap = buildMonthlyReportSnapshot(ym);
+  const { bagAgg, kgAgg, chickenAgg, fdAgg, medAgg, gasAgg, expAgg, moduleOverview, totalRevenue, totalProfit } =
+    snap;
   const monthName = monthLabel(ym);
-  const totalRevenue = bagAgg.totalRevenue + kgAgg.totalRevenue;
   const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
   const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
   const safeMonth = (ym || "").replace(/-/g, "");
@@ -1922,7 +2422,7 @@ function downloadMonthlyReportPdf() {
   doc.text(businessTitle.toUpperCase(), margin, 30);
   doc.setFontSize(12);
   doc.setFont("helvetica", "normal");
-  doc.text("MONTHLY REPORT", margin, 50);
+  doc.text("MONTHLY REPORT — ALL MODULES", margin, 50);
   doc.setFontSize(11);
   doc.text(monthName, pageW - margin, 50, { align: "right" });
 
@@ -1930,11 +2430,11 @@ function downloadMonthlyReportPdf() {
   doc.setFillColor(...G.mint);
   doc.setDrawColor(...G.edge);
   doc.setLineWidth(0.4);
-  doc.roundedRect(margin, y - 8, tableW, 76, 6, 6, "FD");
+  doc.roundedRect(margin, y - 8, tableW, 88, 6, 6, "FD");
   doc.setTextColor(...G.dark);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text(`${monthName} — total recorded revenue`, margin + 12, y + 8);
+  doc.text(`${monthName} — all-module summary`, margin + 12, y + 8);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(...G.accent);
@@ -1944,90 +2444,200 @@ function downloadMonthlyReportPdf() {
   doc.setTextColor(33, 33, 33);
   const kgPretty = Number(kgAgg.totalKg).toFixed(2);
   doc.text(
-    `${bagAgg.totalBags} bag${bagAgg.totalBags === 1 ? "" : "s"} sold (${currency(bagAgg.totalRevenue)})   |   ${kgPretty} kg sold (${currency(kgAgg.totalRevenue)})`,
+    `${currency(totalRevenue)} revenue · ${currency(totalProfit)} est. profit · ${bagAgg.totalBags} bags · ${kgPretty} kg · ${chickenAgg.totalBirds} chicks`,
     margin + 12,
-    y + 32,
+    y + 32
   );
-  doc.text("Combined revenue from every bag and kg sale recorded in the selected month.", margin + 12, y + 50);
-  y += 88;
+  doc.text(`Expenditure: ${currency(expAgg.total)} · Feed, retail, chicken, FD, medicaments & gas included.`, margin + 12, y + 50);
+  y += 100;
 
-  doc.setTextColor(...G.dark);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("Top sellers — Feed Inventory (per bag)", margin, y);
-  y += 6;
+  const activeModules = moduleOverview.filter((m) => (m.isExpense ? m.sales > 0 || m.profit !== 0 : m.sales > 0));
+  const moduleBody =
+    activeModules.length === 0
+      ? [["—", "No module activity this month.", "", "", ""]]
+      : activeModules.map((row, idx) => {
+          const vol =
+            row.unit === "kg"
+              ? `${Number(row.sales).toFixed(2)} kg`
+              : `${row.sales} ${row.unit}`;
+          return [
+            String(idx + 1),
+            row.module,
+            vol,
+            row.isExpense ? "—" : `Ksh${formatKshPlainNumber(row.revenue)}`,
+            row.isExpense
+              ? `-Ksh${formatKshPlainNumber(Math.abs(row.profit))}`
+              : `Ksh${formatKshPlainNumber(row.profit)}`,
+          ];
+        });
 
-  const bagBody = bagAgg.rows.length === 0
-    ? [["—", `No bag sales for ${monthName}.`, "", "", "", ""]]
-    : bagAgg.rows.slice(0, 10).map((row, idx) => [
-        String(idx + 1),
-        row.brand,
-        row.feed,
-        `${row.bagSize} kg`,
-        String(row.bagsSold),
-        `Ksh${formatKshPlainNumber(row.revenue)}`,
-      ]);
-
-  autoTableFn.call(doc, {
-    head: [["#", "BRAND", "FEED TYPE", "BAG SIZE", "BAGS SOLD", "REVENUE"]],
-    body: bagBody,
-    startY: y + 6,
-    margin: { left: margin, right: margin },
-    tableWidth: tableW,
-    styles: { font: "helvetica", fontSize: 9.5, cellPadding: { top: 6, bottom: 6, left: 8, right: 8 }, valign: "middle", lineColor: G.edge, lineWidth: 0.2, textColor: [33, 33, 33] },
-    headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", valign: "middle", fontSize: 9 },
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Overview — all modules",
+    head: ["#", "MODULE", "VOLUME", "REVENUE", "PROFIT / IMPACT"],
+    body: moduleBody,
+    startY: y,
     columnStyles: {
       0: { halign: "center", cellWidth: 28 },
-      1: { halign: "left" },
-      2: { halign: "left" },
-      3: { halign: "center", cellWidth: 60 },
-      4: { halign: "right", cellWidth: 70 },
+      4: { halign: "right", cellWidth: 90 },
+    },
+  });
+
+  const bagBody =
+    bagAgg.rows.length === 0
+      ? [["—", `No bag sales for ${monthName}.`, "", "", "", ""]]
+      : bagAgg.rows.slice(0, 10).map((row, idx) => [
+          String(idx + 1),
+          row.brand,
+          row.feed,
+          `${row.bagSize} kg`,
+          String(row.bagsSold),
+          `Ksh${formatKshPlainNumber(row.revenue)}`,
+        ]);
+
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Top sellers — Sales Per Bags",
+    head: ["#", "BRAND", "FEED TYPE", "BAG SIZE", "BAGS SOLD", "REVENUE"],
+    body: bagBody,
+    startY: y,
+    columnStyles: {
+      0: { halign: "center", cellWidth: 28 },
       5: { halign: "right", cellWidth: 90 },
     },
-    alternateRowStyles: { fillColor: [252, 255, 253] },
-    theme: "plain",
   });
-  y = (doc.lastAutoTable?.finalY || y) + 22;
 
-  if (y > 720) { doc.addPage(); y = 60; }
+  const kgBody =
+    kgAgg.rows.length === 0
+      ? [["—", `No kg sales for ${monthName}.`, "", "", ""]]
+      : kgAgg.rows.slice(0, 10).map((row, idx) => [
+          String(idx + 1),
+          row.brand,
+          row.feed,
+          Number(row.kg).toFixed(2),
+          `Ksh${formatKshPlainNumber(row.revenue)}`,
+        ]);
 
-  doc.setTextColor(...G.dark);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("Top sellers — Sales Per Kg", margin, y);
-  y += 6;
-
-  const kgBody = kgAgg.rows.length === 0
-    ? [["—", `No kg sales for ${monthName}.`, "", "", ""]]
-    : kgAgg.rows.slice(0, 10).map((row, idx) => [
-        String(idx + 1),
-        row.brand,
-        row.feed,
-        Number(row.kg).toFixed(2),
-        `Ksh${formatKshPlainNumber(row.revenue)}`,
-      ]);
-
-  autoTableFn.call(doc, {
-    head: [["#", "BRAND", "FEED TYPE", "KG SOLD", "REVENUE"]],
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Top sellers — Sales Per Kg",
+    head: ["#", "BRAND", "FEED TYPE", "KG SOLD", "REVENUE"],
     body: kgBody,
-    startY: y + 6,
-    margin: { left: margin, right: margin },
-    tableWidth: tableW,
-    styles: { font: "helvetica", fontSize: 9.5, cellPadding: { top: 6, bottom: 6, left: 8, right: 8 }, valign: "middle", lineColor: G.edge, lineWidth: 0.2, textColor: [33, 33, 33] },
-    headStyles: { fillColor: G.dark, textColor: 255, fontStyle: "bold", halign: "center", valign: "middle", fontSize: 9 },
-    columnStyles: {
-      0: { halign: "center", cellWidth: 28 },
-      1: { halign: "left" },
-      2: { halign: "left" },
-      3: { halign: "right", cellWidth: 80 },
-      4: { halign: "right", cellWidth: 100 },
-    },
-    alternateRowStyles: { fillColor: [252, 255, 253] },
-    theme: "plain",
+    startY: y,
+    columnStyles: { 0: { halign: "center", cellWidth: 28 }, 4: { halign: "right", cellWidth: 100 } },
   });
-  y = (doc.lastAutoTable?.finalY || y) + 22;
 
-  if (y > 700) { doc.addPage(); y = 60; }
+  const chBody =
+    chickenAgg.rows.length === 0
+      ? [["—", `No chicken sales for ${monthName}.`, "", "", ""]]
+      : chickenAgg.rows.slice(0, 10).map((row, idx) => [
+          String(idx + 1),
+          row.breed,
+          String(row.birds),
+          `Ksh${formatKshPlainNumber(row.revenue)}`,
+          `Ksh${formatKshPlainNumber(row.profit)}`,
+        ]);
+
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Top sellers — Chicken Sales",
+    head: ["#", "BREED", "CHICKS", "REVENUE", "PROFIT"],
+    body: chBody,
+    startY: y,
+    columnStyles: { 0: { halign: "center", cellWidth: 28 }, 3: { halign: "right" }, 4: { halign: "right" } },
+  });
+
+  const fdBody =
+    fdAgg.rows.length === 0
+      ? [["—", `No sales for ${monthName}.`, "", ""]]
+      : fdAgg.rows.slice(0, 8).map((row, idx) => [
+          String(idx + 1),
+          row.label,
+          String(row.qty),
+          `Ksh${formatKshPlainNumber(row.revenue)}`,
+        ]);
+
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Top sellers — Feeders & Drinkers",
+    head: ["#", "ITEM", "QTY", "REVENUE"],
+    body: fdBody,
+    startY: y,
+    columnStyles: { 0: { halign: "center", cellWidth: 28 }, 3: { halign: "right" } },
+  });
+
+  const medBody =
+    medAgg.rows.length === 0
+      ? [["—", `No sales for ${monthName}.`, "", ""]]
+      : medAgg.rows.slice(0, 8).map((row, idx) => [
+          String(idx + 1),
+          row.label,
+          String(row.qty),
+          `Ksh${formatKshPlainNumber(row.revenue)}`,
+        ]);
+
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Top sellers — Medicaments",
+    head: ["#", "ITEM", "QTY", "REVENUE"],
+    body: medBody,
+    startY: y,
+    columnStyles: { 0: { halign: "center", cellWidth: 28 }, 3: { halign: "right" } },
+  });
+
+  const gasBody =
+    gasAgg.rows.length === 0
+      ? [["—", `No sales for ${monthName}.`, "", ""]]
+      : gasAgg.rows.slice(0, 8).map((row, idx) => [
+          String(idx + 1),
+          row.label,
+          String(row.qty),
+          `Ksh${formatKshPlainNumber(row.revenue)}`,
+        ]);
+
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Top sellers — Gas",
+    head: ["#", "SIZE", "QTY", "REVENUE"],
+    body: gasBody,
+    startY: y,
+    columnStyles: { 0: { halign: "center", cellWidth: 28 }, 3: { halign: "right" } },
+  });
+
+  const expBody =
+    expAgg.byCategory.length === 0
+      ? [["—", `No expenditure for ${monthName}.`]]
+      : expAgg.byCategory.map((row) => [row.category, `Ksh${formatKshPlainNumber(row.amount)}`]);
+
+  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+    margin,
+    tableW,
+    G,
+    title: "Expenditure — by category",
+    head: ["CATEGORY", "MONEY OUT"],
+    body: expBody,
+    startY: y,
+    columnStyles: { 1: { halign: "right", cellWidth: 120 } },
+  });
+
+  if (y > 700) {
+    doc.addPage();
+    y = 60;
+  }
 
   doc.setTextColor(...G.dark);
   doc.setFont("helvetica", "bold");
@@ -2035,7 +2645,7 @@ function downloadMonthlyReportPdf() {
   doc.text("Advice for next month", margin, y);
   y += 16;
 
-  const adviceLines = buildMonthlyAdvice(ym, bagAgg, kgAgg).map(stripHtmlForPdf);
+  const adviceLines = buildMonthlyAdvice(ym, snap).map(stripHtmlForPdf);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(33, 33, 33);
@@ -2043,7 +2653,10 @@ function downloadMonthlyReportPdf() {
     doc.text("No advice available for this month yet.", margin, y);
   } else {
     for (const line of adviceLines) {
-      if (y > 780) { doc.addPage(); y = 60; }
+      if (y > 780) {
+        doc.addPage();
+        y = 60;
+      }
       const wrapped = doc.splitTextToSize(`• ${line}`, tableW);
       doc.text(wrapped, margin, y);
       y += wrapped.length * 13 + 4;

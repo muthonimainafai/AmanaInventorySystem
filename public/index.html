@@ -2009,7 +2009,7 @@
           <div class="card">
             <h3 class="card-title">Monthly Report</h3>
             <p class="field-hint">
-              Owner-only summary of what sold each month. Pick a month to see top performers, total revenue, and tips on what to push next month.
+              Owner-only summary across every page: feed bags, retail kg, chicken, feeders &amp; drinkers, medicaments, gas, expenditure, and more. Pick a month for totals, top sellers, and advice.
             </p>
             <div class="grid">
               <label>
@@ -2036,7 +2036,28 @@
           </div>
 
           <div class="card">
-            <h3 class="card-title">Top sellers — Feed Inventory (per bag)</h3>
+            <h3 class="card-title">Overview — all modules</h3>
+            <p class="field-hint">
+              Revenue and estimated profit from every sales page plus expenditure for the selected month.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Module</th>
+                    <th>Volume</th>
+                    <th>Revenue</th>
+                    <th>Profit / impact</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-modules-body"><tr><td colspan="5" class="empty">No data.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Top sellers — Sales Per Bags</h3>
             <p class="field-hint">
               Aggregates every bag sale recorded for the selected month, grouped by brand, feed type and bag size.
             </p>
@@ -2079,9 +2100,94 @@
           </div>
 
           <div class="card">
+            <h3 class="card-title">Top sellers — Chicken Sales</h3>
+            <p class="field-hint">Staff chick sales (cleared payments) grouped by breed.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Breed</th>
+                    <th>Chicks</th>
+                    <th>Revenue</th>
+                    <th>Profit</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-chicken-body"><tr><td colspan="5" class="empty">No data.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Top sellers — Feeders &amp; Drinkers</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Item</th>
+                    <th>Qty sold</th>
+                    <th>Revenue</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-fd-body"><tr><td colspan="4" class="empty">No data.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Top sellers — Medicaments</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Item</th>
+                    <th>Qty sold</th>
+                    <th>Revenue</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-med-body"><tr><td colspan="4" class="empty">No data.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Top sellers — Gas</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Size</th>
+                    <th>Qty sold</th>
+                    <th>Revenue</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-gas-body"><tr><td colspan="4" class="empty">No data.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Expenditure — by category</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Money out</th>
+                  </tr>
+                </thead>
+                <tbody id="mr-exp-body"><tr><td colspan="2" class="empty">No data.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
             <h3 class="card-title">Advice for next month</h3>
             <p class="field-hint">
-              Suggestions based on this month's numbers, last month for comparison, and the feeds in the catalog that didn't move.
+              Suggestions based on all modules this month, last month for comparison, and feed lines that did not move.
             </p>
             <ul id="mrAdvice" class="advice-list">
               <li class="empty">Pick a month above to generate advice.</li>
