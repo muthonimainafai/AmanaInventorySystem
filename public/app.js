@@ -738,7 +738,7 @@ function updateExpenditureAccumulatedDisplay() {
   document.querySelectorAll(".js-exp-expenditure-total-value").forEach((el) => {
     el.textContent = val;
   });
-  const filter = state.expenditureMonthFilter || "";
+  const filter = getExpStatementMonthFilter();
   const scopeLabel = filter ? monthLabelFromKeyClient(filter) : "all months";
   const meta =
     rows.length === 0
@@ -1092,9 +1092,17 @@ function monthLabelFromKeyClient(monthKey) {
   return `${names[Number(m[2]) - 1] || ""} ${m[1]}`;
 }
 
+function getExpStatementMonthFilter() {
+  const sel = document.getElementById("expStatementMonth");
+  if (sel instanceof HTMLSelectElement) {
+    state.expenditureMonthFilter = sel.value;
+  }
+  return state.expenditureMonthFilter || "";
+}
+
 function expenditureRowsForDisplay() {
   const all = state.expenditureEntries || [];
-  const filter = state.expenditureMonthFilter || "";
+  const filter = getExpStatementMonthFilter();
   if (!filter) return all;
   return all.filter((r) => monthKeyFromDMYClient(formatDateDMY(r.date)) === filter);
 }
@@ -1702,9 +1710,9 @@ function downloadGenericCurrentPagePdf() {
 }
 
 function downloadExpenditurePagePdf() {
+  const filter = getExpStatementMonthFilter();
   const rows = sortRowsLatestFirst(expenditureRowsForDisplay());
-  const filter = state.expenditureMonthFilter || "";
-  const subtitle = filter ? monthLabelFromKeyClient(filter) : "All months";
+  const statementLabel = filter ? monthLabelFromKeyClient(filter) : "All months (full statement)";
   const body = rows.map((r) => [
     formatDateDMY(r.date),
     r.description || "",
@@ -1720,10 +1728,10 @@ function downloadExpenditurePagePdf() {
   }
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   downloadStandardPageTablePdf({
-    pageTitle: "Expenditure",
-    subtitle,
+    pageTitle: "Expenditure Statement",
+    subtitle: `Statement month: ${statementLabel}`,
     filename: `${pdfSafeSlug(pdfBusinessTitle())}-expenditure-${filter || "all"}-${today || "export"}.pdf`,
-    sections: { headers: ["Date", "Description", "Category", "Money out"], body },
+    sections: { title: statementLabel, headers: ["Date", "Description", "Category", "Money out"], body },
   });
 }
 
@@ -6198,6 +6206,15 @@ document.getElementById("expStatementMonth")?.addEventListener("change", (event)
   if (!(sel instanceof HTMLSelectElement)) return;
   state.expenditureMonthFilter = sel.value;
   renderExpenditureTable();
+});
+
+document.getElementById("expDownloadPdfBtn")?.addEventListener("click", () => {
+  try {
+    downloadExpenditurePagePdf();
+  } catch (err) {
+    console.error(err);
+    alert(err?.message || "Could not generate PDF. Please try again.");
+  }
 });
 
 document.getElementById("chDownloadPdfBtn")?.addEventListener("click", () => {

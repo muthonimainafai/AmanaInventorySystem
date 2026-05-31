@@ -588,6 +588,24 @@ button.danger {
   filter: brightness(1.08);
 }
 
+.exp-statement-toolbar {
+  margin-bottom: 12px;
+  align-items: end;
+}
+
+.exp-statement-month-title {
+  display: block;
+  font-weight: 700;
+  color: #0f5132;
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.exp-statement-pdf-wrap {
+  display: flex;
+  align-items: flex-end;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -1977,13 +1977,16 @@
               </div>
               <p class="profit-highlight-example js-exp-expenditure-total-meta"></p>
             </div>
-            <div class="grid" style="margin-bottom: 12px;">
-              <label>
-                Statement month
+            <div class="exp-statement-toolbar grid">
+              <label class="exp-statement-month-field">
+                <span class="exp-statement-month-title">Statement month</span>
                 <select id="expStatementMonth">
                   <option value="">All months (full statement)</option>
                 </select>
               </label>
+              <div class="exp-statement-pdf-wrap">
+                <button type="button" id="expDownloadPdfBtn" class="page-download-pdf-btn">Download PDF</button>
+              </div>
             </div>
             <div class="table-wrap">
               <table>
