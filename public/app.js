@@ -2833,6 +2833,15 @@ function parseDMYParts(dateValue) {
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+/** Returns weekday name for a DD/MM/YYYY string. */
+function weekdayNameFromDMY(dmy) {
+  const parts = parseDMYParts(dmy);
+  if (!parts) return "";
+  const dt = new Date(parts.y, parts.m - 1, parts.d);
+  if (Number.isNaN(dt.getTime())) return "";
+  return WEEKDAY_NAMES[dt.getDay()];
+}
+
 /** e.g. Saturday 23/05/2026 for calculator proforma / invoice PDFs. */
 function formatDateWithDayName(dateValue) {
   const dmy = formatDateDMY(dateValue);
@@ -2856,10 +2865,62 @@ function nextSaturdayDMY(fromDMY) {
   return `${d}/${m}/${dt.getFullYear()}`;
 }
 
-/** "Saturday DD/MM/YYYY 12.00pm" — validity line for proforma/invoice PDFs. */
-function calcValidUntilText(fromDMY) {
-  const satDMY = nextSaturdayDMY(fromDMY);
-  return `Saturday ${satDMY} 12.00pm`;
+function initCalcValidUntilDefaults() {
+  const todayStr = state.shopToday || clientShopTodayDMY();
+  const defaultSat = nextSaturdayDMY(todayStr);
+  const daySel = document.getElementById("calcValidUntilDay");
+  const timeEl = document.getElementById("calcValidUntilTime");
+  if (calcDueDateDisplay instanceof HTMLInputElement && !calcDueDateDisplay.value.trim()) {
+    calcDueDateDisplay.value = defaultSat;
+    if (calcDueDate instanceof HTMLInputElement) calcDueDate.value = toIsoDate(defaultSat);
+  }
+  const dateForDay =
+    calcDueDateDisplay instanceof HTMLInputElement && calcDueDateDisplay.value.trim()
+      ? calcDueDateDisplay.value.trim()
+      : defaultSat;
+  if (daySel instanceof HTMLSelectElement) {
+    daySel.dataset.userSet = "";
+    daySel.value = weekdayNameFromDMY(dateForDay) || "Saturday";
+  }
+  if (timeEl instanceof HTMLInputElement && !timeEl.value.trim()) {
+    timeEl.value = "12.00pm";
+  }
+}
+
+function syncCalcValidUntilDayFromDate() {
+  const daySel = document.getElementById("calcValidUntilDay");
+  if (!(daySel instanceof HTMLSelectElement)) return;
+  if (daySel.dataset.userSet === "1") return;
+  const dmy = calcDueDateDisplay instanceof HTMLInputElement ? calcDueDateDisplay.value.trim() : "";
+  const day = weekdayNameFromDMY(dmy);
+  if (day) daySel.value = day;
+}
+
+function getCalcValidUntilDateForPdf(fallbackDMY) {
+  const t = calcDueDateDisplay instanceof HTMLInputElement ? calcDueDateDisplay.value.trim() : "";
+  if (t && isValidDMY(t)) return t;
+  const base = fallbackDMY || state.shopToday || clientShopTodayDMY();
+  return nextSaturdayDMY(base);
+}
+
+function getCalcValidUntilDayForPdf(fallbackDMY) {
+  const daySel = document.getElementById("calcValidUntilDay");
+  if (daySel instanceof HTMLSelectElement && daySel.value) return daySel.value;
+  return weekdayNameFromDMY(getCalcValidUntilDateForPdf(fallbackDMY)) || "Saturday";
+}
+
+function getCalcValidUntilTimeForPdf() {
+  const el = document.getElementById("calcValidUntilTime");
+  const t = el instanceof HTMLInputElement ? el.value.trim() : "";
+  return t || "12.00pm";
+}
+
+/** Valid-until line for proforma/invoice PDFs — uses calculator form day, date, and time. */
+function calcValidUntilText(invoiceDateDMY) {
+  const validDate = getCalcValidUntilDateForPdf(invoiceDateDMY);
+  const day = getCalcValidUntilDayForPdf(invoiceDateDMY);
+  const time = getCalcValidUntilTimeForPdf();
+  return `${day} ${validDate} ${time}`;
 }
 
 function compareDMYParts(a, b) {
@@ -6051,6 +6112,7 @@ function showPage(page) {
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
     initCalcChickenFormDefaults();
+    initCalcValidUntilDefaults();
     applyCalcChickenPriceFromBreed();
     updateCalcChickenTotalDisplay();
     renderCalculatorTable();
@@ -6317,6 +6379,7 @@ async function loadAllData() {
   populateCalcChickenBreedSelect();
   if (state.currentPage === "calculator") {
     initCalcChickenFormDefaults();
+    initCalcValidUntilDefaults();
     applyCalcChickenPriceFromBreed();
     updateCalcChickenTotalDisplay();
   }
@@ -6855,7 +6918,14 @@ if (expDateDisplay && expDate && expOpenCalendarBtn) wireDatePicker(expDateDispl
 if (roseDateDisplay && roseDate && roseOpenCalendarBtn) wireDatePicker(roseDateDisplay, roseDate, roseOpenCalendarBtn);
 if (calcDueDateDisplay && calcDueDate && calcDueOpenCalendarBtn) {
   wireDatePicker(calcDueDateDisplay, calcDueDate, calcDueOpenCalendarBtn);
+  const syncValidUntilDay = () => syncCalcValidUntilDayFromDate();
+  calcDueDateDisplay.addEventListener("input", syncValidUntilDay);
+  calcDueDate.addEventListener("change", syncValidUntilDay);
 }
+document.getElementById("calcValidUntilDay")?.addEventListener("change", (event) => {
+  const sel = event.target;
+  if (sel instanceof HTMLSelectElement) sel.dataset.userSet = "1";
+});
 if (calcChDateDisplay && calcChDate && calcChOpenCalendarBtn) {
   wireDatePicker(calcChDateDisplay, calcChDate, calcChOpenCalendarBtn);
 }
@@ -6928,6 +6998,14 @@ document.getElementById("calcClearBtn")?.addEventListener("click", () => {
   if (mobileEl instanceof HTMLInputElement) mobileEl.value = "";
   if (calcDueDateDisplay instanceof HTMLInputElement) calcDueDateDisplay.value = "";
   if (calcDueDate instanceof HTMLInputElement) calcDueDate.value = "";
+  const daySel = document.getElementById("calcValidUntilDay");
+  if (daySel instanceof HTMLSelectElement) {
+    daySel.value = "Saturday";
+    daySel.dataset.userSet = "";
+  }
+  const timeEl = document.getElementById("calcValidUntilTime");
+  if (timeEl instanceof HTMLInputElement) timeEl.value = "12.00pm";
+  initCalcValidUntilDefaults();
   const paidEl = document.getElementById("calcPaidAmount");
   if (paidEl instanceof HTMLInputElement) paidEl.value = "0";
   updateCalculatorGrandTotalDisplay();
@@ -7146,12 +7224,9 @@ function getCalcCustomerBillPdfText() {
   return parts.join("\n") || "—";
 }
 
-/** Due date for invoice PDFs: valid DD/MM/YYYY from field, else shop today. */
+/** Valid-until date for invoice PDFs: DD/MM/YYYY from field, else next Saturday from invoice date. */
 function getCalcDueDateForPdf() {
-  const el = document.getElementById("calcDueDateDisplay");
-  const t = el instanceof HTMLInputElement ? el.value.trim() : "";
-  if (t && isValidDMY(t)) return t;
-  return state.shopToday || clientShopTodayDMY();
+  return getCalcValidUntilDateForPdf(state.shopToday || clientShopTodayDMY());
 }
 
 /** Sale date from chicken calculator form, else shop today. */
@@ -7449,9 +7524,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
     const cm = document.getElementById("calcCustomerMobile");
     const cname = cn instanceof HTMLInputElement ? cn.value.trim() : "";
     const cmob = cm instanceof HTMLInputElement ? cm.value.trim() : "";
-    const dueDisp = document.getElementById("calcDueDateDisplay");
-    const dueStr = dueDisp instanceof HTMLInputElement ? dueDisp.value.trim() : "";
-    const duePdf = dueStr && isValidDMY(dueStr) ? dueStr : null;
+    const duePdf = getCalcValidUntilDateForPdf(today);
     if (cname) {
       doc.text(`Customer: ${cname}`, 40, metaY);
       metaY += 14;
@@ -7460,10 +7533,8 @@ async function downloadCalculatorPdf(mode = "calculator") {
       doc.text(`Mobile: ${cmob}`, 40, metaY);
       metaY += 14;
     }
-    if (duePdf) {
-      doc.text(`Due date: ${duePdf}`, 40, metaY);
-      metaY += 14;
-    }
+    doc.text(`Valid until: ${calcValidUntilText(today)}`, 40, metaY);
+    metaY += 14;
 
     let tableStartY = metaY + 10;
     if (filledRows.length) {
@@ -7554,7 +7625,6 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G });
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
-  const dueForPdf = getCalcDueDateForPdf();
   const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
   const leftBlockH = 14 + billLines.length * 12;
   const rightBlockH = 14 * 3;
