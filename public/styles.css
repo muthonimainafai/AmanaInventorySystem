@@ -803,16 +803,8 @@ tr.table-date-separator td {
   font-size: 1.15rem;
   letter-spacing: 0.06em;
 }
-.mpesa-payment-label {
-  margin: 14px 16px 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.88;
-}
 .mpesa-payment-type {
-  margin: 0 16px 10px;
+  margin: 14px 16px 10px;
   font-size: 1rem;
   font-weight: 700;
   line-height: 1.35;

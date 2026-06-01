@@ -7197,7 +7197,6 @@ function getCalcMpesaPaymentConfig() {
   const base = {
     brand: "M-PESA",
     headerSuffix: "PAYMENTS",
-    section: "Payment details",
     type: "Buy Goods and Services",
     tillLabel: "Till Number",
   };
@@ -7234,7 +7233,7 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   if (!payment) return startY;
   const pageW = doc.internal.pageSize.getWidth();
   const w = tableW ?? pageW - 2 * margin;
-  const blockH = 96;
+  const blockH = 84;
   const green = [0, 166, 81];
   const greenDark = [0, 120, 58];
   const white = [255, 255, 255];
@@ -7252,12 +7251,8 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   const paymentsX = brandX + doc.getTextWidth(payment.brand) + 6;
   doc.text(payment.headerSuffix, paymentsX, headerTextY);
 
-  let y = startY + 30;
+  let y = startY + 28;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.5);
-  doc.setTextColor(230, 255, 240);
-  doc.text(payment.section.toUpperCase(), margin + 12, y);
-  y += 12;
   doc.setFontSize(10);
   doc.setTextColor(...white);
   doc.text(payment.type, margin + 12, y);
