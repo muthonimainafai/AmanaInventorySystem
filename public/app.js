@@ -492,6 +492,7 @@ function applyAppTheme() {
   }
   updateCalculatorModeUi();
   updateCalcMpesaPaymentCardUi();
+  updateCalcBrandHeaderUi();
 }
 
 async function api(path, options = {}) {
@@ -595,6 +596,27 @@ function currency(value) {
 function formatKshPlainNumber(value) {
   const n = roundMoney(value) || 0;
   return new Intl.NumberFormat("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+}
+
+/**
+ * Draw invoice payment summary rows with matching font, size, and aligned columns.
+ * @returns {number} Y position below the last row
+ */
+function drawInvoicePaymentSummaryPdf(doc, { rightX, startY, rows, darkColor = [14, 92, 58], labelGap = 130 }) {
+  const fontSize = 10;
+  const lineHeight = 16;
+  const labelX = rightX - labelGap;
+  let y = startY;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(fontSize);
+  doc.setTextColor(...darkColor);
+  for (const row of rows) {
+    doc.text(row.label, labelX, y, { align: "right" });
+    doc.text(`Ksh${formatKshPlainNumber(row.value)}`, rightX, y, { align: "right" });
+    y += lineHeight;
+  }
+  doc.setTextColor(0, 0, 0);
+  return y;
 }
 
 /** Round to 2 decimal places (half-up) — avoids float drift like 4299.999999 → 4299.99 in inputs. */
@@ -7053,6 +7075,8 @@ document.getElementById("calcChDownloadProformaBtn")?.addEventListener("click", 
 
 const AMANA_LOGO_PATH = "/amana-kuku-logo.png";
 const UFARAY_LOGO_PATH = "/ufaray-logo.jpeg";
+const AMANA_CALC_BUSINESS_MOBILE_LINE = "Mobile number : 0141 388 444";
+const UFARAY_CALC_BUSINESS_MOBILE_LINE = "Mobile number : 0116 322 881";
 /** @type {Map<string, Promise<{ dataUrl: string, width: number, height: number, format: string } | null>>} */
 const pdfLogoCache = new Map();
 
@@ -7118,9 +7142,23 @@ async function loadCalculatorPdfLogo(mode) {
   return null;
 }
 
-/** Logo at top-right; preserves aspect ratio. Returns drawn height in pt. */
+function getCalcBusinessMobileLineForPdf(mode) {
+  if (state.appInstance === "amana") return AMANA_CALC_BUSINESS_MOBILE_LINE;
+  if (state.appInstance === "ufaray" && (mode === "proforma" || mode === "invoice")) {
+    return UFARAY_CALC_BUSINESS_MOBILE_LINE;
+  }
+  return "";
+}
+
+function updateCalcBrandHeaderUi() {
+  const header = document.getElementById("calcBrandHeader");
+  if (!header) return;
+  header.classList.toggle("hidden", state.appInstance !== "amana");
+}
+
+/** Logo at top-right; preserves aspect ratio. Returns placement or null. */
 function addPdfLogoTopRight(doc, logoMeta, opts = {}) {
-  if (!logoMeta?.dataUrl || !logoMeta.width || !logoMeta.height) return 0;
+  if (!logoMeta?.dataUrl || !logoMeta.width || !logoMeta.height) return null;
   const pageW = doc.internal.pageSize.getWidth();
   const margin = opts.margin ?? 40;
   const maxW = opts.maxWidth ?? opts.size ?? 108;
@@ -7136,7 +7174,22 @@ function addPdfLogoTopRight(doc, logoMeta, opts = {}) {
   const x = pageW - margin - drawW;
   const format = logoMeta.format || "PNG";
   doc.addImage(logoMeta.dataUrl, format, x, top, drawW, drawH);
-  return drawH;
+  return { drawH, drawW, x, top };
+}
+
+function drawBusinessMobileBelowPdfLogo(doc, placement, mobileLine) {
+  if (!mobileLine || !placement) return 0;
+  const textY = placement.top + placement.drawH + 10;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(20, 20, 20);
+  doc.text(mobileLine, placement.x + placement.drawW / 2, textY, { align: "center" });
+  return 14;
+}
+
+function pdfLogoBlockHeight(placement, extraBelow = 0) {
+  if (!placement) return 0;
+  return placement.drawH + extraBelow;
 }
 
 /** M-Pesa Buy Goods payment details on Calculator (Amana / Ufaray) and calculator PDFs. */
@@ -7226,7 +7279,7 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
 }
 
 /** Invoice / proforma header: logo above the divider line, title on the left. Returns Y for content below the line. */
-function drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G }) {
+function drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G, pdfMode = "proforma" }) {
   const rightX = pageW - margin;
   const logoTop = 14;
   const titleY = logoMeta ? 52 : 36;
@@ -7234,11 +7287,14 @@ function drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW
   doc.setFillColor(...G.accent);
   doc.rect(0, 0, pageW, 12, "F");
 
-  let logoDrawH = 0;
+  let logoPlacement = null;
+  let mobileBelowH = 0;
   if (logoMeta) {
-    logoDrawH = addPdfLogoTopRight(doc, logoMeta, { top: logoTop, maxWidth: 118, maxHeight: 118, margin });
+    logoPlacement = addPdfLogoTopRight(doc, logoMeta, { top: logoTop, maxWidth: 118, maxHeight: 118, margin });
+    mobileBelowH = drawBusinessMobileBelowPdfLogo(doc, logoPlacement, getCalcBusinessMobileLineForPdf(pdfMode));
   }
-  const lineY = logoMeta ? logoTop + logoDrawH + 14 : 58;
+  const logoBlockH = pdfLogoBlockHeight(logoPlacement, mobileBelowH);
+  const lineY = logoMeta ? logoTop + logoBlockH + 14 : 58;
 
   if (!logoMeta && brandLine) {
     doc.setFont("helvetica", "bold");
@@ -7342,7 +7398,7 @@ async function downloadCalcChickenProformaPdf() {
 
   const hdr = "PRO-FORMA INVOICE";
   const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
-  const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G });
+  const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G, pdfMode: "proforma" });
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
   const leftBlockH = 14 + billLines.length * 12;
@@ -7410,24 +7466,16 @@ async function downloadCalcChickenProformaPdf() {
   doc.setFontSize(10);
   doc.setTextColor(...G.dark);
   doc.text(`TOTAL CHICKS: ${row.qtyNum}`, rightX, finalY + 22, { align: "right" });
-  const summaryRows = [
-    { label: "TOTAL AMOUNT", value: invoiceTotal, emphasize: true },
-    { label: "PAID AMOUNT", value: paidAmount, emphasize: false },
-    { label: "UNPAID BALANCE", value: unpaidBalance, emphasize: true },
-  ];
-  let summaryY = finalY + 40;
-  summaryRows.forEach((summaryRow) => {
-    doc.setFontSize(summaryRow.emphasize ? 11 : 10);
-    doc.setTextColor(...G.dark);
-    doc.text(summaryRow.label, rightX - 110, summaryY, { align: "right" });
-    if (summaryRow.emphasize) {
-      doc.setFontSize(12);
-      doc.setTextColor(...G.accent);
-    }
-    doc.text(`Ksh${formatKshPlainNumber(summaryRow.value)}`, rightX, summaryY, { align: "right" });
-    summaryY += 18;
+  const summaryY = drawInvoicePaymentSummaryPdf(doc, {
+    rightX,
+    startY: finalY + 40,
+    darkColor: G.dark,
+    rows: [
+      { label: "TOTAL AMOUNT", value: invoiceTotal },
+      { label: "PAID AMOUNT", value: paidAmount },
+      { label: "UNPAID BALANCE", value: unpaidBalance },
+    ],
   });
-  doc.setTextColor(0, 0, 0);
 
   if (shouldIncludeCalcMpesaPaymentInPdf()) {
     let payY = summaryY + 20;
@@ -7552,9 +7600,15 @@ async function downloadCalculatorPdf(mode = "calculator") {
     if (chickenRow) grand += chickenRow.lineTotal;
 
     const calcLogoTop = 18;
-    const calcLogoH = logoMeta
+    const logoPlacement = logoMeta
       ? addPdfLogoTopRight(doc, logoMeta, { top: calcLogoTop, maxWidth: 96, maxHeight: 96 })
-      : 0;
+      : null;
+    const mobileBelowH = drawBusinessMobileBelowPdfLogo(
+      doc,
+      logoPlacement,
+      getCalcBusinessMobileLineForPdf("calculator")
+    );
+    const calcLogoH = pdfLogoBlockHeight(logoPlacement, mobileBelowH);
     const calcTextTop = logoMeta ? calcLogoTop + calcLogoH + 16 : 42;
 
     doc.setFont("helvetica", "bold");
@@ -7669,7 +7723,15 @@ async function downloadCalculatorPdf(mode = "calculator") {
 
   const hdr = isProforma ? "PRO-FORMA INVOICE" : "INVOICE";
   const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
-  const blockTop = drawInvoicePdfHeaderBand(doc, { logoMeta, hdr, brandLine, margin, pageW, G });
+  const blockTop = drawInvoicePdfHeaderBand(doc, {
+    logoMeta,
+    hdr,
+    brandLine,
+    margin,
+    pageW,
+    G,
+    pdfMode: isProforma ? "proforma" : "invoice",
+  });
   const billRaw = getCalcCustomerBillPdfText();
   const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
   const noLabel = isProforma ? "PROFORMA NO." : "INVOICE NO.";
@@ -7759,24 +7821,16 @@ async function downloadCalculatorPdf(mode = "calculator") {
     doc.text(`TOTAL CHICKS: ${chickenRow.qtyNum}`, rightX, totalsY, { align: "right" });
     totalsY += 16;
   }
-  const summaryRows = [
-    { label: "TOTAL AMOUNT", value: invoiceTotal, emphasize: true },
-    { label: "PAID AMOUNT", value: paidAmount, emphasize: false },
-    { label: "UNPAID BALANCE", value: unpaidBalance, emphasize: true },
-  ];
-  let summaryY = totalsY + 14;
-  summaryRows.forEach((row) => {
-    doc.setFontSize(row.emphasize ? 11 : 10);
-    doc.setTextColor(...G.dark);
-    doc.text(row.label, rightX - 110, summaryY, { align: "right" });
-    if (row.emphasize) {
-      doc.setFontSize(12);
-      doc.setTextColor(...G.accent);
-    }
-    doc.text(`Ksh${formatKshPlainNumber(row.value)}`, rightX, summaryY, { align: "right" });
-    summaryY += 18;
+  const summaryY = drawInvoicePaymentSummaryPdf(doc, {
+    rightX,
+    startY: totalsY + 14,
+    darkColor: G.dark,
+    rows: [
+      { label: "TOTAL AMOUNT", value: invoiceTotal },
+      { label: "PAID AMOUNT", value: paidAmount },
+      { label: "UNPAID BALANCE", value: unpaidBalance },
+    ],
   });
-  doc.setTextColor(0, 0, 0);
 
   if (shouldIncludeCalcMpesaPaymentInPdf()) {
     let payY = summaryY + 20;

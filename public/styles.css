@@ -749,6 +749,29 @@ tr.table-date-separator td {
   margin-left: -22px;
 }
 
+/* Calculator brand logo + contact (Amana) */
+.calc-brand-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-bottom: 0.75rem;
+  gap: 0.35rem;
+}
+.calc-brand-logo {
+  max-width: 120px;
+  max-height: 120px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.calc-brand-mobile {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0e5c3a;
+  text-align: right;
+}
+
 /* M-Pesa-style payment card on Calculator (Amana / Ufaray) */
 .mpesa-payment-card {
   margin: 1rem 0 0.5rem;
