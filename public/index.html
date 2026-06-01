@@ -1986,7 +1986,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Total expenditure</p>
                   <p class="profit-highlight-sub">
-                    Full expenditure statement — filter by month below or view all months. Balance page uses the current month only.
+                    Shows the current month only (starts at KES 0 each new month). Choose a past month below to view or download its statement.
                   </p>
                 </div>
                 <span class="js-exp-expenditure-total-value profit-highlight-amount">KES 0</span>
@@ -1996,9 +1996,7 @@
             <div class="exp-statement-toolbar grid">
               <label class="exp-statement-month-field">
                 <span class="exp-statement-month-title">Statement month</span>
-                <select id="expStatementMonth">
-                  <option value="">All months (full statement)</option>
-                </select>
+                <select id="expStatementMonth"></select>
               </label>
               <div class="exp-statement-pdf-wrap">
                 <button type="button" id="expDownloadPdfBtn" class="page-download-pdf-btn">Download PDF</button>

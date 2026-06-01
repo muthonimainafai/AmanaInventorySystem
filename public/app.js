@@ -57,6 +57,8 @@ const state = {
   editGasId: null,
   expenditureEntries: [],
   expenditureMonthFilter: "",
+  /** Tracks shop calendar month for auto-resetting expenditure view on month change. */
+  expStatementLastShopMonth: null,
   editExpenditureId: null,
   roseEntries: [],
   editRoseId: null,
@@ -739,13 +741,15 @@ function updateExpenditureAccumulatedDisplay() {
     el.textContent = val;
   });
   const filter = getExpStatementMonthFilter();
-  const scopeLabel = filter ? monthLabelFromKeyClient(filter) : "all months";
+  const current = currentExpenditureMonthKey();
+  const isCurrent = filter === current;
+  const scopeLabel = monthLabelFromKeyClient(filter);
   const meta =
     rows.length === 0
-      ? filter
-        ? `No expenditure records for ${scopeLabel}.`
-        : "No expenditure records yet."
-      : `${rows.length} record${rows.length === 1 ? "" : "s"} · ${scopeLabel} · Sum of money out: ${currency(sumMoneyOut)}`;
+      ? isCurrent
+        ? `No expenditure recorded for ${scopeLabel} yet — starts at KES 0 each new month.`
+        : `No expenditure records for ${scopeLabel}.`
+      : `${rows.length} record${rows.length === 1 ? "" : "s"} · ${scopeLabel}${isCurrent ? " (current month)" : ""} · Sum: ${currency(sumMoneyOut)}`;
   document.querySelectorAll(".js-exp-expenditure-total-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -1092,18 +1096,23 @@ function monthLabelFromKeyClient(monthKey) {
   return `${names[Number(m[2]) - 1] || ""} ${m[1]}`;
 }
 
+function currentExpenditureMonthKey() {
+  return monthKeyFromDMYClient(state.shopToday || clientShopTodayDMY()) || "";
+}
+
 function getExpStatementMonthFilter() {
   const sel = document.getElementById("expStatementMonth");
   if (sel instanceof HTMLSelectElement) {
     state.expenditureMonthFilter = sel.value;
   }
-  return state.expenditureMonthFilter || "";
+  const current = currentExpenditureMonthKey();
+  return state.expenditureMonthFilter || current || "";
 }
 
 function expenditureRowsForDisplay() {
   const all = state.expenditureEntries || [];
   const filter = getExpStatementMonthFilter();
-  if (!filter) return all;
+  if (!filter) return [];
   return all.filter((r) => monthKeyFromDMYClient(formatDateDMY(r.date)) === filter);
 }
 
@@ -1118,19 +1127,38 @@ function expenditureEntriesForCurrentMonth() {
 function populateExpenditureMonthFilter() {
   const sel = document.getElementById("expStatementMonth");
   if (!(sel instanceof HTMLSelectElement)) return;
-  const prev = state.expenditureMonthFilter || sel.value || "";
+  const current = currentExpenditureMonthKey();
+  const prev = state.expenditureMonthFilter || sel.value || current;
   const keys = new Set();
+  if (current) keys.add(current);
   for (const r of state.expenditureEntries || []) {
     const mk = monthKeyFromDMYClient(formatDateDMY(r.date));
     if (mk) keys.add(mk);
   }
   const sorted = [...keys].sort((a, b) => b.localeCompare(a));
-  sel.innerHTML =
-    `<option value="">All months (full statement)</option>` +
-    sorted.map((k) => `<option value="${k}">${monthLabelFromKeyClient(k)}</option>`).join("");
-  if (prev === "" || sorted.includes(prev)) sel.value = prev;
-  else sel.value = "";
-  state.expenditureMonthFilter = sel.value;
+  sel.innerHTML = sorted
+    .map((k) => {
+      const label = monthLabelFromKeyClient(k);
+      const suffix = k === current ? " (current)" : "";
+      return `<option value="${k}">${label}${suffix}</option>`;
+    })
+    .join("");
+  const pick = sorted.includes(prev) ? prev : current;
+  if (pick) sel.value = pick;
+  state.expenditureMonthFilter = sel.value || pick || "";
+}
+
+function ensureExpenditureStatementMonth() {
+  const current = currentExpenditureMonthKey();
+  if (!current) return;
+  const prevTracked = state.expStatementLastShopMonth;
+  if (prevTracked && prevTracked !== current) {
+    state.expenditureMonthFilter = current;
+  } else if (!state.expenditureMonthFilter) {
+    state.expenditureMonthFilter = current;
+  }
+  state.expStatementLastShopMonth = current;
+  populateExpenditureMonthFilter();
 }
 
 function updateBalanceBanner() {
@@ -2178,7 +2206,7 @@ function downloadGenericCurrentPagePdf() {
 function downloadExpenditurePagePdf() {
   const filter = getExpStatementMonthFilter();
   const rows = sortRowsLatestFirst(expenditureRowsForDisplay());
-  const statementLabel = filter ? monthLabelFromKeyClient(filter) : "All months (full statement)";
+  const statementLabel = monthLabelFromKeyClient(filter) || "Current month";
   const body = rows.map((r) => [
     formatDateDMY(r.date),
     r.description || "",
@@ -2196,7 +2224,7 @@ function downloadExpenditurePagePdf() {
   downloadStandardPageTablePdf({
     pageTitle: "Expenditure Statement",
     subtitle: `Statement month: ${statementLabel}`,
-    filename: `${pdfSafeSlug(pdfBusinessTitle())}-expenditure-${filter || "all"}-${today || "export"}.pdf`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-expenditure-${filter || "current"}-${today || "export"}.pdf`,
     sections: { title: statementLabel, headers: ["Date", "Description", "Category", "Money out"], body },
   });
 }
@@ -6118,7 +6146,7 @@ function showPage(page) {
     renderCalculatorTable();
   }
   if (page === "expenditure") {
-    populateExpenditureMonthFilter();
+    ensureExpenditureStatementMonth();
     renderExpenditureTable();
   }
   if (page === "balance") updateBalanceBanner();
@@ -6357,7 +6385,7 @@ async function loadAllData() {
   state.gasEmployeeItems = extras[9].status === "fulfilled" ? extras[9].value : [];
   state.gasSales = extras[10].status === "fulfilled" ? extras[10].value : [];
   state.expenditureEntries = extras[11].status === "fulfilled" ? extras[11].value : [];
-  populateExpenditureMonthFilter();
+  ensureExpenditureStatementMonth();
   state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
   state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
