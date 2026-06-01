@@ -491,6 +491,7 @@ function applyAppTheme() {
     calcTitle.textContent = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
   }
   updateCalculatorModeUi();
+  updateCalcMpesaPaymentCardUi();
 }
 
 async function api(path, options = {}) {
@@ -3523,9 +3524,7 @@ function showLoggedIn() {
   document.querySelectorAll(".amana-only-bag-pigs-block").forEach((el) => {
     el.classList.toggle("hidden", !isOwner || state.appInstance !== "amana");
   });
-  document.querySelectorAll(".amana-only-calc-mpesa-block").forEach((el) => {
-    el.classList.toggle("hidden", state.appInstance !== "amana");
-  });
+  updateCalcMpesaPaymentCardUi();
   document.querySelectorAll(".employee-only-action").forEach((el) => {
     el.classList.toggle("hidden", state.user.role !== "employee");
   });
@@ -7140,19 +7139,37 @@ function addPdfLogoTopRight(doc, logoMeta, opts = {}) {
   return drawH;
 }
 
-/** M-Pesa Buy Goods payment details shown on Calculator (Amana) and included on calculator PDFs. */
-const AMANA_MPESA_PAYMENT = {
-  brand: "M-PESA",
-  headerSuffix: "PAYMENTS",
-  section: "Payment details",
-  type: "Buy Goods and Services",
-  tillLabel: "Till Number",
-  till: "5757375",
-  payee: "Amana Kuku Feeds",
-};
+/** M-Pesa Buy Goods payment details on Calculator (Amana / Ufaray) and calculator PDFs. */
+function getCalcMpesaPaymentConfig() {
+  const base = {
+    brand: "M-PESA",
+    headerSuffix: "PAYMENTS",
+    section: "Payment details",
+    type: "Buy Goods and Services",
+    tillLabel: "Till Number",
+  };
+  if (state.appInstance === "ufaray") {
+    return { ...base, till: "4963272", payee: "Ufaray Feeds" };
+  }
+  if (state.appInstance === "amana") {
+    return { ...base, till: "5757375", payee: "Amana Kuku Feeds" };
+  }
+  return null;
+}
 
-function shouldIncludeAmanaMpesaPaymentInPdf() {
-  return state.appInstance === "amana";
+function updateCalcMpesaPaymentCardUi() {
+  const payment = getCalcMpesaPaymentConfig();
+  const card = document.getElementById("calcMpesaPaymentCard");
+  if (card) card.classList.toggle("hidden", !payment);
+  if (!payment) return;
+  const tillEl = document.getElementById("calcMpesaTill");
+  const payeeEl = document.getElementById("calcMpesaPayee");
+  if (tillEl) tillEl.textContent = payment.till;
+  if (payeeEl) payeeEl.textContent = payment.payee;
+}
+
+function shouldIncludeCalcMpesaPaymentInPdf() {
+  return getCalcMpesaPaymentConfig() != null;
 }
 
 /**
@@ -7160,6 +7177,8 @@ function shouldIncludeAmanaMpesaPaymentInPdf() {
  * @returns {number} Y position below the block
  */
 function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
+  const payment = getCalcMpesaPaymentConfig();
+  if (!payment) return startY;
   const pageW = doc.internal.pageSize.getWidth();
   const w = tableW ?? pageW - 2 * margin;
   const blockH = 96;
@@ -7176,31 +7195,31 @@ function drawMpesaPaymentBlockPdf(doc, startY, { margin = 40, tableW } = {}) {
   doc.setFontSize(11);
   doc.setTextColor(...white);
   const brandX = margin + 12;
-  doc.text(AMANA_MPESA_PAYMENT.brand, brandX, headerTextY);
-  const paymentsX = brandX + doc.getTextWidth(AMANA_MPESA_PAYMENT.brand) + 6;
-  doc.text(AMANA_MPESA_PAYMENT.headerSuffix, paymentsX, headerTextY);
+  doc.text(payment.brand, brandX, headerTextY);
+  const paymentsX = brandX + doc.getTextWidth(payment.brand) + 6;
+  doc.text(payment.headerSuffix, paymentsX, headerTextY);
 
   let y = startY + 30;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(7.5);
   doc.setTextColor(230, 255, 240);
-  doc.text(AMANA_MPESA_PAYMENT.section.toUpperCase(), margin + 12, y);
+  doc.text(payment.section.toUpperCase(), margin + 12, y);
   y += 12;
   doc.setFontSize(10);
   doc.setTextColor(...white);
-  doc.text(AMANA_MPESA_PAYMENT.type, margin + 12, y);
+  doc.text(payment.type, margin + 12, y);
   y += 14;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(AMANA_MPESA_PAYMENT.tillLabel, margin + 12, y);
+  doc.text(payment.tillLabel, margin + 12, y);
   y += 14;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.text(AMANA_MPESA_PAYMENT.till, margin + 12, y);
+  doc.text(payment.till, margin + 12, y);
   y += 14;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text(AMANA_MPESA_PAYMENT.payee, margin + 12, y);
+  doc.text(payment.payee, margin + 12, y);
   doc.setTextColor(0, 0, 0);
 
   return startY + blockH + 16;
@@ -7410,7 +7429,7 @@ async function downloadCalcChickenProformaPdf() {
   });
   doc.setTextColor(0, 0, 0);
 
-  if (shouldIncludeAmanaMpesaPaymentInPdf()) {
+  if (shouldIncludeCalcMpesaPaymentInPdf()) {
     let payY = summaryY + 20;
     const pageH = doc.internal.pageSize.getHeight();
     if (payY > pageH - 120) {
@@ -7613,7 +7632,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
     }
     doc.text(`Grand total: ${currency(grand)}`, 40, footY);
     footY += 22;
-    if (shouldIncludeAmanaMpesaPaymentInPdf()) {
+    if (shouldIncludeCalcMpesaPaymentInPdf()) {
       const pageH = doc.internal.pageSize.getHeight();
       if (footY > pageH - 120) {
         doc.addPage();
@@ -7759,7 +7778,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   });
   doc.setTextColor(0, 0, 0);
 
-  if (shouldIncludeAmanaMpesaPaymentInPdf()) {
+  if (shouldIncludeCalcMpesaPaymentInPdf()) {
     let payY = summaryY + 20;
     const pageH = doc.internal.pageSize.getHeight();
     if (payY > pageH - 120) {

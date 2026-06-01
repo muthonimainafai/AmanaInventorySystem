@@ -1494,7 +1494,7 @@
                 Set <strong>Valid until</strong> day, date, and time for the PDF line (e.g. Saturday 31/05/2026 12.00pm). The day updates from the date unless you change it manually.
               </p>
             </form>
-            <div id="calcMpesaPaymentCard" class="mpesa-payment-card amana-only-calc-mpesa-block hidden" aria-label="M-Pesa payment details">
+            <div id="calcMpesaPaymentCard" class="mpesa-payment-card calc-mpesa-block hidden" aria-label="M-Pesa payment details">
               <div class="mpesa-payment-header">
                 <span class="mpesa-payment-brand">M-PESA</span>
                 <span class="mpesa-payment-header-suffix">PAYMENTS</span>
@@ -1502,8 +1502,8 @@
               <p class="mpesa-payment-label">Payment details</p>
               <p class="mpesa-payment-type">Buy Goods and Services</p>
               <p class="mpesa-payment-till-label">Till Number</p>
-              <p class="mpesa-payment-till">5757375</p>
-              <p class="mpesa-payment-payee">Amana Kuku Feeds</p>
+              <p class="mpesa-payment-till" id="calcMpesaTill">5757375</p>
+              <p class="mpesa-payment-payee" id="calcMpesaPayee">Amana Kuku Feeds</p>
             </div>
             <div class="actions calc-pdf-actions">
               <button type="button" class="secondary" id="calcClearBtn">Clear calculator</button>
