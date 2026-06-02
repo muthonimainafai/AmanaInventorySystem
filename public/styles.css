@@ -749,6 +749,11 @@ tr.table-date-separator td {
   margin-left: -22px;
 }
 
+.cess-acc-balance-negative {
+  color: #dc3545;
+  font-weight: 700;
+}
+
 /* Calculator brand logo + contact (Amana) */
 .calc-brand-header {
   display: flex;

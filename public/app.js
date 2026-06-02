@@ -5383,6 +5383,13 @@ function resetCessAccountsForm() {
   applyEmployeeSalesDateRules();
 }
 
+function formatCessAccountBalanceCell(value) {
+  const n = Number(value) || 0;
+  const text = currency(n);
+  if (n < 0) return `<span class="cess-acc-balance-negative">${text}</span>`;
+  return text;
+}
+
 function renderCessAccountsTable() {
   if (!cessAccountsBody) return;
   const rows = sortRowsLatestFirst(state.cessAccountsEntries || []);
@@ -5393,7 +5400,10 @@ function renderCessAccountsTable() {
     const balEl = document.getElementById("cessAccTotalBalance");
     if (inEl) inEl.textContent = "0";
     if (outEl) outEl.textContent = "0";
-    if (balEl) balEl.textContent = currency(0);
+    if (balEl) {
+      balEl.textContent = currency(0);
+      balEl.classList.remove("cess-acc-balance-negative");
+    }
     return;
   }
   let sumIn = 0;
@@ -5414,7 +5424,7 @@ function renderCessAccountsTable() {
         <td>${Number(row.unit_price || 0)}</td>
         <td>${moneyIn}</td>
         <td>${moneyOut}</td>
-        <td>${currency(balance)}</td>
+        <td>${formatCessAccountBalanceCell(balance)}</td>
         <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
         <td>
           <div class="row-actions">
@@ -5430,7 +5440,11 @@ function renderCessAccountsTable() {
   const balEl = document.getElementById("cessAccTotalBalance");
   if (inEl) inEl.textContent = String(sumIn);
   if (outEl) outEl.textContent = String(sumOut);
-  if (balEl) balEl.textContent = currency(sumIn - sumOut);
+  if (balEl) {
+    const totalBal = sumIn - sumOut;
+    balEl.textContent = currency(totalBal);
+    balEl.classList.toggle("cess-acc-balance-negative", totalBal < 0);
+  }
 }
 
 function renderCreditDashboard() {
