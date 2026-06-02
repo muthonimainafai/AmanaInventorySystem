@@ -5387,19 +5387,24 @@ function renderCessAccountsTable() {
   if (!cessAccountsBody) return;
   const rows = sortRowsLatestFirst(state.cessAccountsEntries || []);
   if (!rows.length) {
-    cessAccountsBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
+    cessAccountsBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
     const inEl = document.getElementById("cessAccTotalMoneyIn");
     const outEl = document.getElementById("cessAccTotalMoneyOut");
+    const balEl = document.getElementById("cessAccTotalBalance");
     if (inEl) inEl.textContent = "0";
     if (outEl) outEl.textContent = "0";
+    if (balEl) balEl.textContent = currency(0);
     return;
   }
   let sumIn = 0;
   let sumOut = 0;
   cessAccountsBody.innerHTML = rows
     .map((row, idx) => {
-      sumIn += Number(row.money_in || 0);
-      sumOut += Number(row.money_out || 0);
+      const moneyIn = Number(row.money_in || 0);
+      const moneyOut = Number(row.money_out || 0);
+      sumIn += moneyIn;
+      sumOut += moneyOut;
+      const balance = moneyIn - moneyOut;
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -5407,8 +5412,9 @@ function renderCessAccountsTable() {
         <td>${escapeHtmlCell(row.description)}</td>
         <td>${Number(row.quantity || 0)}</td>
         <td>${Number(row.unit_price || 0)}</td>
-        <td>${Number(row.money_in || 0)}</td>
-        <td>${Number(row.money_out || 0)}</td>
+        <td>${moneyIn}</td>
+        <td>${moneyOut}</td>
+        <td>${currency(balance)}</td>
         <td>${escapeHtmlCell(row.sale_via || "Shop")}</td>
         <td>
           <div class="row-actions">
@@ -5421,8 +5427,10 @@ function renderCessAccountsTable() {
     .join("");
   const inEl = document.getElementById("cessAccTotalMoneyIn");
   const outEl = document.getElementById("cessAccTotalMoneyOut");
+  const balEl = document.getElementById("cessAccTotalBalance");
   if (inEl) inEl.textContent = String(sumIn);
   if (outEl) outEl.textContent = String(sumOut);
+  if (balEl) balEl.textContent = currency(sumIn - sumOut);
 }
 
 function renderCreditDashboard() {
