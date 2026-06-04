@@ -2829,10 +2829,8 @@ function applyEmployeeSalesDateRules() {
     ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
     ["cessAccDateDisplay", "cessAccDate", "cessAccOpenCalendarBtn"],
     ["nahashonDateDisplay", "nahashonDate", "nahashonOpenCalendarBtn"],
-    ["waterBillsDateDisplay", "waterBillsDate", "waterBillsOpenCalendarBtn"],
     ["waterBillsDateFromDisplay", "waterBillsDateFrom", "waterBillsDateFromOpenCalendarBtn"],
     ["waterBillsDateToDisplay", "waterBillsDateTo", "waterBillsDateToOpenCalendarBtn"],
-    ["electricityBillsDateDisplay", "electricityBillsDate", "electricityBillsOpenCalendarBtn"],
     ["electricityBillsDateFromDisplay", "electricityBillsDateFrom", "electricityBillsDateFromOpenCalendarBtn"],
     ["electricityBillsDateToDisplay", "electricityBillsDateTo", "electricityBillsDateToOpenCalendarBtn"],
   ];
@@ -5548,7 +5546,7 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
   if (!bodyEl) return;
   const rows = sortRowsLatestFirst(entries || []);
   if (!rows.length) {
-    bodyEl.innerHTML = '<tr><td colspan="13" class="empty">No records.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="12" class="empty">No records.</td></tr>';
     const curEl = document.getElementById(totalCurrentBillingId);
     const balEl = document.getElementById(totalBalId);
     const totEl = document.getElementById(totalBillingId);
@@ -5567,8 +5565,8 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
   let lastBalance = 0;
   let lastTotalBilling = 0;
   const chronological = [...rows].sort((a, b) => {
-    const ap = parseDMYParts(a?.date);
-    const bp = parseDMYParts(b?.date);
+    const ap = parseDMYParts(a?.date_to || a?.date_from || a?.date);
+    const bp = parseDMYParts(b?.date_to || b?.date_from || b?.date);
     if (ap && bp) {
       const byDate = compareDMYParts(ap, bp);
       if (byDate !== 0) return byDate;
@@ -5587,7 +5585,6 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
       return `
       <tr>
         <td>${idx + 1}</td>
-        <td>${formatDateDMY(row.date)}</td>
         <td>${formatDateDMY(row.date_from || row.date)}</td>
         <td>${formatDateDMY(row.date_to || row.date)}</td>
         <td>${escapeHtmlCell(row.description)}</td>
@@ -5644,7 +5641,7 @@ function renderElectricityBillsTable() {
 }
 
 function clearMeterBillsDateFields(prefix) {
-  for (const role of ["", "From", "To"]) {
+  for (const role of ["From", "To"]) {
     const disp = document.getElementById(`${prefix}Date${role}Display`);
     const native = document.getElementById(`${prefix}Date${role}`);
     if (disp) disp.value = "";
@@ -5691,7 +5688,6 @@ function resetElectricityBillsForm() {
 }
 
 function fillMeterBillsFormFromRow(prefix, row) {
-  setMeterBillsDateField(prefix, "", row.date);
   setMeterBillsDateField(prefix, "From", row.date_from || row.date);
   setMeterBillsDateField(prefix, "To", row.date_to || row.date);
   const desc = document.getElementById(`${prefix}Description`);
@@ -5715,7 +5711,7 @@ function meterBillsPeriodDatesFromForm(prefix) {
   if (fromParts && toParts && compareDMYParts(fromParts, toParts) > 0) {
     throw new Error("Date from must be on or before Date to.");
   }
-  return { date_from: dateFrom, date_to: dateTo };
+  return { date_from: dateFrom, date_to: dateTo, date: dateTo };
 }
 
 function meterBillsPayloadFromForm(prefix) {
@@ -7386,12 +7382,6 @@ if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
 if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
   wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
 }
-const waterBillsDateDisplay = document.getElementById("waterBillsDateDisplay");
-const waterBillsDate = document.getElementById("waterBillsDate");
-const waterBillsOpenCalendarBtn = document.getElementById("waterBillsOpenCalendarBtn");
-if (waterBillsDateDisplay && waterBillsDate && waterBillsOpenCalendarBtn) {
-  wireDatePicker(waterBillsDateDisplay, waterBillsDate, waterBillsOpenCalendarBtn);
-}
 const waterBillsDateFromDisplay = document.getElementById("waterBillsDateFromDisplay");
 const waterBillsDateFrom = document.getElementById("waterBillsDateFrom");
 const waterBillsDateFromOpenCalendarBtn = document.getElementById("waterBillsDateFromOpenCalendarBtn");
@@ -7403,12 +7393,6 @@ const waterBillsDateTo = document.getElementById("waterBillsDateTo");
 const waterBillsDateToOpenCalendarBtn = document.getElementById("waterBillsDateToOpenCalendarBtn");
 if (waterBillsDateToDisplay && waterBillsDateTo && waterBillsDateToOpenCalendarBtn) {
   wireDatePicker(waterBillsDateToDisplay, waterBillsDateTo, waterBillsDateToOpenCalendarBtn);
-}
-const electricityBillsDateDisplay = document.getElementById("electricityBillsDateDisplay");
-const electricityBillsDate = document.getElementById("electricityBillsDate");
-const electricityBillsOpenCalendarBtn = document.getElementById("electricityBillsOpenCalendarBtn");
-if (electricityBillsDateDisplay && electricityBillsDate && electricityBillsOpenCalendarBtn) {
-  wireDatePicker(electricityBillsDateDisplay, electricityBillsDate, electricityBillsOpenCalendarBtn);
 }
 const electricityBillsDateFromDisplay = document.getElementById("electricityBillsDateFromDisplay");
 const electricityBillsDateFrom = document.getElementById("electricityBillsDateFrom");
@@ -8565,19 +8549,15 @@ cessAccountsForm?.addEventListener("submit", async (event) => {
 
 document.getElementById("water-bills-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const dateValue = document.getElementById("waterBillsDateDisplay")?.value?.trim() || "";
-  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  let meterFields;
+  let payload;
   try {
-    meterFields = meterBillsPayloadFromForm("waterBills");
+    payload = {
+      description: String(document.getElementById("waterBillsDescription")?.value || "").trim(),
+      ...meterBillsPayloadFromForm("waterBills"),
+    };
   } catch (err) {
     return alert(err.message);
   }
-  const payload = {
-    date: dateValue,
-    description: String(document.getElementById("waterBillsDescription")?.value || "").trim(),
-    ...meterFields,
-  };
   try {
     if (state.editWaterBillsId) {
       await api(`/api/water-bills/${state.editWaterBillsId}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -8594,19 +8574,15 @@ document.getElementById("water-bills-form")?.addEventListener("submit", async (e
 
 document.getElementById("electricity-bills-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const dateValue = document.getElementById("electricityBillsDateDisplay")?.value?.trim() || "";
-  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  let meterFields;
+  let payload;
   try {
-    meterFields = meterBillsPayloadFromForm("electricityBills");
+    payload = {
+      description: String(document.getElementById("electricityBillsDescription")?.value || "").trim(),
+      ...meterBillsPayloadFromForm("electricityBills"),
+    };
   } catch (err) {
     return alert(err.message);
   }
-  const payload = {
-    date: dateValue,
-    description: String(document.getElementById("electricityBillsDescription")?.value || "").trim(),
-    ...meterFields,
-  };
   try {
     if (state.editElectricityBillsId) {
       await api(`/api/electricity-bills/${state.editElectricityBillsId}`, { method: "PUT", body: JSON.stringify(payload) });

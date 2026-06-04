@@ -4655,14 +4655,17 @@ function parseMeterBillsPeriodDate(value, label) {
 }
 
 function parseMeterBillsEntryBody(p) {
-  const dateCanon = normalizeInventoryDate(p.date);
+  const dateFrom = parseMeterBillsPeriodDate(p.date_from, "Date from");
+  const dateTo = parseMeterBillsPeriodDate(p.date_to, "Date to");
+  const dateCanon =
+    normalizeInventoryDate(p.date) ||
+    normalizeInventoryDate(dateTo) ||
+    normalizeInventoryDate(dateFrom);
   if (!dateCanon) {
-    const err = new Error("Invalid date. Use DD/MM/YYYY.");
+    const err = new Error("Invalid billing period dates. Use DD/MM/YYYY.");
     err.status = 400;
     throw err;
   }
-  const dateFrom = parseMeterBillsPeriodDate(p.date_from, "Date from");
-  const dateTo = parseMeterBillsPeriodDate(p.date_to, "Date to");
   const fromParts = parseSaleDateDMY(dateFrom);
   const toParts = parseSaleDateDMY(dateTo);
   if (fromParts && toParts && compareCalendarDates(fromParts, toParts) > 0) {
