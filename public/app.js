@@ -2829,10 +2829,6 @@ function applyEmployeeSalesDateRules() {
     ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
     ["cessAccDateDisplay", "cessAccDate", "cessAccOpenCalendarBtn"],
     ["nahashonDateDisplay", "nahashonDate", "nahashonOpenCalendarBtn"],
-    ["waterBillsDateFromDisplay", "waterBillsDateFrom", "waterBillsDateFromOpenCalendarBtn"],
-    ["waterBillsDateToDisplay", "waterBillsDateTo", "waterBillsDateToOpenCalendarBtn"],
-    ["electricityBillsDateFromDisplay", "electricityBillsDateFrom", "electricityBillsDateFromOpenCalendarBtn"],
-    ["electricityBillsDateToDisplay", "electricityBillsDateTo", "electricityBillsDateToOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -4047,6 +4043,74 @@ function wireDatePicker(dateDisplay, dateInput, openBtn) {
     if (isValidDMY(text)) {
       dateInput.value = toIsoDate(text);
     }
+  });
+}
+
+const BILLING_MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function parseBillingMonthValue(value) {
+  const s = String(value || "").trim();
+  if (!s) return null;
+  const mmYyyy = s.match(/^(\d{1,2})\/(\d{4})$/);
+  if (mmYyyy) {
+    const month = Number(mmYyyy[1]);
+    const year = Number(mmYyyy[2]);
+    if (month >= 1 && month <= 12 && year >= 1900) return { month, year };
+  }
+  const parts = parseDMYParts(s);
+  if (parts) return { month: parts.month, year: parts.year };
+  const isoMonth = s.match(/^(\d{4})-(\d{2})$/);
+  if (isoMonth) {
+    const year = Number(isoMonth[1]);
+    const month = Number(isoMonth[2]);
+    if (month >= 1 && month <= 12 && year >= 1900) return { month, year };
+  }
+  return null;
+}
+
+function billingMonthStorageValue(parts) {
+  if (!parts) return "";
+  const mm = String(parts.month).padStart(2, "0");
+  return `01/${mm}/${parts.year}`;
+}
+
+function billingMonthIsoValue(parts) {
+  if (!parts) return "";
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+}
+
+function billingMonthKey(parts) {
+  if (!parts) return 0;
+  return parts.year * 12 + parts.month;
+}
+
+function formatBillingMonthDisplay(value) {
+  const parts = parseBillingMonthValue(value);
+  if (!parts) return "—";
+  return `${BILLING_MONTH_NAMES[parts.month - 1]} ${parts.year}`;
+}
+
+function wireBillingMonthPicker(monthInput, openBtn) {
+  if (!monthInput || !openBtn) return;
+  openBtn.addEventListener("click", () => {
+    if (typeof monthInput.showPicker === "function") {
+      monthInput.showPicker();
+      return;
+    }
+    monthInput.focus();
   });
 }
 
@@ -5565,12 +5629,9 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
   let lastBalance = 0;
   let lastTotalBilling = 0;
   const chronological = [...rows].sort((a, b) => {
-    const ap = parseDMYParts(a?.date_to || a?.date_from || a?.date);
-    const bp = parseDMYParts(b?.date_to || b?.date_from || b?.date);
-    if (ap && bp) {
-      const byDate = compareDMYParts(ap, bp);
-      if (byDate !== 0) return byDate;
-    }
+    const ak = billingMonthKey(parseBillingMonthValue(a?.date_to || a?.date_from || a?.date));
+    const bk = billingMonthKey(parseBillingMonthValue(b?.date_to || b?.date_from || b?.date));
+    if (ak !== bk) return ak - bk;
     return Number(a?.id || 0) - Number(b?.id || 0);
   });
   for (const row of chronological) {
@@ -5585,8 +5646,8 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
       return `
       <tr>
         <td>${idx + 1}</td>
-        <td>${formatDateDMY(row.date_from || row.date)}</td>
-        <td>${formatDateDMY(row.date_to || row.date)}</td>
+        <td>${formatBillingMonthDisplay(row.date_from)}</td>
+        <td>${formatBillingMonthDisplay(row.date_to)}</td>
         <td>${escapeHtmlCell(row.description)}</td>
         <td>${Number(row.current_meter_reading || 0)}</td>
         <td>${Number(row.previous_meter_reading || 0)}</td>
@@ -5640,21 +5701,18 @@ function renderElectricityBillsTable() {
   });
 }
 
-function clearMeterBillsDateFields(prefix) {
+function clearMeterBillsBillingMonths(prefix) {
   for (const role of ["From", "To"]) {
-    const disp = document.getElementById(`${prefix}Date${role}Display`);
-    const native = document.getElementById(`${prefix}Date${role}`);
-    if (disp) disp.value = "";
-    if (native) native.value = "";
+    const el = document.getElementById(`${prefix}BillingMonth${role}`);
+    if (el) el.value = "";
   }
 }
 
-function setMeterBillsDateField(prefix, role, value) {
-  const disp = document.getElementById(`${prefix}Date${role}Display`);
-  const native = document.getElementById(`${prefix}Date${role}`);
-  const dmy = formatDateDMY(value);
-  if (disp) disp.value = dmy;
-  if (native && dmy) native.value = toIsoDate(dmy);
+function setMeterBillsBillingMonth(prefix, role, value) {
+  const el = document.getElementById(`${prefix}BillingMonth${role}`);
+  if (!el) return;
+  const parts = parseBillingMonthValue(value);
+  el.value = parts ? billingMonthIsoValue(parts) : "";
 }
 
 function resetWaterBillsForm() {
@@ -5662,7 +5720,7 @@ function resetWaterBillsForm() {
   if (!form) return;
   form.reset();
   state.editWaterBillsId = null;
-  clearMeterBillsDateFields("waterBills");
+  clearMeterBillsBillingMonths("waterBills");
   const unitsEl = document.getElementById("waterBillsUnitsUsed");
   const billingEl = document.getElementById("waterBillsCurrentBilling");
   if (unitsEl) unitsEl.value = "";
@@ -5677,7 +5735,7 @@ function resetElectricityBillsForm() {
   if (!form) return;
   form.reset();
   state.editElectricityBillsId = null;
-  clearMeterBillsDateFields("electricityBills");
+  clearMeterBillsBillingMonths("electricityBills");
   const unitsEl = document.getElementById("electricityBillsUnitsUsed");
   const billingEl = document.getElementById("electricityBillsCurrentBilling");
   if (unitsEl) unitsEl.value = "";
@@ -5688,8 +5746,8 @@ function resetElectricityBillsForm() {
 }
 
 function fillMeterBillsFormFromRow(prefix, row) {
-  setMeterBillsDateField(prefix, "From", row.date_from || row.date);
-  setMeterBillsDateField(prefix, "To", row.date_to || row.date);
+  setMeterBillsBillingMonth(prefix, "From", row.date_from);
+  setMeterBillsBillingMonth(prefix, "To", row.date_to);
   const desc = document.getElementById(`${prefix}Description`);
   const current = document.getElementById(`${prefix}CurrentMeter`);
   const previous = document.getElementById(`${prefix}PreviousMeter`);
@@ -5702,16 +5760,19 @@ function fillMeterBillsFormFromRow(prefix, row) {
 }
 
 function meterBillsPeriodDatesFromForm(prefix) {
-  const dateFrom = document.getElementById(`${prefix}DateFromDisplay`)?.value?.trim() || "";
-  const dateTo = document.getElementById(`${prefix}DateToDisplay`)?.value?.trim() || "";
-  if (!isValidDMY(dateFrom)) throw new Error("Date from must be in DD/MM/YYYY format.");
-  if (!isValidDMY(dateTo)) throw new Error("Date to must be in DD/MM/YYYY format.");
-  const fromParts = parseDMYParts(dateFrom);
-  const toParts = parseDMYParts(dateTo);
-  if (fromParts && toParts && compareDMYParts(fromParts, toParts) > 0) {
-    throw new Error("Date from must be on or before Date to.");
+  const fromIso = document.getElementById(`${prefix}BillingMonthFrom`)?.value?.trim() || "";
+  const toIso = document.getElementById(`${prefix}BillingMonthTo`)?.value?.trim() || "";
+  const fromParts = fromIso ? parseBillingMonthValue(fromIso) : null;
+  const toParts = toIso ? parseBillingMonthValue(toIso) : null;
+  if (fromIso && !fromParts) throw new Error("Billing Month From is invalid.");
+  if (toIso && !toParts) throw new Error("Billing Month To is invalid.");
+  if (fromParts && toParts && billingMonthKey(fromParts) > billingMonthKey(toParts)) {
+    throw new Error("Billing Month From must be on or before Billing Month To.");
   }
-  return { date_from: dateFrom, date_to: dateTo, date: dateTo };
+  const dateFrom = billingMonthStorageValue(fromParts);
+  const dateTo = billingMonthStorageValue(toParts);
+  const date = dateTo || dateFrom || state.shopToday || clientShopTodayDMY();
+  return { date_from: dateFrom, date_to: dateTo, date };
 }
 
 function meterBillsPayloadFromForm(prefix) {
@@ -7382,30 +7443,22 @@ if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
 if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
   wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
 }
-const waterBillsDateFromDisplay = document.getElementById("waterBillsDateFromDisplay");
-const waterBillsDateFrom = document.getElementById("waterBillsDateFrom");
-const waterBillsDateFromOpenCalendarBtn = document.getElementById("waterBillsDateFromOpenCalendarBtn");
-if (waterBillsDateFromDisplay && waterBillsDateFrom && waterBillsDateFromOpenCalendarBtn) {
-  wireDatePicker(waterBillsDateFromDisplay, waterBillsDateFrom, waterBillsDateFromOpenCalendarBtn);
-}
-const waterBillsDateToDisplay = document.getElementById("waterBillsDateToDisplay");
-const waterBillsDateTo = document.getElementById("waterBillsDateTo");
-const waterBillsDateToOpenCalendarBtn = document.getElementById("waterBillsDateToOpenCalendarBtn");
-if (waterBillsDateToDisplay && waterBillsDateTo && waterBillsDateToOpenCalendarBtn) {
-  wireDatePicker(waterBillsDateToDisplay, waterBillsDateTo, waterBillsDateToOpenCalendarBtn);
-}
-const electricityBillsDateFromDisplay = document.getElementById("electricityBillsDateFromDisplay");
-const electricityBillsDateFrom = document.getElementById("electricityBillsDateFrom");
-const electricityBillsDateFromOpenCalendarBtn = document.getElementById("electricityBillsDateFromOpenCalendarBtn");
-if (electricityBillsDateFromDisplay && electricityBillsDateFrom && electricityBillsDateFromOpenCalendarBtn) {
-  wireDatePicker(electricityBillsDateFromDisplay, electricityBillsDateFrom, electricityBillsDateFromOpenCalendarBtn);
-}
-const electricityBillsDateToDisplay = document.getElementById("electricityBillsDateToDisplay");
-const electricityBillsDateTo = document.getElementById("electricityBillsDateTo");
-const electricityBillsDateToOpenCalendarBtn = document.getElementById("electricityBillsDateToOpenCalendarBtn");
-if (electricityBillsDateToDisplay && electricityBillsDateTo && electricityBillsDateToOpenCalendarBtn) {
-  wireDatePicker(electricityBillsDateToDisplay, electricityBillsDateTo, electricityBillsDateToOpenCalendarBtn);
-}
+wireBillingMonthPicker(
+  document.getElementById("waterBillsBillingMonthFrom"),
+  document.getElementById("waterBillsBillingMonthFromOpenBtn")
+);
+wireBillingMonthPicker(
+  document.getElementById("waterBillsBillingMonthTo"),
+  document.getElementById("waterBillsBillingMonthToOpenBtn")
+);
+wireBillingMonthPicker(
+  document.getElementById("electricityBillsBillingMonthFrom"),
+  document.getElementById("electricityBillsBillingMonthFromOpenBtn")
+);
+wireBillingMonthPicker(
+  document.getElementById("electricityBillsBillingMonthTo"),
+  document.getElementById("electricityBillsBillingMonthToOpenBtn")
+);
 wireMeterBillsFormCalc("waterBills");
 wireMeterBillsFormCalc("electricityBills");
 if (hadifaAccDateDisplay && hadifaAccDate && hadifaAccOpenCalendarBtn) {

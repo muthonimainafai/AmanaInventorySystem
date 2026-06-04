@@ -4644,32 +4644,34 @@ app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), asyn
   res.json({ ok: true });
 });
 
-function parseMeterBillsPeriodDate(value, label) {
-  const canon = normalizeInventoryDate(value);
+function parseMeterBillsPeriodDateOptional(value, label) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const canon = normalizeInventoryDate(raw);
   if (!canon) {
-    const err = new Error(`Invalid ${label}. Use DD/MM/YYYY.`);
+    const err = new Error(`Invalid ${label}. Choose a valid billing month.`);
     err.status = 400;
     throw err;
   }
   return canon;
 }
 
+function billingMonthSortKeyFromDMY(dmy) {
+  const parts = parseSaleDateDMY(dmy);
+  if (!parts) return 0;
+  return parts.year * 12 + parts.month;
+}
+
 function parseMeterBillsEntryBody(p) {
-  const dateFrom = parseMeterBillsPeriodDate(p.date_from, "Date from");
-  const dateTo = parseMeterBillsPeriodDate(p.date_to, "Date to");
+  const dateFrom = parseMeterBillsPeriodDateOptional(p.date_from, "Billing Month From");
+  const dateTo = parseMeterBillsPeriodDateOptional(p.date_to, "Billing Month To");
   const dateCanon =
     normalizeInventoryDate(p.date) ||
     normalizeInventoryDate(dateTo) ||
-    normalizeInventoryDate(dateFrom);
-  if (!dateCanon) {
-    const err = new Error("Invalid billing period dates. Use DD/MM/YYYY.");
-    err.status = 400;
-    throw err;
-  }
-  const fromParts = parseSaleDateDMY(dateFrom);
-  const toParts = parseSaleDateDMY(dateTo);
-  if (fromParts && toParts && compareCalendarDates(fromParts, toParts) > 0) {
-    const err = new Error("Date from must be on or before Date to.");
+    normalizeInventoryDate(dateFrom) ||
+    todayDMY();
+  if (dateFrom && dateTo && billingMonthSortKeyFromDMY(dateFrom) > billingMonthSortKeyFromDMY(dateTo)) {
+    const err = new Error("Billing Month From must be on or before Billing Month To.");
     err.status = 400;
     throw err;
   }
