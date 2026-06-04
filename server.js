@@ -980,6 +980,7 @@ async function initDb() {
       date TEXT NOT NULL,
       date_from TEXT NOT NULL DEFAULT '',
       date_to TEXT NOT NULL DEFAULT '',
+      bill_to TEXT NOT NULL DEFAULT '',
       description TEXT NOT NULL DEFAULT '',
       current_meter_reading REAL NOT NULL DEFAULT 0,
       previous_meter_reading REAL NOT NULL DEFAULT 0,
@@ -999,6 +1000,7 @@ async function initDb() {
       date TEXT NOT NULL,
       date_from TEXT NOT NULL DEFAULT '',
       date_to TEXT NOT NULL DEFAULT '',
+      bill_to TEXT NOT NULL DEFAULT '',
       description TEXT NOT NULL DEFAULT '',
       current_meter_reading REAL NOT NULL DEFAULT 0,
       previous_meter_reading REAL NOT NULL DEFAULT 0,
@@ -1022,6 +1024,7 @@ async function initDb() {
     await run(`ALTER TABLE ${table} ADD COLUMN total_billing REAL NOT NULL DEFAULT 0`).catch(() => {});
     await run(`ALTER TABLE ${table} ADD COLUMN date_from TEXT NOT NULL DEFAULT ''`).catch(() => {});
     await run(`ALTER TABLE ${table} ADD COLUMN date_to TEXT NOT NULL DEFAULT ''`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN bill_to TEXT NOT NULL DEFAULT ''`).catch(() => {});
   }
 
   await run(`
@@ -4676,6 +4679,7 @@ function parseMeterBillsEntryBody(p) {
     throw err;
   }
   const description = String(p.description || "").trim();
+  const billTo = String(p.bill_to || "").trim();
   let currentMeter;
   let previousMeter;
   let pricePerM3;
@@ -4699,6 +4703,7 @@ function parseMeterBillsEntryBody(p) {
     dateCanon,
     dateFrom,
     dateTo,
+    billTo,
     description,
     currentMeter,
     previousMeter,
@@ -4742,13 +4747,14 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     const nowIso = new Date().toISOString();
     await run(
       `INSERT INTO ${tableName}
-       (date, date_from, date_to, description, current_meter_reading, previous_meter_reading, units_used, price_per_m3,
+       (date, date_from, date_to, bill_to, description, current_meter_reading, previous_meter_reading, units_used, price_per_m3,
         current_billing, balance, total_billing, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
       [
         parsed.dateCanon,
         parsed.dateFrom,
         parsed.dateTo,
+        parsed.billTo,
         parsed.description,
         parsed.currentMeter,
         parsed.previousMeter,
@@ -4778,13 +4784,14 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     }
     await run(
       `UPDATE ${tableName}
-       SET date = ?, date_from = ?, date_to = ?, description = ?, current_meter_reading = ?, previous_meter_reading = ?,
+       SET date = ?, date_from = ?, date_to = ?, bill_to = ?, description = ?, current_meter_reading = ?, previous_meter_reading = ?,
            units_used = ?, price_per_m3 = ?, current_billing = ?, updated_at = ?
        WHERE id = ?`,
       [
         parsed.dateCanon,
         parsed.dateFrom,
         parsed.dateTo,
+        parsed.billTo,
         parsed.description,
         parsed.currentMeter,
         parsed.previousMeter,

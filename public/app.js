@@ -2221,14 +2221,29 @@ function tableElementToPdfData(table) {
   return { headers, body };
 }
 
-function downloadStandardPageTablePdf({ pageTitle, subtitle, filename, sections, landscape = false }) {
+function downloadStandardPageTablePdf({ pageTitle, subtitle, filename, sections, landscape = false, billToText = "" }) {
   const ctx = ensureJsPdfReady();
   if (!ctx) return;
   const { jsPdfNs, JsPdfCtor } = ctx;
   const doc = new JsPdfCtor({ orientation: landscape ? "landscape" : "portrait", unit: "pt", format: "a4" });
   const margin = 36;
+  const pageW = doc.internal.pageSize.getWidth();
   const autoFn = doc.autoTable || jsPdfNs?.autoTable;
   let y = drawStandardPagePdfHeader(doc, { pageTitle, subtitle });
+  const billTo = String(billToText || "").trim();
+  if (billTo) {
+    doc.setTextColor(...PDF_PAGE_THEME.dark);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("BILL TO", margin, y);
+    y += 14;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(33, 33, 33);
+    const billLines = doc.splitTextToSize(billTo, pageW - margin * 2);
+    doc.text(billLines, margin, y);
+    y += billLines.length * 12 + 10;
+  }
   const allSections = (Array.isArray(sections) ? sections : [sections]).filter(Boolean);
   let wroteRows = false;
 
@@ -2277,6 +2292,34 @@ function pdfSectionsFromPageElement(pageEl) {
     sections.push({ title, ...data });
   });
   return sections;
+}
+
+function meterBillsPdfBillToText(entries) {
+  const names = [
+    ...new Set((entries || []).map((r) => String(r.bill_to || "").trim()).filter(Boolean)),
+  ];
+  return names.join("\n");
+}
+
+function downloadMeterBillsPagePdf() {
+  const page = state.currentPage;
+  const pageTitle = PAGE_HEADINGS[page] || "Bills";
+  const pageEl = document.getElementById(`page-${page}`);
+  if (!pageEl) {
+    alert("Nothing to export on this page.");
+    return;
+  }
+  const entries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
+  const sections = pdfSectionsFromPageElement(pageEl);
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle,
+    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`,
+    sections,
+    landscape: true,
+    billToText: meterBillsPdfBillToText(entries),
+  });
 }
 
 function downloadGenericCurrentPagePdf() {
@@ -2471,6 +2514,10 @@ function downloadCurrentPagePdf() {
   }
   if (page === "credit") {
     downloadCreditPagePdf();
+    return;
+  }
+  if (page === "water-bills" || page === "electricity-bills") {
+    downloadMeterBillsPagePdf();
     return;
   }
   downloadGenericCurrentPagePdf();
@@ -5648,7 +5695,7 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
         <td>${idx + 1}</td>
         <td>${formatBillingMonthDisplay(row.date_from)}</td>
         <td>${formatBillingMonthDisplay(row.date_to)}</td>
-        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${escapeHtmlCell(row.bill_to || "")}</td>
         <td>${Number(row.current_meter_reading || 0)}</td>
         <td>${Number(row.previous_meter_reading || 0)}</td>
         <td>${Number(row.units_used || 0)}</td>
@@ -5748,11 +5795,11 @@ function resetElectricityBillsForm() {
 function fillMeterBillsFormFromRow(prefix, row) {
   setMeterBillsBillingMonth(prefix, "From", row.date_from);
   setMeterBillsBillingMonth(prefix, "To", row.date_to);
-  const desc = document.getElementById(`${prefix}Description`);
+  const billTo = document.getElementById(`${prefix}BillTo`);
   const current = document.getElementById(`${prefix}CurrentMeter`);
   const previous = document.getElementById(`${prefix}PreviousMeter`);
   const price = document.getElementById(`${prefix}PricePerM3`);
-  if (desc) desc.value = row.description || "";
+  if (billTo) billTo.value = row.bill_to || "";
   if (current) current.value = row.current_meter_reading ?? 0;
   if (previous) previous.value = row.previous_meter_reading ?? 0;
   if (price) price.value = row.price_per_m3 ?? 0;
@@ -5785,6 +5832,8 @@ function meterBillsPayloadFromForm(prefix) {
   if (!Number.isFinite(price) || price < 0) throw new Error("Enter a valid price per m³.");
   return {
     ...meterBillsPeriodDatesFromForm(prefix),
+    bill_to: String(document.getElementById(`${prefix}BillTo`)?.value || "").trim(),
+    description: "",
     current_meter_reading: current,
     previous_meter_reading: previous,
     price_per_m3: price,
@@ -8604,10 +8653,7 @@ document.getElementById("water-bills-form")?.addEventListener("submit", async (e
   event.preventDefault();
   let payload;
   try {
-    payload = {
-      description: String(document.getElementById("waterBillsDescription")?.value || "").trim(),
-      ...meterBillsPayloadFromForm("waterBills"),
-    };
+    payload = meterBillsPayloadFromForm("waterBills");
   } catch (err) {
     return alert(err.message);
   }
@@ -8629,10 +8675,7 @@ document.getElementById("electricity-bills-form")?.addEventListener("submit", as
   event.preventDefault();
   let payload;
   try {
-    payload = {
-      description: String(document.getElementById("electricityBillsDescription")?.value || "").trim(),
-      ...meterBillsPayloadFromForm("electricityBills"),
-    };
+    payload = meterBillsPayloadFromForm("electricityBills");
   } catch (err) {
     return alert(err.message);
   }
