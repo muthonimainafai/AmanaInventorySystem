@@ -34,6 +34,8 @@ function loadEnvFile() {
       key.startsWith("MFC_") ||
       key.startsWith("ROSE_") ||
       key.startsWith("UFARAY_") ||
+      key.startsWith("WATER_BILLS_") ||
+      key.startsWith("ELECTRICITY_BILLS_") ||
       key.startsWith("SHOP_") ||
       key.startsWith("VEHICLE_") ||
       key === "JWT_SECRET";
@@ -240,6 +242,56 @@ function tenantLoginEnv(tenant) {
           : "AMANA_* (fallback)",
     };
   }
+  if (t === "water-bills") {
+    const ownerUsername = String(process.env.WATER_BILLS_OWNER_USERNAME || "").trim();
+    const ownerPassword = String(process.env.WATER_BILLS_OWNER_PASSWORD || "");
+    const ownerFullName = String(process.env.WATER_BILLS_OWNER_FULL_NAME || "").trim();
+    const employeeUsername = String(process.env.WATER_BILLS_EMPLOYEE_USERNAME || "").trim();
+    const employeePassword = String(process.env.WATER_BILLS_EMPLOYEE_PASSWORD || "");
+    const employeeFullName = String(process.env.WATER_BILLS_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "water-bills",
+      owner: {
+        username: ownerUsername || AMANA_OWNER_USERNAME,
+        password: ownerPassword || AMANA_OWNER_PASSWORD,
+        fullName: ownerFullName || "Water Bills Owner",
+      },
+      employee: {
+        username: employeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: employeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: employeeFullName || "Water Bills Employee",
+      },
+      sourceLabel:
+        ownerUsername || employeeUsername || ownerPassword || employeePassword
+          ? "WATER_BILLS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
+  if (t === "electricity-bills") {
+    const ownerUsername = String(process.env.ELECTRICITY_BILLS_OWNER_USERNAME || "").trim();
+    const ownerPassword = String(process.env.ELECTRICITY_BILLS_OWNER_PASSWORD || "");
+    const ownerFullName = String(process.env.ELECTRICITY_BILLS_OWNER_FULL_NAME || "").trim();
+    const employeeUsername = String(process.env.ELECTRICITY_BILLS_EMPLOYEE_USERNAME || "").trim();
+    const employeePassword = String(process.env.ELECTRICITY_BILLS_EMPLOYEE_PASSWORD || "");
+    const employeeFullName = String(process.env.ELECTRICITY_BILLS_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "electricity-bills",
+      owner: {
+        username: ownerUsername || AMANA_OWNER_USERNAME,
+        password: ownerPassword || AMANA_OWNER_PASSWORD,
+        fullName: ownerFullName || "Electricity Bills Owner",
+      },
+      employee: {
+        username: employeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: employeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: employeeFullName || "Electricity Bills Employee",
+      },
+      sourceLabel:
+        ownerUsername || employeeUsername || ownerPassword || employeePassword
+          ? "ELECTRICITY_BILLS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
   if (t === "ufaray") {
     const ufarayOwnerUsername = String(
       process.env.UFARAY_OWNER_USERNAME || process.env.UFARAY_FEEDS_USERNAME || ""
@@ -292,6 +344,8 @@ function normalizeAppTenant(value) {
   if (t === "maina-faith-cess") return "maina-faith-cess";
   if (t === "shop") return "shop";
   if (t === "nahah") return "nahah";
+  if (t === "water-bills") return "water-bills";
+  if (t === "electricity-bills") return "electricity-bills";
   return "amana";
 }
 
@@ -308,6 +362,8 @@ function dbFileNameForTenant(tenant) {
   if (t === "shop") return "inventory-shop.db";
   if (t === "nahah") return "inventory-nahah.db";
   if (t === "rose") return "inventory-rose.db";
+  if (t === "water-bills") return "inventory-water-bills.db";
+  if (t === "electricity-bills") return "inventory-electricity-bills.db";
   return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
 }
 
@@ -917,6 +973,56 @@ async function initDb() {
     )
   `);
   await run("ALTER TABLE cess_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS water_bills_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      date_from TEXT NOT NULL DEFAULT '',
+      date_to TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      current_meter_reading REAL NOT NULL DEFAULT 0,
+      previous_meter_reading REAL NOT NULL DEFAULT 0,
+      units_used REAL NOT NULL DEFAULT 0,
+      price_per_m3 REAL NOT NULL DEFAULT 0,
+      current_billing REAL NOT NULL DEFAULT 0,
+      balance REAL NOT NULL DEFAULT 0,
+      total_billing REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await run(`
+    CREATE TABLE IF NOT EXISTS electricity_bills_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      date_from TEXT NOT NULL DEFAULT '',
+      date_to TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      current_meter_reading REAL NOT NULL DEFAULT 0,
+      previous_meter_reading REAL NOT NULL DEFAULT 0,
+      units_used REAL NOT NULL DEFAULT 0,
+      price_per_m3 REAL NOT NULL DEFAULT 0,
+      current_billing REAL NOT NULL DEFAULT 0,
+      balance REAL NOT NULL DEFAULT 0,
+      total_billing REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  for (const table of ["water_bills_entries", "electricity_bills_entries"]) {
+    await run(`ALTER TABLE ${table} ADD COLUMN current_meter_reading REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN previous_meter_reading REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN units_used REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN price_per_m3 REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN current_billing REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN balance REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN total_billing REAL NOT NULL DEFAULT 0`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN date_from TEXT NOT NULL DEFAULT ''`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN date_to TEXT NOT NULL DEFAULT ''`).catch(() => {});
+  }
 
   await run(`
     CREATE TABLE IF NOT EXISTS hadifa_accounts_entries (
@@ -4538,6 +4644,172 @@ app.delete("/api/cess-accounts/:id", auth, allowRoles("owner", "employee"), asyn
   res.json({ ok: true });
 });
 
+function parseMeterBillsPeriodDate(value, label) {
+  const canon = normalizeInventoryDate(value);
+  if (!canon) {
+    const err = new Error(`Invalid ${label}. Use DD/MM/YYYY.`);
+    err.status = 400;
+    throw err;
+  }
+  return canon;
+}
+
+function parseMeterBillsEntryBody(p) {
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) {
+    const err = new Error("Invalid date. Use DD/MM/YYYY.");
+    err.status = 400;
+    throw err;
+  }
+  const dateFrom = parseMeterBillsPeriodDate(p.date_from, "Date from");
+  const dateTo = parseMeterBillsPeriodDate(p.date_to, "Date to");
+  const fromParts = parseSaleDateDMY(dateFrom);
+  const toParts = parseSaleDateDMY(dateTo);
+  if (fromParts && toParts && compareCalendarDates(fromParts, toParts) > 0) {
+    const err = new Error("Date from must be on or before Date to.");
+    err.status = 400;
+    throw err;
+  }
+  const description = String(p.description || "").trim();
+  let currentMeter;
+  let previousMeter;
+  let pricePerM3;
+  try {
+    currentMeter = parseRoseNonNegativeField(p.current_meter_reading, "Current meter reading");
+    previousMeter = parseRoseNonNegativeField(p.previous_meter_reading, "Previous meter reading");
+    pricePerM3 = parseRoseNonNegativeField(p.price_per_m3, "Price per m³");
+  } catch (error) {
+    const err = new Error(error.message || "Invalid values.");
+    err.status = 400;
+    throw err;
+  }
+  if (currentMeter < previousMeter) {
+    const err = new Error("Current meter reading must be greater than or equal to previous meter reading.");
+    err.status = 400;
+    throw err;
+  }
+  const unitsUsed = roundMoney(currentMeter - previousMeter);
+  const currentBilling = roundMoney(unitsUsed * pricePerM3);
+  return {
+    dateCanon,
+    dateFrom,
+    dateTo,
+    description,
+    currentMeter,
+    previousMeter,
+    unitsUsed,
+    pricePerM3,
+    currentBilling,
+  };
+}
+
+/** Recompute running balance and cumulative total billing (chronological by date, then id). */
+async function recomputeMeterBillsBalances(tableName) {
+  const rows = await all(`SELECT id, current_billing FROM ${tableName} ORDER BY date ASC, id ASC`);
+  let cumulative = 0;
+  for (const row of rows) {
+    cumulative += Number(row.current_billing) || 0;
+    const cumulativeRounded = roundMoney(cumulative);
+    await run(`UPDATE ${tableName} SET balance = ?, total_billing = ? WHERE id = ?`, [
+      cumulativeRounded,
+      cumulativeRounded,
+      row.id,
+    ]);
+  }
+}
+
+function mountBillsEntriesApi(routeSlug, tableName) {
+  const base = `/api/${routeSlug}`;
+  app.get(base, auth, allowRoles("owner", "employee"), async (req, res) => {
+    const rows =
+      req.user.role === "owner"
+        ? await all(`SELECT * FROM ${tableName} ORDER BY id DESC`)
+        : await all(`SELECT * FROM ${tableName} WHERE created_by = ? ORDER BY id DESC`, [req.user.username]);
+    res.json(rows);
+  });
+  app.post(base, auth, allowRoles("owner", "employee"), async (req, res) => {
+    let parsed;
+    try {
+      parsed = parseMeterBillsEntryBody(req.body || {});
+    } catch (error) {
+      return res.status(error.status || 400).json({ error: error.message });
+    }
+    const nowIso = new Date().toISOString();
+    await run(
+      `INSERT INTO ${tableName}
+       (date, date_from, date_to, description, current_meter_reading, previous_meter_reading, units_used, price_per_m3,
+        current_billing, balance, total_billing, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
+      [
+        parsed.dateCanon,
+        parsed.dateFrom,
+        parsed.dateTo,
+        parsed.description,
+        parsed.currentMeter,
+        parsed.previousMeter,
+        parsed.unitsUsed,
+        parsed.pricePerM3,
+        parsed.currentBilling,
+        req.user.username,
+        nowIso,
+        nowIso,
+      ]
+    );
+    await recomputeMeterBillsBalances(tableName);
+    res.json({ ok: true });
+  });
+  app.put(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
+    const id = Number(req.params.id);
+    const existing =
+      req.user.role === "owner"
+        ? await get(`SELECT * FROM ${tableName} WHERE id = ?`, [id])
+        : await get(`SELECT * FROM ${tableName} WHERE id = ? AND created_by = ?`, [id, req.user.username]);
+    if (!existing) return res.status(404).json({ error: "Record not found." });
+    let parsed;
+    try {
+      parsed = parseMeterBillsEntryBody(req.body || {});
+    } catch (error) {
+      return res.status(error.status || 400).json({ error: error.message });
+    }
+    await run(
+      `UPDATE ${tableName}
+       SET date = ?, date_from = ?, date_to = ?, description = ?, current_meter_reading = ?, previous_meter_reading = ?,
+           units_used = ?, price_per_m3 = ?, current_billing = ?, updated_at = ?
+       WHERE id = ?`,
+      [
+        parsed.dateCanon,
+        parsed.dateFrom,
+        parsed.dateTo,
+        parsed.description,
+        parsed.currentMeter,
+        parsed.previousMeter,
+        parsed.unitsUsed,
+        parsed.pricePerM3,
+        parsed.currentBilling,
+        new Date().toISOString(),
+        id,
+      ]
+    );
+    await recomputeMeterBillsBalances(tableName);
+    res.json({ ok: true });
+  });
+  app.delete(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
+    const result =
+      req.user.role === "owner"
+        ? await run(`DELETE FROM ${tableName} WHERE id = ?`, [Number(req.params.id)])
+        : await run(`DELETE FROM ${tableName} WHERE id = ? AND created_by = ?`, [
+            Number(req.params.id),
+            req.user.username,
+          ]);
+    if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+    await recomputeMeterBillsBalances(tableName);
+    res.json({ ok: true });
+  });
+}
+
+mountBillsEntriesApi("water-bills", "water_bills_entries");
+mountBillsEntriesApi("electricity-bills", "electricity_bills_entries");
+
 /* ── Credit Accounts (Amana & Ufaray – owner and employee) ──────────── */
 
 app.get("/api/credit-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
@@ -6483,6 +6755,8 @@ async function startServer(port = PORT) {
   await ensureTenantInitialized("nahah");
   await ensureTenantInitialized("rose");
   await ensureTenantInitialized("ufaray");
+  await ensureTenantInitialized("water-bills");
+  await ensureTenantInitialized("electricity-bills");
 
   await new Promise((resolve, reject) => {
     httpServer = app

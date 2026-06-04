@@ -1,7 +1,19 @@
 const state = {
   appInstance: (() => {
     const saved = (localStorage.getItem("amanaAppInstance") || "amana").trim().toLowerCase();
-    return ["amana", "ufaray", "rose", "nahah", "terry", "cess", "terry-and-cess", "maina-faith-cess", "shop"].includes(saved)
+    return [
+      "amana",
+      "ufaray",
+      "rose",
+      "nahah",
+      "terry",
+      "cess",
+      "terry-and-cess",
+      "maina-faith-cess",
+      "shop",
+      "water-bills",
+      "electricity-bills",
+    ].includes(saved)
       ? saved
       : "amana";
   })(),
@@ -80,6 +92,10 @@ const state = {
   editNahashonId: null,
   pigsEntries: [],
   editPigsId: null,
+  waterBillsEntries: [],
+  editWaterBillsId: null,
+  electricityBillsEntries: [],
+  editElectricityBillsId: null,
   calculatorValues: {},
 };
 
@@ -95,6 +111,8 @@ const PAGE_HEADINGS = {
   "rose-inventory": "Rose Inventory",
   "nahashon-records": "Nahashon Records",
   "cess-accounts": "Cess Accounts",
+  "water-bills": "Water Bills",
+  "electricity-bills": "Electricity Bills",
   credit: "Credit",
   calculator: "Calculator",
   pigs: "Pigs Page",
@@ -113,6 +131,34 @@ function updateCalculatorModeUi() {
 
 function isRecordsTenant() {
   return state.appInstance === "rose";
+}
+
+function isWaterBillsTenant() {
+  return state.appInstance === "water-bills";
+}
+
+function isElectricityBillsTenant() {
+  return state.appInstance === "electricity-bills";
+}
+
+function isBillsTenant() {
+  return isWaterBillsTenant() || isElectricityBillsTenant();
+}
+
+function defaultPageForLoggedInUser() {
+  if (isWaterBillsTenant()) return "water-bills";
+  if (isElectricityBillsTenant()) return "electricity-bills";
+  if (state.appInstance === "terry") return "rose-inventory";
+  if (
+    state.appInstance === "cess" ||
+    state.appInstance === "maina-faith-cess" ||
+    state.appInstance === "terry-and-cess"
+  ) {
+    return "rose-inventory";
+  }
+  if (state.appInstance === "shop") return "inventory";
+  if (isRecordsTenant()) return "rose-inventory";
+  return state.user?.role === "owner" ? "inventory" : "sales-bags";
 }
 
 function isTerryCessOrShopTenant() {
@@ -373,22 +419,44 @@ let catalogInitialized = false;
 let inventoryPricesDirty = false;
 
 function persistAppInstance() {
-  const normalized = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "terry-and-cess", "maina-faith-cess", "shop"].includes(
-    state.appInstance
-  )
+  const normalized = [
+    "amana",
+    "ufaray",
+    "rose",
+    "nahah",
+    "terry",
+    "cess",
+    "terry-and-cess",
+    "maina-faith-cess",
+    "shop",
+    "water-bills",
+    "electricity-bills",
+  ].includes(state.appInstance)
     ? state.appInstance
     : "amana";
   localStorage.setItem("amanaAppInstance", normalized);
 }
 
 function applyAppTheme() {
-  const tenant = ["amana", "ufaray", "rose", "nahah", "terry", "cess", "terry-and-cess", "maina-faith-cess", "shop"].includes(
-    state.appInstance
-  )
+  const tenant = [
+    "amana",
+    "ufaray",
+    "rose",
+    "nahah",
+    "terry",
+    "cess",
+    "terry-and-cess",
+    "maina-faith-cess",
+    "shop",
+    "water-bills",
+    "electricity-bills",
+  ].includes(state.appInstance)
     ? state.appInstance
     : "amana";
   const isUfaray = tenant === "ufaray";
   const isRose = tenant === "rose";
+  const isWaterBills = tenant === "water-bills";
+  const isElectricityBills = tenant === "electricity-bills";
   const isMainaFaithCess = tenant === "maina-faith-cess";
   const isTerryAndCess = tenant === "terry-and-cess";
   const isNahah =
@@ -401,7 +469,13 @@ function applyAppTheme() {
   document.body.classList.toggle("ufaray-theme", isUfaray);
   document.body.classList.toggle("rose-theme", isRose);
   document.body.classList.toggle("nahah-theme", isNahah);
-  document.title = isMainaFaithCess
+  document.body.classList.toggle("water-bills-theme", isWaterBills);
+  document.body.classList.toggle("electricity-bills-theme", isElectricityBills);
+  document.title = isWaterBills
+    ? "Water Bills - Desktop Inventory"
+    : isElectricityBills
+      ? "Electricity Bills - Desktop Inventory"
+      : isMainaFaithCess
     ? "Maina+Faith+Cess - Desktop Inventory"
     : isTerryAndCess
       ? "Terry and Cess - Desktop Inventory"
@@ -418,6 +492,10 @@ function applyAppTheme() {
       ? "Maina+Faith+Cess"
       : isTerryAndCess
         ? "Terry and Cess"
+        : isWaterBills
+          ? "WATER BILLS"
+          : isElectricityBills
+            ? "ELECTRICITY BILLS"
         : isUfaray
         ? "UFARAY FEEDS"
         : isRose
@@ -428,7 +506,11 @@ function applyAppTheme() {
   }
   const loginTitle = document.getElementById("loginCardTitle");
   if (loginTitle) {
-    loginTitle.textContent = tenant === "terry"
+    loginTitle.textContent = isWaterBills
+      ? "Water Bills Login"
+      : isElectricityBills
+        ? "Electricity Bills Login"
+        : tenant === "terry"
       ? "Terry Inventory Login"
         : tenant === "cess"
         ? "Cess Inventory Login"
@@ -502,11 +584,14 @@ async function api(path, options = {}) {
       "amana",
       "ufaray",
       "rose",
+      "nahah",
       "terry",
       "cess",
       "terry-and-cess",
       "maina-faith-cess",
       "shop",
+      "water-bills",
+      "electricity-bills",
     ].includes(state.appInstance)
       ? state.appInstance
       : "amana",
@@ -2080,6 +2165,8 @@ function ensureJsPdfReady() {
 }
 
 function pdfBusinessTitle() {
+  if (state.appInstance === "water-bills") return "Water Bills";
+  if (state.appInstance === "electricity-bills") return "Electricity Bills";
   if (state.appInstance === "ufaray") return "Ufaray Feeds";
   if (state.appInstance === "maina-faith-cess") return "Faith Inventory";
   if (state.appInstance === "terry") return "Terry Records";
@@ -2216,6 +2303,8 @@ function downloadGenericCurrentPagePdf() {
     "cess-accounts",
     "credit",
     "pigs",
+    "water-bills",
+    "electricity-bills",
   ]);
   downloadStandardPageTablePdf({
     pageTitle,
@@ -2740,6 +2829,12 @@ function applyEmployeeSalesDateRules() {
     ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
     ["cessAccDateDisplay", "cessAccDate", "cessAccOpenCalendarBtn"],
     ["nahashonDateDisplay", "nahashonDate", "nahashonOpenCalendarBtn"],
+    ["waterBillsDateDisplay", "waterBillsDate", "waterBillsOpenCalendarBtn"],
+    ["waterBillsDateFromDisplay", "waterBillsDateFrom", "waterBillsDateFromOpenCalendarBtn"],
+    ["waterBillsDateToDisplay", "waterBillsDateTo", "waterBillsDateToOpenCalendarBtn"],
+    ["electricityBillsDateDisplay", "electricityBillsDate", "electricityBillsOpenCalendarBtn"],
+    ["electricityBillsDateFromDisplay", "electricityBillsDateFrom", "electricityBillsDateFromOpenCalendarBtn"],
+    ["electricityBillsDateToDisplay", "electricityBillsDateTo", "electricityBillsDateToOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -3607,6 +3702,12 @@ function showLoggedIn() {
     }
     if (page === "monthly-records") {
       shouldShow = monthlyRecordsTenantEnabled();
+    }
+    if (isWaterBillsTenant()) {
+      shouldShow = page === "water-bills";
+    }
+    if (isElectricityBillsTenant()) {
+      shouldShow = page === "electricity-bills";
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -5390,6 +5491,259 @@ function formatCessAccountBalanceCell(value) {
   return text;
 }
 
+function computeMeterBillsDerived(currentMeter, previousMeter, pricePerM3) {
+  const current = Number(currentMeter);
+  const previous = Number(previousMeter);
+  const price = Number(pricePerM3);
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || !Number.isFinite(price)) {
+    return { unitsUsed: NaN, currentBilling: NaN };
+  }
+  if (current < previous) return { unitsUsed: NaN, currentBilling: NaN };
+  const unitsUsed = roundMoney(current - previous);
+  const currentBilling = roundMoney(unitsUsed * price);
+  return { unitsUsed, currentBilling };
+}
+
+function updateMeterBillsFormCalc(prefix) {
+  const currentEl = document.getElementById(`${prefix}CurrentMeter`);
+  const previousEl = document.getElementById(`${prefix}PreviousMeter`);
+  const priceEl = document.getElementById(`${prefix}PricePerM3`);
+  const unitsEl = document.getElementById(`${prefix}UnitsUsed`);
+  const billingEl = document.getElementById(`${prefix}CurrentBilling`);
+  if (!currentEl || !previousEl || !priceEl || !unitsEl || !billingEl) return;
+  const { unitsUsed, currentBilling } = computeMeterBillsDerived(
+    currentEl.value,
+    previousEl.value,
+    priceEl.value
+  );
+  if (Number.isFinite(unitsUsed)) {
+    unitsEl.value = String(unitsUsed);
+    billingEl.value = currency(currentBilling);
+  } else {
+    unitsEl.value = "";
+    billingEl.value = "";
+  }
+}
+
+function wireMeterBillsFormCalc(prefix) {
+  const ids = [`${prefix}CurrentMeter`, `${prefix}PreviousMeter`, `${prefix}PricePerM3`];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.meterCalcWired === "1") continue;
+    el.dataset.meterCalcWired = "1";
+    el.addEventListener("input", () => updateMeterBillsFormCalc(prefix));
+  }
+}
+
+function latestMeterReadingFromEntries(entries) {
+  const rows = sortRowsLatestFirst(entries || []);
+  if (!rows.length) return null;
+  const chronological = sortRowsLatestFirst(rows).reverse();
+  const latest = chronological[chronological.length - 1];
+  const reading = Number(latest?.current_meter_reading);
+  return Number.isFinite(reading) ? reading : null;
+}
+
+function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, totalBalId, totalBillingId, rowKind }) {
+  if (!bodyEl) return;
+  const rows = sortRowsLatestFirst(entries || []);
+  if (!rows.length) {
+    bodyEl.innerHTML = '<tr><td colspan="13" class="empty">No records.</td></tr>';
+    const curEl = document.getElementById(totalCurrentBillingId);
+    const balEl = document.getElementById(totalBalId);
+    const totEl = document.getElementById(totalBillingId);
+    if (curEl) curEl.textContent = currency(0);
+    if (balEl) {
+      balEl.textContent = currency(0);
+      balEl.classList.remove("cess-acc-balance-negative");
+    }
+    if (totEl) {
+      totEl.textContent = currency(0);
+      totEl.classList.remove("cess-acc-balance-negative");
+    }
+    return;
+  }
+  let sumCurrentBilling = 0;
+  let lastBalance = 0;
+  let lastTotalBilling = 0;
+  const chronological = [...rows].sort((a, b) => {
+    const ap = parseDMYParts(a?.date);
+    const bp = parseDMYParts(b?.date);
+    if (ap && bp) {
+      const byDate = compareDMYParts(ap, bp);
+      if (byDate !== 0) return byDate;
+    }
+    return Number(a?.id || 0) - Number(b?.id || 0);
+  });
+  for (const row of chronological) {
+    sumCurrentBilling += Number(row.current_billing || 0);
+    lastBalance = Number(row.balance || 0);
+    lastTotalBilling = Number(row.total_billing || 0);
+  }
+  bodyEl.innerHTML = rows
+    .map((row, idx) => {
+      const balance = Number(row.balance || 0);
+      const totalBilling = Number(row.total_billing || 0);
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${formatDateDMY(row.date_from || row.date)}</td>
+        <td>${formatDateDMY(row.date_to || row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${Number(row.current_meter_reading || 0)}</td>
+        <td>${Number(row.previous_meter_reading || 0)}</td>
+        <td>${Number(row.units_used || 0)}</td>
+        <td>${Number(row.price_per_m3 || 0)}</td>
+        <td>${currency(Number(row.current_billing || 0))}</td>
+        <td>${formatCessAccountBalanceCell(balance)}</td>
+        <td>${formatCessAccountBalanceCell(totalBilling)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="${rowKind}" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="${rowKind}" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const curEl = document.getElementById(totalCurrentBillingId);
+  const balEl = document.getElementById(totalBalId);
+  const totEl = document.getElementById(totalBillingId);
+  if (curEl) curEl.textContent = currency(sumCurrentBilling);
+  if (balEl) {
+    balEl.textContent = currency(lastBalance);
+    balEl.classList.toggle("cess-acc-balance-negative", lastBalance < 0);
+  }
+  if (totEl) {
+    totEl.textContent = currency(lastTotalBilling);
+    totEl.classList.toggle("cess-acc-balance-negative", lastTotalBilling < 0);
+  }
+}
+
+function renderWaterBillsTable() {
+  renderBillsEntriesTable({
+    bodyEl: document.getElementById("water-bills-body"),
+    entries: state.waterBillsEntries,
+    totalCurrentBillingId: "waterBillsTotalCurrentBilling",
+    totalBalId: "waterBillsTotalBalance",
+    totalBillingId: "waterBillsTotalBilling",
+    rowKind: "water-bills",
+  });
+}
+
+function renderElectricityBillsTable() {
+  renderBillsEntriesTable({
+    bodyEl: document.getElementById("electricity-bills-body"),
+    entries: state.electricityBillsEntries,
+    totalCurrentBillingId: "electricityBillsTotalCurrentBilling",
+    totalBalId: "electricityBillsTotalBalance",
+    totalBillingId: "electricityBillsTotalBilling",
+    rowKind: "electricity-bills",
+  });
+}
+
+function clearMeterBillsDateFields(prefix) {
+  for (const role of ["", "From", "To"]) {
+    const disp = document.getElementById(`${prefix}Date${role}Display`);
+    const native = document.getElementById(`${prefix}Date${role}`);
+    if (disp) disp.value = "";
+    if (native) native.value = "";
+  }
+}
+
+function setMeterBillsDateField(prefix, role, value) {
+  const disp = document.getElementById(`${prefix}Date${role}Display`);
+  const native = document.getElementById(`${prefix}Date${role}`);
+  const dmy = formatDateDMY(value);
+  if (disp) disp.value = dmy;
+  if (native && dmy) native.value = toIsoDate(dmy);
+}
+
+function resetWaterBillsForm() {
+  const form = document.getElementById("water-bills-form");
+  if (!form) return;
+  form.reset();
+  state.editWaterBillsId = null;
+  clearMeterBillsDateFields("waterBills");
+  const unitsEl = document.getElementById("waterBillsUnitsUsed");
+  const billingEl = document.getElementById("waterBillsCurrentBilling");
+  if (unitsEl) unitsEl.value = "";
+  if (billingEl) billingEl.value = "";
+  const saveBtn = document.getElementById("waterBillsSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function resetElectricityBillsForm() {
+  const form = document.getElementById("electricity-bills-form");
+  if (!form) return;
+  form.reset();
+  state.editElectricityBillsId = null;
+  clearMeterBillsDateFields("electricityBills");
+  const unitsEl = document.getElementById("electricityBillsUnitsUsed");
+  const billingEl = document.getElementById("electricityBillsCurrentBilling");
+  if (unitsEl) unitsEl.value = "";
+  if (billingEl) billingEl.value = "";
+  const saveBtn = document.getElementById("electricityBillsSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function fillMeterBillsFormFromRow(prefix, row) {
+  setMeterBillsDateField(prefix, "", row.date);
+  setMeterBillsDateField(prefix, "From", row.date_from || row.date);
+  setMeterBillsDateField(prefix, "To", row.date_to || row.date);
+  const desc = document.getElementById(`${prefix}Description`);
+  const current = document.getElementById(`${prefix}CurrentMeter`);
+  const previous = document.getElementById(`${prefix}PreviousMeter`);
+  const price = document.getElementById(`${prefix}PricePerM3`);
+  if (desc) desc.value = row.description || "";
+  if (current) current.value = row.current_meter_reading ?? 0;
+  if (previous) previous.value = row.previous_meter_reading ?? 0;
+  if (price) price.value = row.price_per_m3 ?? 0;
+  updateMeterBillsFormCalc(prefix);
+}
+
+function meterBillsPeriodDatesFromForm(prefix) {
+  const dateFrom = document.getElementById(`${prefix}DateFromDisplay`)?.value?.trim() || "";
+  const dateTo = document.getElementById(`${prefix}DateToDisplay`)?.value?.trim() || "";
+  if (!isValidDMY(dateFrom)) throw new Error("Date from must be in DD/MM/YYYY format.");
+  if (!isValidDMY(dateTo)) throw new Error("Date to must be in DD/MM/YYYY format.");
+  const fromParts = parseDMYParts(dateFrom);
+  const toParts = parseDMYParts(dateTo);
+  if (fromParts && toParts && compareDMYParts(fromParts, toParts) > 0) {
+    throw new Error("Date from must be on or before Date to.");
+  }
+  return { date_from: dateFrom, date_to: dateTo };
+}
+
+function meterBillsPayloadFromForm(prefix) {
+  const current = Number(document.getElementById(`${prefix}CurrentMeter`)?.value || 0);
+  const previous = Number(document.getElementById(`${prefix}PreviousMeter`)?.value || 0);
+  const price = Number(document.getElementById(`${prefix}PricePerM3`)?.value || 0);
+  if (!Number.isFinite(current) || current < 0) throw new Error("Enter a valid current meter reading.");
+  if (!Number.isFinite(previous) || previous < 0) throw new Error("Enter a valid previous meter reading.");
+  if (current < previous) throw new Error("Current meter reading must be at least the previous reading.");
+  if (!Number.isFinite(price) || price < 0) throw new Error("Enter a valid price per m³.");
+  return {
+    ...meterBillsPeriodDatesFromForm(prefix),
+    current_meter_reading: current,
+    previous_meter_reading: previous,
+    price_per_m3: price,
+  };
+}
+
+function suggestPreviousMeterForNewEntry(prefix, entries, editingId) {
+  if (editingId != null) return;
+  const previousEl = document.getElementById(`${prefix}PreviousMeter`);
+  if (!previousEl || String(previousEl.value || "").trim() !== "") return;
+  const rows = (entries || []).filter((r) => editingId == null || String(r.id) !== String(editingId));
+  const lastReading = latestMeterReadingFromEntries(rows);
+  if (lastReading != null) previousEl.value = String(lastReading);
+  updateMeterBillsFormCalc(prefix);
+}
+
 function renderCessAccountsTable() {
   if (!cessAccountsBody) return;
   const rows = sortRowsLatestFirst(state.cessAccountsEntries || []);
@@ -6031,6 +6385,12 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
+  if (isWaterBillsTenant() && page !== "water-bills") {
+    return showPage("water-bills");
+  }
+  if (isElectricityBillsTenant() && page !== "electricity-bills") {
+    return showPage("electricity-bills");
+  }
   if (
     (state.appInstance === "ufaray" || state.appInstance === "amana") &&
     state.user?.role === "owner" &&
@@ -6172,6 +6532,14 @@ function showPage(page) {
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
+  if (page === "water-bills") {
+    renderWaterBillsTable();
+    suggestPreviousMeterForNewEntry("waterBills", state.waterBillsEntries, state.editWaterBillsId);
+  }
+  if (page === "electricity-bills") {
+    renderElectricityBillsTable();
+    suggestPreviousMeterForNewEntry("electricityBills", state.electricityBillsEntries, state.editElectricityBillsId);
+  }
   if (page === "credit") {
     state.activeCreditAccountId = null;
     document.getElementById("credit-dashboard")?.classList.remove("hidden");
@@ -6293,7 +6661,35 @@ async function loadCatalogFromServer() {
   }
 }
 
+async function loadBillsTenantData() {
+  const apiPath = isWaterBillsTenant() ? "/api/water-bills" : "/api/electricity-bills";
+  try {
+    const rows = await api(apiPath);
+    if (isWaterBillsTenant()) {
+      state.waterBillsEntries = Array.isArray(rows) ? rows : [];
+      renderWaterBillsTable();
+      suggestPreviousMeterForNewEntry("waterBills", state.waterBillsEntries, state.editWaterBillsId);
+    } else {
+      state.electricityBillsEntries = Array.isArray(rows) ? rows : [];
+      renderElectricityBillsTable();
+      suggestPreviousMeterForNewEntry("electricityBills", state.electricityBillsEntries, state.editElectricityBillsId);
+    }
+  } catch {
+    if (isWaterBillsTenant()) {
+      state.waterBillsEntries = [];
+      renderWaterBillsTable();
+    } else {
+      state.electricityBillsEntries = [];
+      renderElectricityBillsTable();
+    }
+  }
+}
+
 async function loadAllData() {
+  if (isBillsTenant()) {
+    await loadBillsTenantData();
+    return;
+  }
   const inventoryDraft = captureInventoryFormDraft();
   const salesKgDraft = captureSalesKgFormDraft();
   state.catalog = await loadCatalogFromServer();
@@ -6522,6 +6918,18 @@ document.getElementById("openUfarayBtn")?.addEventListener("click", () => {
   showLoginCard();
 });
 
+document.getElementById("openWaterBillsBtn")?.addEventListener("click", () => {
+  state.appInstance = "water-bills";
+  persistAppInstance();
+  showLoginCard();
+});
+
+document.getElementById("openElectricityBillsBtn")?.addEventListener("click", () => {
+  state.appInstance = "electricity-bills";
+  persistAppInstance();
+  showLoginCard();
+});
+
 document.getElementById("openRoseBtn")?.addEventListener("click", () => {
   state.appInstance = "rose";
   persistAppInstance();
@@ -6588,21 +6996,7 @@ loginForm.addEventListener("submit", async (event) => {
     state.user = result.user;
     persistAuth();
     showLoggedIn();
-    showPage(
-      state.appInstance === "terry"
-        ? "rose-inventory"
-        : state.appInstance === "cess" ||
-            state.appInstance === "maina-faith-cess" ||
-            state.appInstance === "terry-and-cess"
-          ? "rose-inventory"
-        : state.appInstance === "shop"
-          ? "inventory"
-        : isRecordsTenant()
-          ? "rose-inventory"
-          : state.user.role === "owner"
-            ? "inventory"
-            : "sales-bags"
-    );
+    showPage(defaultPageForLoggedInUser());
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -6852,21 +7246,7 @@ async function boot() {
   }
   try {
     showLoggedIn();
-    showPage(
-      state.appInstance === "terry"
-        ? "rose-inventory"
-        : state.appInstance === "cess" ||
-            state.appInstance === "maina-faith-cess" ||
-            state.appInstance === "terry-and-cess"
-          ? "rose-inventory"
-        : state.appInstance === "shop"
-          ? "inventory"
-        : isRecordsTenant()
-          ? "rose-inventory"
-          : state.user.role === "owner"
-            ? "inventory"
-            : "sales-bags"
-    );
+    showPage(defaultPageForLoggedInUser());
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
@@ -7006,6 +7386,44 @@ if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
 if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
   wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
 }
+const waterBillsDateDisplay = document.getElementById("waterBillsDateDisplay");
+const waterBillsDate = document.getElementById("waterBillsDate");
+const waterBillsOpenCalendarBtn = document.getElementById("waterBillsOpenCalendarBtn");
+if (waterBillsDateDisplay && waterBillsDate && waterBillsOpenCalendarBtn) {
+  wireDatePicker(waterBillsDateDisplay, waterBillsDate, waterBillsOpenCalendarBtn);
+}
+const waterBillsDateFromDisplay = document.getElementById("waterBillsDateFromDisplay");
+const waterBillsDateFrom = document.getElementById("waterBillsDateFrom");
+const waterBillsDateFromOpenCalendarBtn = document.getElementById("waterBillsDateFromOpenCalendarBtn");
+if (waterBillsDateFromDisplay && waterBillsDateFrom && waterBillsDateFromOpenCalendarBtn) {
+  wireDatePicker(waterBillsDateFromDisplay, waterBillsDateFrom, waterBillsDateFromOpenCalendarBtn);
+}
+const waterBillsDateToDisplay = document.getElementById("waterBillsDateToDisplay");
+const waterBillsDateTo = document.getElementById("waterBillsDateTo");
+const waterBillsDateToOpenCalendarBtn = document.getElementById("waterBillsDateToOpenCalendarBtn");
+if (waterBillsDateToDisplay && waterBillsDateTo && waterBillsDateToOpenCalendarBtn) {
+  wireDatePicker(waterBillsDateToDisplay, waterBillsDateTo, waterBillsDateToOpenCalendarBtn);
+}
+const electricityBillsDateDisplay = document.getElementById("electricityBillsDateDisplay");
+const electricityBillsDate = document.getElementById("electricityBillsDate");
+const electricityBillsOpenCalendarBtn = document.getElementById("electricityBillsOpenCalendarBtn");
+if (electricityBillsDateDisplay && electricityBillsDate && electricityBillsOpenCalendarBtn) {
+  wireDatePicker(electricityBillsDateDisplay, electricityBillsDate, electricityBillsOpenCalendarBtn);
+}
+const electricityBillsDateFromDisplay = document.getElementById("electricityBillsDateFromDisplay");
+const electricityBillsDateFrom = document.getElementById("electricityBillsDateFrom");
+const electricityBillsDateFromOpenCalendarBtn = document.getElementById("electricityBillsDateFromOpenCalendarBtn");
+if (electricityBillsDateFromDisplay && electricityBillsDateFrom && electricityBillsDateFromOpenCalendarBtn) {
+  wireDatePicker(electricityBillsDateFromDisplay, electricityBillsDateFrom, electricityBillsDateFromOpenCalendarBtn);
+}
+const electricityBillsDateToDisplay = document.getElementById("electricityBillsDateToDisplay");
+const electricityBillsDateTo = document.getElementById("electricityBillsDateTo");
+const electricityBillsDateToOpenCalendarBtn = document.getElementById("electricityBillsDateToOpenCalendarBtn");
+if (electricityBillsDateToDisplay && electricityBillsDateTo && electricityBillsDateToOpenCalendarBtn) {
+  wireDatePicker(electricityBillsDateToDisplay, electricityBillsDateTo, electricityBillsDateToOpenCalendarBtn);
+}
+wireMeterBillsFormCalc("waterBills");
+wireMeterBillsFormCalc("electricityBills");
 if (hadifaAccDateDisplay && hadifaAccDate && hadifaAccOpenCalendarBtn) {
   wireDatePicker(hadifaAccDateDisplay, hadifaAccDate, hadifaAccOpenCalendarBtn);
 }
@@ -7903,6 +8321,8 @@ document.getElementById("gasClearBtn")?.addEventListener("click", resetGasForm);
 document.getElementById("expClearBtn")?.addEventListener("click", resetExpenditureForm);
 document.getElementById("roseClearBtn")?.addEventListener("click", resetRoseForm);
 document.getElementById("cessAccClearBtn")?.addEventListener("click", resetCessAccountsForm);
+document.getElementById("waterBillsClearBtn")?.addEventListener("click", resetWaterBillsForm);
+document.getElementById("electricityBillsClearBtn")?.addEventListener("click", resetElectricityBillsForm);
 document.getElementById("nahashonClearBtn")?.addEventListener("click", resetNahashonForm);
 
 fdForm?.addEventListener("submit", async (event) => {
@@ -8138,6 +8558,64 @@ cessAccountsForm?.addEventListener("submit", async (event) => {
     }
     resetCessAccountsForm();
     await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+document.getElementById("water-bills-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = document.getElementById("waterBillsDateDisplay")?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  let meterFields;
+  try {
+    meterFields = meterBillsPayloadFromForm("waterBills");
+  } catch (err) {
+    return alert(err.message);
+  }
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("waterBillsDescription")?.value || "").trim(),
+    ...meterFields,
+  };
+  try {
+    if (state.editWaterBillsId) {
+      await api(`/api/water-bills/${state.editWaterBillsId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/water-bills", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetWaterBillsForm();
+    await loadAllData();
+    suggestPreviousMeterForNewEntry("waterBills", state.waterBillsEntries, null);
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+document.getElementById("electricity-bills-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = document.getElementById("electricityBillsDateDisplay")?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  let meterFields;
+  try {
+    meterFields = meterBillsPayloadFromForm("electricityBills");
+  } catch (err) {
+    return alert(err.message);
+  }
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("electricityBillsDescription")?.value || "").trim(),
+    ...meterFields,
+  };
+  try {
+    if (state.editElectricityBillsId) {
+      await api(`/api/electricity-bills/${state.editElectricityBillsId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/electricity-bills", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetElectricityBillsForm();
+    await loadAllData();
+    suggestPreviousMeterForNewEntry("electricityBills", state.electricityBillsEntries, null);
   } catch (error) {
     alert(error.message);
   }
@@ -9385,6 +9863,60 @@ roseBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/rose/inventory/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+document.getElementById("water-bills-body")?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "water-bills") return;
+  const row = state.waterBillsEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editWaterBillsId = row.id;
+    fillMeterBillsFormFromRow("waterBills", row);
+    const saveBtn = document.getElementById("waterBillsSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/water-bills/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+document.getElementById("electricity-bills-body")?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "electricity-bills") return;
+  const row = state.electricityBillsEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editElectricityBillsId = row.id;
+    fillMeterBillsFormFromRow("electricityBills", row);
+    const saveBtn = document.getElementById("electricityBillsSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/electricity-bills/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);

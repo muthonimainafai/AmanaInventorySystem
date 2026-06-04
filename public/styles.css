@@ -343,6 +343,44 @@ h1 {
   box-shadow: 0 6px 14px rgba(13, 110, 253, 0.22);
 }
 
+#landingCard #openWaterBillsBtn {
+  background: linear-gradient(135deg, #0dcaf0, #0aa2c0);
+  box-shadow: 0 6px 14px rgba(13, 202, 240, 0.28);
+}
+
+#landingCard #openElectricityBillsBtn {
+  background: linear-gradient(135deg, #fd7e14, #e8590c);
+  box-shadow: 0 6px 14px rgba(253, 126, 20, 0.28);
+}
+
+body.water-bills-theme {
+  background: #f0f8ff;
+  color: #1a2a3a;
+}
+
+body.water-bills-theme .page-title {
+  color: #0d4a9e;
+}
+
+body.water-bills-theme .nav-tab.active {
+  background: #0d6efd;
+  color: #fff;
+}
+
+body.electricity-bills-theme {
+  background: #fff8f0;
+  color: #3a2a1a;
+}
+
+body.electricity-bills-theme .page-title {
+  color: #b35c00;
+}
+
+body.electricity-bills-theme .nav-tab.active {
+  background: #e67e00;
+  color: #fff;
+}
+
 body.ufaray-theme {
   background: #f6f2ff;
   color: #25123f;

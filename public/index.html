@@ -38,6 +38,14 @@
             <span class="portal-option-title">Ufaray Feeds</span>
             <span class="portal-option-sub">Fresh copy with same features and empty data</span>
           </button>
+          <button type="button" id="openWaterBillsBtn" class="portal-option">
+            <span class="portal-option-title">Water Bills</span>
+            <span class="portal-option-sub">Track water bill payments with separate data and login</span>
+          </button>
+          <button type="button" id="openElectricityBillsBtn" class="portal-option">
+            <span class="portal-option-title">Electricity Bills</span>
+            <span class="portal-option-sub">Track electricity bill payments with separate data and login</span>
+          </button>
           <button type="button" class="secondary portal-option" id="openVehicleBtn">
             <span class="portal-option-title">Vehicle Inventory</span>
             <span class="portal-option-sub">Fleet stock and vehicle operations module</span>
@@ -70,7 +78,7 @@
         </form>
         <p class="hint">
           Use the <strong>owner</strong> and <strong>staff</strong> accounts defined in your server
-          <code>.env</code> file (<code>AMANA_*</code>, <code>NAHAH_*</code>, <code>ROSE_*</code>, <code>UFARAY_*</code>). See
+          <code>.env</code> file (<code>AMANA_*</code>, <code>NAHAH_*</code>, <code>ROSE_*</code>, <code>UFARAY_*</code>, <code>WATER_BILLS_*</code>, <code>ELECTRICITY_BILLS_*</code>). See
           <code>env.example</code> in the project folder.
         </p>
       </section>
@@ -135,6 +143,8 @@
           <button type="button" class="nav-tab" data-page="rose-inventory" id="roseInventoryTabLabel">Rose Inventory</button>
           <button type="button" class="nav-tab" data-page="nahashon-records" id="nahashonRecordsTab">Nahashon Records</button>
           <button type="button" class="nav-tab" data-page="cess-accounts" id="cessAccountsTab">Cess Accounts</button>
+          <button type="button" class="nav-tab hidden" data-page="water-bills" id="waterBillsTab">Water Bills</button>
+          <button type="button" class="nav-tab hidden" data-page="electricity-bills" id="electricityBillsTab">Electricity Bills</button>
           <button type="button" class="nav-tab" data-page="credit" id="creditTab">Credit</button>
           <button type="button" class="nav-tab" data-page="pigs">Pigs Page</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
@@ -1681,6 +1691,198 @@
                     <th id="nahashonTotalMoneyOut">0</th>
                     <th id="nahashonTotalMortality">0</th>
                     <th>—</th>
+                    <th>—</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-water-bills" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Water Bills</h3>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. Balance and total billing are cumulative amounts due.</p>
+            <form id="water-bills-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="waterBillsDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="waterBillsOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="waterBillsDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label class="date-field">
+                  <span class="date-field-label">Date from (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="waterBillsDateFromDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="waterBillsDateFromOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="waterBillsDateFrom" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label class="date-field">
+                  <span class="date-field-label">Date to (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="waterBillsDateToDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="waterBillsDateToOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="waterBillsDateTo" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="waterBillsDescription" />
+                </label>
+                <label>
+                  Current meter reading (m³)
+                  <input type="number" id="waterBillsCurrentMeter" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Previous meter reading (m³)
+                  <input type="number" id="waterBillsPreviousMeter" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Units used (m³)
+                  <input type="text" id="waterBillsUnitsUsed" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Price per m³
+                  <input type="number" id="waterBillsPricePerM3" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Current billing (Ksh)
+                  <input type="text" id="waterBillsCurrentBilling" readonly tabindex="-1" />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="waterBillsSaveBtn">Save entry</button>
+                <button type="button" class="secondary" id="waterBillsClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Date</th>
+                    <th>Date from</th>
+                    <th>Date to</th>
+                    <th>Description</th>
+                    <th>Current meter (m³)</th>
+                    <th>Previous meter (m³)</th>
+                    <th>Units used (m³)</th>
+                    <th>Price per m³</th>
+                    <th>Current billing (Ksh)</th>
+                    <th>Balance</th>
+                    <th>Total billing</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="water-bills-body"><tr><td colspan="13" class="empty">No records.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="9">Total</th>
+                    <th id="waterBillsTotalCurrentBilling">0</th>
+                    <th id="waterBillsTotalBalance">0</th>
+                    <th id="waterBillsTotalBilling">0</th>
+                    <th>—</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-electricity-bills" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Electricity Bills</h3>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. Balance and total billing are cumulative amounts due.</p>
+            <form id="electricity-bills-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="electricityBillsDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="electricityBillsOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="electricityBillsDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label class="date-field">
+                  <span class="date-field-label">Date from (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="electricityBillsDateFromDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="electricityBillsDateFromOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="electricityBillsDateFrom" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label class="date-field">
+                  <span class="date-field-label">Date to (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="electricityBillsDateToDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="electricityBillsDateToOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="electricityBillsDateTo" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="electricityBillsDescription" />
+                </label>
+                <label>
+                  Current meter reading (m³)
+                  <input type="number" id="electricityBillsCurrentMeter" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Previous meter reading (m³)
+                  <input type="number" id="electricityBillsPreviousMeter" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Units used (m³)
+                  <input type="text" id="electricityBillsUnitsUsed" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Price per m³
+                  <input type="number" id="electricityBillsPricePerM3" min="0" step="0.01" required />
+                </label>
+                <label>
+                  Current billing (Ksh)
+                  <input type="text" id="electricityBillsCurrentBilling" readonly tabindex="-1" />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="electricityBillsSaveBtn">Save entry</button>
+                <button type="button" class="secondary" id="electricityBillsClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Date</th>
+                    <th>Date from</th>
+                    <th>Date to</th>
+                    <th>Description</th>
+                    <th>Current meter (m³)</th>
+                    <th>Previous meter (m³)</th>
+                    <th>Units used (m³)</th>
+                    <th>Price per m³</th>
+                    <th>Current billing (Ksh)</th>
+                    <th>Balance</th>
+                    <th>Total billing</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="electricity-bills-body"><tr><td colspan="13" class="empty">No records.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="9">Total</th>
+                    <th id="electricityBillsTotalCurrentBilling">0</th>
+                    <th id="electricityBillsTotalBalance">0</th>
+                    <th id="electricityBillsTotalBilling">0</th>
                     <th>—</th>
                   </tr>
                 </tfoot>
