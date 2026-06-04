@@ -2156,12 +2156,24 @@ function ensureJsPdfReady() {
     return null;
   }
   const probe = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
-  const autoTableFn = probe.autoTable || jsPdfNs?.autoTable;
-  if (typeof autoTableFn !== "function") {
+  if (typeof probe.autoTable !== "function" && typeof jsPdfNs?.autoTable !== "function") {
     alert("PDF table helper is not loaded. Refresh and try again.");
     return null;
   }
-  return { jsPdfNs, JsPdfCtor, autoTableFn };
+  return { jsPdfNs, JsPdfCtor };
+}
+
+/** jspdf-autotable: use doc.autoTable(options) or jsPDF.autoTable(doc, options). */
+function runPdfAutoTable(doc, jsPdfNs, options) {
+  if (typeof doc.autoTable === "function") {
+    doc.autoTable(options);
+    return;
+  }
+  if (typeof jsPdfNs?.autoTable === "function") {
+    jsPdfNs.autoTable(doc, options);
+    return;
+  }
+  throw new Error("PDF table helper is not available.");
 }
 
 function pdfBusinessTitle() {
@@ -2228,7 +2240,6 @@ function downloadStandardPageTablePdf({ pageTitle, subtitle, filename, sections,
   const doc = new JsPdfCtor({ orientation: landscape ? "landscape" : "portrait", unit: "pt", format: "a4" });
   const margin = 36;
   const pageW = doc.internal.pageSize.getWidth();
-  const autoFn = doc.autoTable || jsPdfNs?.autoTable;
   let y = drawStandardPagePdfHeader(doc, { pageTitle, subtitle });
   const billTo = String(billToText || "").trim();
   if (billTo) {
@@ -2257,7 +2268,7 @@ function downloadStandardPageTablePdf({ pageTitle, subtitle, filename, sections,
       doc.text(sec.title, margin, y);
       y += 14;
     }
-    autoFn.call(doc, {
+    runPdfAutoTable(doc, jsPdfNs, {
       startY: y,
       head: [sec.headers],
       body: sec.body,
@@ -2301,16 +2312,64 @@ function meterBillsPdfBillToText(entries) {
   return names.join("\n");
 }
 
+function meterBillsPdfSectionsFromEntries(entries, sectionTitle) {
+  const rows = sortRowsLatestFirst(entries || []);
+  const headers = [
+    "No",
+    "Billing month from",
+    "Billing month to",
+    "Bill to",
+    "Current meter (m³)",
+    "Previous meter (m³)",
+    "Units used (m³)",
+    "Price per m³",
+    "Current billing (Ksh)",
+    "Balance",
+    "Total billing",
+  ];
+  const body = rows.map((row, idx) => [
+    String(idx + 1),
+    formatBillingMonthDisplay(row.date_from),
+    formatBillingMonthDisplay(row.date_to),
+    String(row.bill_to || "").trim() || "—",
+    String(Number(row.current_meter_reading || 0)),
+    String(Number(row.previous_meter_reading || 0)),
+    String(Number(row.units_used || 0)),
+    String(Number(row.price_per_m3 || 0)),
+    currency(Number(row.current_billing || 0)),
+    currency(Number(row.balance || 0)),
+    currency(Number(row.total_billing || 0)),
+  ]);
+  if (rows.length) {
+    let sumCurrentBilling = 0;
+    let lastBalance = 0;
+    let lastTotalBilling = 0;
+    const chronological = [...rows].sort((a, b) => {
+      const ak = billingMonthKey(parseBillingMonthValue(a?.date_to || a?.date_from || a?.date));
+      const bk = billingMonthKey(parseBillingMonthValue(b?.date_to || b?.date_from || b?.date));
+      if (ak !== bk) return ak - bk;
+      return Number(a?.id || 0) - Number(b?.id || 0);
+    });
+    for (const row of chronological) {
+      sumCurrentBilling += Number(row.current_billing || 0);
+      lastBalance = Number(row.balance || 0);
+      lastTotalBilling = Number(row.total_billing || 0);
+    }
+    body.push([
+      { content: "Total", colSpan: 8, styles: { fontStyle: "bold", halign: "right" } },
+      { content: currency(sumCurrentBilling), styles: { fontStyle: "bold" } },
+      { content: currency(lastBalance), styles: { fontStyle: "bold" } },
+      { content: currency(lastTotalBilling), styles: { fontStyle: "bold" } },
+    ]);
+  }
+  return [{ title: sectionTitle, headers, body }];
+}
+
 function downloadMeterBillsPagePdf() {
   const page = state.currentPage;
   const pageTitle = PAGE_HEADINGS[page] || "Bills";
-  const pageEl = document.getElementById(`page-${page}`);
-  if (!pageEl) {
-    alert("Nothing to export on this page.");
-    return;
-  }
   const entries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
-  const sections = pdfSectionsFromPageElement(pageEl);
+  const sections = meterBillsPdfSectionsFromEntries(entries, pageTitle);
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   downloadStandardPageTablePdf({
     pageTitle,
@@ -2400,9 +2459,8 @@ function downloadBalancePagePdf() {
   const { jsPdfNs, JsPdfCtor } = ctx;
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
   const margin = 36;
-  const autoFn = doc.autoTable || jsPdfNs?.autoTable;
   let y = drawStandardPagePdfHeader(doc, { pageTitle: "Balance", subtitle: calendarMonthCycleLabel(today) });
-  autoFn.call(doc, {
+  runPdfAutoTable(doc, jsPdfNs, {
     startY: y,
     head: [["Item", "Amount"]],
     body: [
@@ -2536,7 +2594,7 @@ function stripHtmlForPdf(html) {
 }
 
 /** Generates a PDF snapshot of the Monthly Report for the currently selected month. */
-function appendMonthlyReportPdfTable(doc, autoTableFn, { margin, tableW, G, title, head, body, startY, columnStyles }) {
+function appendMonthlyReportPdfTable(doc, jsPdfNs, { margin, tableW, G, title, head, body, startY, columnStyles }) {
   let y = startY;
   if (y > 700) {
     doc.addPage();
@@ -2547,7 +2605,7 @@ function appendMonthlyReportPdfTable(doc, autoTableFn, { margin, tableW, G, titl
   doc.setFontSize(12);
   doc.text(title, margin, y);
   y += 6;
-  autoTableFn.call(doc, {
+  runPdfAutoTable(doc, jsPdfNs, {
     head: [head],
     body,
     startY: y + 6,
@@ -2590,11 +2648,6 @@ function downloadMonthlyReportPdf() {
   const safeMonth = (ym || "").replace(/-/g, "");
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
-  const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
-  if (typeof autoTableFn !== "function") {
-    alert("PDF table helper is not loaded. Refresh and try again.");
-    return;
-  }
 
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
@@ -2658,7 +2711,7 @@ function downloadMonthlyReportPdf() {
           ];
         });
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2684,7 +2737,7 @@ function downloadMonthlyReportPdf() {
           `Ksh${formatKshPlainNumber(row.revenue)}`,
         ]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2709,7 +2762,7 @@ function downloadMonthlyReportPdf() {
           `Ksh${formatKshPlainNumber(row.revenue)}`,
         ]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2731,7 +2784,7 @@ function downloadMonthlyReportPdf() {
           `Ksh${formatKshPlainNumber(row.profit)}`,
         ]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2752,7 +2805,7 @@ function downloadMonthlyReportPdf() {
           `Ksh${formatKshPlainNumber(row.revenue)}`,
         ]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2773,7 +2826,7 @@ function downloadMonthlyReportPdf() {
           `Ksh${formatKshPlainNumber(row.revenue)}`,
         ]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2794,7 +2847,7 @@ function downloadMonthlyReportPdf() {
           `Ksh${formatKshPlainNumber(row.revenue)}`,
         ]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -2810,7 +2863,7 @@ function downloadMonthlyReportPdf() {
       ? [["—", `No expenditure for ${monthName}.`]]
       : expAgg.byCategory.map((row) => [row.category, `Ksh${formatKshPlainNumber(row.amount)}`]);
 
-  y = appendMonthlyReportPdfTable(doc, autoTableFn, {
+  y = appendMonthlyReportPdfTable(doc, jsPdfNs, {
     margin,
     tableW,
     G,
@@ -6267,8 +6320,7 @@ function downloadChickenSalesPdf() {
     return;
   }
   const autoTableCheck = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
-  const autoTableFn = autoTableCheck.autoTable || jsPdfNs?.autoTable;
-  if (typeof autoTableFn !== "function") {
+  if (typeof autoTableCheck.autoTable !== "function" && typeof jsPdfNs?.autoTable !== "function") {
     alert("PDF table helper is not loaded. Refresh and try again.");
     return;
   }
@@ -7897,8 +7949,7 @@ async function downloadCalcChickenProformaPdf() {
   const logoMeta = await loadCalculatorPdfLogo("proforma");
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
-  const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
-  if (typeof autoTableFn !== "function") {
+  if (typeof doc.autoTable !== "function" && typeof jsPdfNs?.autoTable !== "function") {
     alert("PDF table helper is not loaded. Refresh and try again.");
     return;
   }
@@ -7949,7 +8000,7 @@ async function downloadCalcChickenProformaPdf() {
   const desc = `${row.breed} DAY-OLD CHICKS`.replace(/\s+/g, " ").trim().toUpperCase();
   const tableBody = [[desc, String(row.qtyNum), `Ksh${formatKshPlainNumber(row.unitPrice)}`, `Ksh${formatKshPlainNumber(row.lineTotal)}`]];
 
-  autoTableFn.call(doc, {
+  runPdfAutoTable(doc, jsPdfNs, {
     head: [["DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]],
     body: tableBody,
     startY: headerBottom,
@@ -8095,8 +8146,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   const logoMeta = await loadCalculatorPdfLogo(mode);
 
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
-  const autoTableFn = doc.autoTable || jsPdfNs?.autoTable;
-  if (typeof autoTableFn !== "function") {
+  if (typeof doc.autoTable !== "function" && typeof jsPdfNs?.autoTable !== "function") {
     alert("PDF table helper is not loaded. Refresh and try again.");
     return;
   }
@@ -8162,7 +8212,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
     if (filledRows.length) {
       const head = [["Brand", "Feed Type", "Bag Size (kg)", "Number of bags", "Buying price (per bag)", "Total (purchase cost)"]];
       const body = filledRows.map((r) => [r.brand, r.feedType, r.bagSize, r.bags, r.buying, r.total]);
-      autoTableFn.call(doc, {
+      runPdfAutoTable(doc, jsPdfNs, {
         head,
         body,
         startY: tableStartY,
@@ -8184,7 +8234,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
         currency(chickenRow.unitPrice),
         currency(chickenRow.lineTotal),
       ]];
-      autoTableFn.call(doc, {
+      runPdfAutoTable(doc, jsPdfNs, {
         head: chHead,
         body: chBody,
         startY: tableStartY + 8,
@@ -8291,7 +8341,7 @@ async function downloadCalculatorPdf(mode = "calculator") {
   });
   appendChickenRowToPdfTableBody(tableBody);
 
-  autoTableFn.call(doc, {
+  runPdfAutoTable(doc, jsPdfNs, {
     head: [[
       "DESCRIPTION",
       "QTY",
