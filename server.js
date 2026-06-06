@@ -4744,19 +4744,23 @@ function parseMeterBillsEntryBody(p) {
   };
 }
 
-/** Recompute running balance and cumulative total billing (chronological by date, then id). */
-async function recomputeMeterBillsBalances(tableName) {
-  const rows = await all(`SELECT id, current_billing FROM ${tableName} ORDER BY date ASC, id ASC`);
-  let cumulative = 0;
-  for (const row of rows) {
-    cumulative += Number(row.current_billing) || 0;
-    const cumulativeRounded = roundMoney(cumulative);
-    await run(`UPDATE ${tableName} SET balance = ?, total_billing = ? WHERE id = ?`, [
-      cumulativeRounded,
-      cumulativeRounded,
-      row.id,
-    ]);
+function parseMeterBillsBalanceFromBody(p, isOwner) {
+  if (!isOwner) return null;
+  const raw = p?.balance;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return 0;
+  try {
+    return parseRoseNonNegativeField(raw, "Balance");
+  } catch (error) {
+    const err = new Error(error.message || "Invalid balance.");
+    err.status = 400;
+    throw err;
   }
+}
+
+function meterBillsTotalsFromEntry(currentBilling, balance) {
+  const bal = roundMoney(Number(balance) || 0);
+  const totalBilling = roundMoney((Number(currentBilling) || 0) + bal);
+  return { balance: bal, totalBilling };
 }
 
 function mountBillsEntriesApi(routeSlug, tableName) {
@@ -4775,12 +4779,15 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     } catch (error) {
       return res.status(error.status || 400).json({ error: error.message });
     }
+    const isOwner = req.user.role === "owner";
+    const balance = isOwner ? parseMeterBillsBalanceFromBody(req.body, true) : 0;
+    const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance);
     const nowIso = new Date().toISOString();
     await run(
       `INSERT INTO ${tableName}
        (date, date_from, date_to, bill_to, description, current_meter_reading, previous_meter_reading, units_used, price_per_m3,
         current_billing, balance, total_billing, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         parsed.dateCanon,
         parsed.dateFrom,
@@ -4792,12 +4799,13 @@ function mountBillsEntriesApi(routeSlug, tableName) {
         parsed.unitsUsed,
         parsed.pricePerM3,
         parsed.currentBilling,
+        totals.balance,
+        totals.totalBilling,
         req.user.username,
         nowIso,
         nowIso,
       ]
     );
-    await recomputeMeterBillsBalances(tableName);
     res.json({ ok: true });
   });
   app.put(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
@@ -4813,10 +4821,17 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     } catch (error) {
       return res.status(error.status || 400).json({ error: error.message });
     }
+    const isOwner = req.user.role === "owner";
+    let balance = Number(existing.balance) || 0;
+    if (isOwner) {
+      const parsedBalance = parseMeterBillsBalanceFromBody(req.body, true);
+      balance = parsedBalance == null ? balance : parsedBalance;
+    }
+    const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance);
     await run(
       `UPDATE ${tableName}
        SET date = ?, date_from = ?, date_to = ?, bill_to = ?, description = ?, current_meter_reading = ?, previous_meter_reading = ?,
-           units_used = ?, price_per_m3 = ?, current_billing = ?, updated_at = ?
+           units_used = ?, price_per_m3 = ?, current_billing = ?, balance = ?, total_billing = ?, updated_at = ?
        WHERE id = ?`,
       [
         parsed.dateCanon,
@@ -4829,11 +4844,12 @@ function mountBillsEntriesApi(routeSlug, tableName) {
         parsed.unitsUsed,
         parsed.pricePerM3,
         parsed.currentBilling,
+        totals.balance,
+        totals.totalBilling,
         new Date().toISOString(),
         id,
       ]
     );
-    await recomputeMeterBillsBalances(tableName);
     res.json({ ok: true });
   });
   app.delete(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
@@ -4845,7 +4861,6 @@ function mountBillsEntriesApi(routeSlug, tableName) {
             req.user.username,
           ]);
     if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
-    await recomputeMeterBillsBalances(tableName);
     res.json({ ok: true });
   });
 }

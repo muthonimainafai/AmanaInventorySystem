@@ -1703,7 +1703,7 @@
         <div id="page-water-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Water Bills</h3>
-            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. Balance and total billing are cumulative amounts due.</p>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner may enter a pending balance from before; total billing = current billing + balance.</p>
             <form id="water-bills-form">
               <div class="grid meter-bills-form-grid">
                 <label class="billing-month-field">
@@ -1743,6 +1743,14 @@
                 <label>
                   Current billing (Ksh)
                   <input type="text" id="waterBillsCurrentBilling" readonly tabindex="-1" />
+                </label>
+                <label class="owner-only-meter-balance-field hidden">
+                  Balance (Ksh) — pending from before
+                  <input type="number" id="waterBillsBalance" min="0" step="0.01" value="0" />
+                </label>
+                <label>
+                  Total billing (Ksh)
+                  <input type="text" id="waterBillsTotalBilling" readonly tabindex="-1" />
                 </label>
               </div>
               <div class="actions">
@@ -1788,7 +1796,7 @@
         <div id="page-electricity-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Electricity Bills</h3>
-            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. Balance and total billing are cumulative amounts due.</p>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner may enter a pending balance from before; total billing = current billing + balance.</p>
             <form id="electricity-bills-form">
               <div class="grid meter-bills-form-grid">
                 <label class="billing-month-field">
@@ -1828,6 +1836,14 @@
                 <label>
                   Current billing (Ksh)
                   <input type="text" id="electricityBillsCurrentBilling" readonly tabindex="-1" />
+                </label>
+                <label class="owner-only-meter-balance-field hidden">
+                  Balance (Ksh) — pending from before
+                  <input type="number" id="electricityBillsBalance" min="0" step="0.01" value="0" />
+                </label>
+                <label>
+                  Total billing (Ksh)
+                  <input type="text" id="electricityBillsTotalBilling" readonly tabindex="-1" />
                 </label>
               </div>
               <div class="actions">
@@ -2604,6 +2620,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-27-bills-invoice-pdf"></script>
+    <script src="app.js?v=2026-05-27-bills-pdf-fields"></script>
   </body>
 </html>

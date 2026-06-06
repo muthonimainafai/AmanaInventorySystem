@@ -2542,30 +2542,6 @@ function meterBillsPdfBillToText(entries) {
 
 const METER_BILLS_PDF_PAYMENT_LINE = "Send Money to 0114 784 478";
 
-function meterBillsChronologicalEntries(entries) {
-  return [...(entries || [])].sort((a, b) => {
-    const ak = billingMonthKey(parseBillingMonthValue(a?.date_to || a?.date_from || a?.date));
-    const bk = billingMonthKey(parseBillingMonthValue(b?.date_to || b?.date_from || b?.date));
-    if (ak !== bk) return ak - bk;
-    return Number(a?.id || 0) - Number(b?.id || 0);
-  });
-}
-
-function meterBillsBalanceBroughtForward(row, chronological) {
-  const idx = chronological.findIndex((r) => Number(r.id) === Number(row.id));
-  if (idx <= 0) return 0;
-  return Number(chronological[idx - 1].total_billing || 0);
-}
-
-function meterBillsBillingPeriodLabel(row) {
-  const from = formatBillingMonthDisplay(row.date_from);
-  const to = formatBillingMonthDisplay(row.date_to);
-  if (from === "—" && to === "—") return "—";
-  if (from === to || from === "—") return to;
-  if (to === "—") return from;
-  return `${from} – ${to}`;
-}
-
 function formatBillDateShort(dmy) {
   const parts = parseDMYParts(dmy);
   if (!parts) return "—";
@@ -2606,7 +2582,7 @@ function drawMeterBillsInvoiceInfoGrid(doc, { margin, pageW, startY, rows }) {
   return y + 4;
 }
 
-function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, chronological, pageIndex, pageCount }) {
+function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, pageIndex, pageCount }) {
   const margin = 36;
   const pageW = doc.internal.pageSize.getWidth();
   const rightX = pageW - margin;
@@ -2624,7 +2600,6 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   y += 22;
 
   const billTo = String(row.bill_to || "").trim() || "—";
-  const billingPeriod = meterBillsBillingPeriodLabel(row);
   const billDate = row.date ? formatBillDateShort(row.date) : "—";
   y = drawMeterBillsInvoiceInfoGrid(doc, {
     margin,
@@ -2633,11 +2608,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
     rows: [
       [
         { label: "Bill To", value: billTo },
-        { label: "Billing period", value: billingPeriod },
-      ],
-      [
         { label: "Billing month from", value: formatBillingMonthDisplay(row.date_from) },
-        { label: "Billing month to", value: formatBillingMonthDisplay(row.date_to) },
       ],
       [{ label: "Bill date", value: billDate }, null],
     ],
@@ -2649,7 +2620,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   doc.text("Meter readings & charges", margin, y);
   y += 12;
 
-  const balanceBf = meterBillsBalanceBroughtForward(row, chronological);
+  const balanceBf = Number(row.balance || 0);
   const prevReading = Number(row.previous_meter_reading || 0);
   const currReading = Number(row.current_meter_reading || 0);
   const unitsUsed = Number(row.units_used || 0);
@@ -2765,7 +2736,6 @@ function downloadMeterBillsPagePdf() {
   const serviceItem = page === "electricity-bills" ? "Electricity" : "Water";
   const entries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
   const rows = sortRowsLatestFirst(entries || []);
-  const chronological = meterBillsChronologicalEntries(entries);
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   const filename = `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`;
   const { jsPdfNs, JsPdfCtor } = ctx;
@@ -2791,7 +2761,6 @@ function downloadMeterBillsPagePdf() {
     drawMeterBillsInvoicePage(doc, jsPdfNs, row, {
       pageTitle,
       serviceItem,
-      chronological,
       pageIndex: idx + 1,
       pageCount,
     });
@@ -4332,6 +4301,7 @@ function showLoggedIn() {
   if (medSaveBtn) medSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
   const gasSaveBtn = document.getElementById("gasSaveBtn");
   if (gasSaveBtn) gasSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
+  applyMeterBillsOwnerBalanceUi();
   // Re-apply tenant-specific visibility after role-based show/hide rules.
   applyAppTheme();
 }
@@ -6139,35 +6109,60 @@ function computeMeterBillsDerived(currentMeter, previousMeter, pricePerM3) {
   return { unitsUsed, currentBilling };
 }
 
+function meterBillsBalanceFromForm(prefix) {
+  if (state.user?.role !== "owner") return 0;
+  const balanceEl = document.getElementById(`${prefix}Balance`);
+  const balance = Number(balanceEl instanceof HTMLInputElement ? balanceEl.value : 0);
+  return Number.isFinite(balance) && balance >= 0 ? balance : 0;
+}
+
 function updateMeterBillsFormCalc(prefix) {
   const currentEl = document.getElementById(`${prefix}CurrentMeter`);
   const previousEl = document.getElementById(`${prefix}PreviousMeter`);
   const priceEl = document.getElementById(`${prefix}PricePerM3`);
   const unitsEl = document.getElementById(`${prefix}UnitsUsed`);
   const billingEl = document.getElementById(`${prefix}CurrentBilling`);
+  const totalEl = document.getElementById(`${prefix}TotalBilling`);
   if (!currentEl || !previousEl || !priceEl || !unitsEl || !billingEl) return;
   const { unitsUsed, currentBilling } = computeMeterBillsDerived(
     currentEl.value,
     previousEl.value,
     priceEl.value
   );
+  const balance = meterBillsBalanceFromForm(prefix);
   if (Number.isFinite(unitsUsed)) {
     unitsEl.value = String(unitsUsed);
     billingEl.value = currency(currentBilling);
+    if (totalEl) totalEl.value = currency(roundMoney(currentBilling + balance));
   } else {
     unitsEl.value = "";
     billingEl.value = "";
+    if (totalEl) totalEl.value = "";
   }
 }
 
 function wireMeterBillsFormCalc(prefix) {
-  const ids = [`${prefix}CurrentMeter`, `${prefix}PreviousMeter`, `${prefix}PricePerM3`];
+  const ids = [`${prefix}CurrentMeter`, `${prefix}PreviousMeter`, `${prefix}PricePerM3`, `${prefix}Balance`];
   for (const id of ids) {
     const el = document.getElementById(id);
     if (!el || el.dataset.meterCalcWired === "1") continue;
     el.dataset.meterCalcWired = "1";
     el.addEventListener("input", () => updateMeterBillsFormCalc(prefix));
   }
+}
+
+function applyMeterBillsOwnerBalanceUi() {
+  const isOwner = state.user?.role === "owner";
+  document.querySelectorAll(".owner-only-meter-balance-field").forEach((el) => {
+    el.classList.toggle("hidden", !isOwner);
+    const input = el.querySelector("input");
+    if (input instanceof HTMLInputElement) {
+      input.disabled = !isOwner;
+      if (!isOwner) input.value = "0";
+    }
+  });
+  updateMeterBillsFormCalc("waterBills");
+  updateMeterBillsFormCalc("electricityBills");
 }
 
 function latestMeterReadingFromEntries(entries) {
@@ -6199,18 +6194,12 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
     return;
   }
   let sumCurrentBilling = 0;
-  let lastBalance = 0;
-  let lastTotalBilling = 0;
-  const chronological = [...rows].sort((a, b) => {
-    const ak = billingMonthKey(parseBillingMonthValue(a?.date_to || a?.date_from || a?.date));
-    const bk = billingMonthKey(parseBillingMonthValue(b?.date_to || b?.date_from || b?.date));
-    if (ak !== bk) return ak - bk;
-    return Number(a?.id || 0) - Number(b?.id || 0);
-  });
-  for (const row of chronological) {
+  let sumBalance = 0;
+  let sumTotalBilling = 0;
+  for (const row of rows) {
     sumCurrentBilling += Number(row.current_billing || 0);
-    lastBalance = Number(row.balance || 0);
-    lastTotalBilling = Number(row.total_billing || 0);
+    sumBalance += Number(row.balance || 0);
+    sumTotalBilling += Number(row.total_billing || 0);
   }
   bodyEl.innerHTML = rows
     .map((row, idx) => {
@@ -6243,12 +6232,12 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
   const totEl = document.getElementById(totalBillingId);
   if (curEl) curEl.textContent = currency(sumCurrentBilling);
   if (balEl) {
-    balEl.textContent = currency(lastBalance);
-    balEl.classList.toggle("cess-acc-balance-negative", lastBalance < 0);
+    balEl.textContent = currency(sumBalance);
+    balEl.classList.toggle("cess-acc-balance-negative", sumBalance < 0);
   }
   if (totEl) {
-    totEl.textContent = currency(lastTotalBilling);
-    totEl.classList.toggle("cess-acc-balance-negative", lastTotalBilling < 0);
+    totEl.textContent = currency(sumTotalBilling);
+    totEl.classList.toggle("cess-acc-balance-negative", sumTotalBilling < 0);
   }
 }
 
@@ -6296,11 +6285,16 @@ function resetWaterBillsForm() {
   clearMeterBillsBillingMonths("waterBills");
   const unitsEl = document.getElementById("waterBillsUnitsUsed");
   const billingEl = document.getElementById("waterBillsCurrentBilling");
+  const balanceEl = document.getElementById("waterBillsBalance");
+  const totalEl = document.getElementById("waterBillsTotalBilling");
   if (unitsEl) unitsEl.value = "";
   if (billingEl) billingEl.value = "";
+  if (balanceEl instanceof HTMLInputElement) balanceEl.value = "0";
+  if (totalEl) totalEl.value = "";
   const saveBtn = document.getElementById("waterBillsSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
   applyEmployeeSalesDateRules();
+  updateMeterBillsFormCalc("waterBills");
 }
 
 function resetElectricityBillsForm() {
@@ -6311,11 +6305,16 @@ function resetElectricityBillsForm() {
   clearMeterBillsBillingMonths("electricityBills");
   const unitsEl = document.getElementById("electricityBillsUnitsUsed");
   const billingEl = document.getElementById("electricityBillsCurrentBilling");
+  const balanceEl = document.getElementById("electricityBillsBalance");
+  const totalEl = document.getElementById("electricityBillsTotalBilling");
   if (unitsEl) unitsEl.value = "";
   if (billingEl) billingEl.value = "";
+  if (balanceEl instanceof HTMLInputElement) balanceEl.value = "0";
+  if (totalEl) totalEl.value = "";
   const saveBtn = document.getElementById("electricityBillsSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
   applyEmployeeSalesDateRules();
+  updateMeterBillsFormCalc("electricityBills");
 }
 
 function fillMeterBillsFormFromRow(prefix, row) {
@@ -6329,6 +6328,10 @@ function fillMeterBillsFormFromRow(prefix, row) {
   if (current) current.value = row.current_meter_reading ?? 0;
   if (previous) previous.value = row.previous_meter_reading ?? 0;
   if (price) price.value = row.price_per_m3 ?? 0;
+  const balanceEl = document.getElementById(`${prefix}Balance`);
+  if (balanceEl instanceof HTMLInputElement && state.user?.role === "owner") {
+    balanceEl.value = String(Number(row.balance) || 0);
+  }
   updateMeterBillsFormCalc(prefix);
 }
 
@@ -6356,7 +6359,7 @@ function meterBillsPayloadFromForm(prefix) {
   if (!Number.isFinite(previous) || previous < 0) throw new Error("Enter a valid previous meter reading.");
   if (current < previous) throw new Error("Current meter reading must be at least the previous reading.");
   if (!Number.isFinite(price) || price < 0) throw new Error("Enter a valid price per m³.");
-  return {
+  const payload = {
     ...meterBillsPeriodDatesFromForm(prefix),
     bill_to: String(document.getElementById(`${prefix}BillTo`)?.value || "").trim(),
     description: "",
@@ -6364,6 +6367,11 @@ function meterBillsPayloadFromForm(prefix) {
     previous_meter_reading: previous,
     price_per_m3: price,
   };
+  if (state.user?.role === "owner") {
+    const balance = meterBillsBalanceFromForm(prefix);
+    payload.balance = balance;
+  }
+  return payload;
 }
 
 function suggestPreviousMeterForNewEntry(prefix, entries, editingId) {
@@ -7168,10 +7176,12 @@ function showPage(page) {
   if (page === "nahashon-records") renderNahashonTable();
   if (page === "cess-accounts") renderCessAccountsTable();
   if (page === "water-bills") {
+    applyMeterBillsOwnerBalanceUi();
     renderWaterBillsTable();
     suggestPreviousMeterForNewEntry("waterBills", state.waterBillsEntries, state.editWaterBillsId);
   }
   if (page === "electricity-bills") {
+    applyMeterBillsOwnerBalanceUi();
     renderElectricityBillsTable();
     suggestPreviousMeterForNewEntry("electricityBills", state.electricityBillsEntries, state.editElectricityBillsId);
   }
