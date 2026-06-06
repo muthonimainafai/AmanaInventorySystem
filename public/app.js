@@ -6156,10 +6156,12 @@ function wireMeterBillsFormCalc(prefix) {
 function applyMeterBillsOwnerBalanceUi() {
   const isOwner = state.user?.role === "owner";
   document.querySelectorAll(".owner-only-meter-balance-field").forEach((el) => {
-    el.classList.toggle("hidden", !isOwner);
+    el.classList.remove("hidden");
     const input = el.querySelector("input[type='number']");
     if (input instanceof HTMLInputElement) {
       input.disabled = !isOwner;
+      input.readOnly = !isOwner;
+      input.placeholder = isOwner ? "Enter amount, if any" : "Owner only";
       if (!isOwner) input.value = "";
     }
   });
