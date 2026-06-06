@@ -2604,7 +2604,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   y += 22;
 
   const billTo = String(row.bill_to || "").trim() || "—";
-  const billDate = row.date ? formatBillDateShort(row.date) : "—";
+  const billDate = formatBillDateShort(state.shopToday || clientShopTodayDMY());
   y = drawMeterBillsInvoiceInfoGrid(doc, {
     margin,
     pageW,
@@ -2612,9 +2612,12 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
     rows: [
       [
         { label: "Bill To", value: billTo },
-        { label: "Billing month from", value: formatBillingMonthDisplay(row.date_from) },
+        { label: "Bill date", value: billDate },
       ],
-      [{ label: "Bill date", value: billDate }, null],
+      [
+        { label: "Billing month from", value: formatBillingMonthDisplay(row.date_from) },
+        { label: "Billing month to", value: formatBillingMonthDisplay(row.date_to) },
+      ],
     ],
   });
 
@@ -4618,7 +4621,7 @@ function parseBillingMonthValue(value) {
     if (month >= 1 && month <= 12 && year >= 1900) return { month, year };
   }
   const parts = parseDMYParts(s);
-  if (parts) return { month: parts.month, year: parts.year };
+  if (parts) return { month: parts.m, year: parts.y };
   const isoMonth = s.match(/^(\d{4})-(\d{2})$/);
   if (isoMonth) {
     const year = Number(isoMonth[1]);
