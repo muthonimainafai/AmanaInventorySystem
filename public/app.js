@@ -4621,7 +4621,11 @@ function parseBillingMonthValue(value) {
     if (month >= 1 && month <= 12 && year >= 1900) return { month, year };
   }
   const parts = parseDMYParts(s);
-  if (parts) return { month: parts.m, year: parts.y };
+  if (parts) {
+    const month = Number(parts.m);
+    const year = Number(parts.y);
+    if (month >= 1 && month <= 12 && year >= 1900) return { month, year };
+  }
   const isoMonth = s.match(/^(\d{4})-(\d{2})$/);
   if (isoMonth) {
     const year = Number(isoMonth[1]);
@@ -4649,8 +4653,10 @@ function billingMonthKey(parts) {
 
 function formatBillingMonthDisplay(value) {
   const parts = parseBillingMonthValue(value);
-  if (!parts) return "—";
-  return `${BILLING_MONTH_NAMES[parts.month - 1]} ${parts.year}`;
+  const month = Number(parts?.month);
+  const year = Number(parts?.year);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || month < 1 || month > 12) return "—";
+  return `${BILLING_MONTH_NAMES[month - 1]} ${year}`;
 }
 
 function wireBillingMonthPicker(monthInput, openBtn) {
