@@ -151,6 +151,7 @@
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="monthly-report">Monthly Report</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="monthly-records">Monthly Records</button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="loan-repayment">Loan Repayment</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="balance">Balance</button>
         </nav>
 
@@ -2436,6 +2437,68 @@
           </div>
         </div>
 
+        <div id="page-loan-repayment" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Loan Repayment</h3>
+            <p class="field-hint">
+              Record money put back into the business for a specific month. This increases the balance on the Balance page and on closed months in Monthly Records. Choose the month the repayment applies to — for example, June for the current month, or May to adjust a month that is already closed.
+            </p>
+            <form id="loan-repayment-form">
+              <div class="grid">
+                <label>
+                  Month
+                  <input type="month" id="loanRepaymentMonth" required />
+                </label>
+                <label>
+                  Repayment amount (KES)
+                  <input type="number" id="loanRepaymentAmount" min="0.01" step="0.01" required />
+                </label>
+                <label>
+                  Note (optional)
+                  <input type="text" id="loanRepaymentNote" placeholder="e.g. Owner capital injection" />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="loanRepaymentSaveBtn">Save repayment</button>
+                <button type="button" class="secondary" id="loanRepaymentClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div id="loanRepaymentPreviewPanel" class="profit-highlight-above-table" aria-live="polite">
+              <div class="profit-highlight-inner">
+                <div class="profit-highlight-text">
+                  <p class="profit-highlight-title" id="loanRepaymentPreviewTitle">Balance preview</p>
+                  <p class="profit-highlight-sub" id="loanRepaymentPreviewSub">Pick a month to see how a repayment affects the balance.</p>
+                </div>
+                <div class="profit-highlight-amount-col">
+                  <span class="profit-highlight-amount" id="loanRepaymentPreviewBalance">KES 0</span>
+                </div>
+              </div>
+              <p class="profit-highlight-example" id="loanRepaymentPreviewMeta"></p>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Repayment history</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Amount</th>
+                    <th>Note</th>
+                    <th>Recorded by</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="loan-repayment-body">
+                  <tr><td colspan="5" class="empty">No loan repayments yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <div id="page-balance" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Balance</h3>
@@ -2444,7 +2507,7 @@
                 <div class="profit-highlight-text">
                   <p class="profit-highlight-title">Remaining balance after daily operational costs</p>
                   <p class="profit-highlight-sub">
-                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for each day of the current calendar month (1st through today), minus this month's recorded expenditure. Accumulated profits reset each month; expenditure records are kept as a permanent statement.
+                    Combined accumulated profits minus <span class="js-balance-daily-op-rate">Ksh 540</span> per day for each day of the current calendar month (1st through today), minus this month's recorded expenditure, plus any loan repayments recorded for this month on the Loan Repayment page. Accumulated profits reset each month; expenditure records are kept as a permanent statement.
                   </p>
                 </div>
                 <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>
@@ -2541,6 +2604,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-06-04-pdf-fix"></script>
+    <script src="app.js?v=2026-05-27-bills-invoice-pdf"></script>
   </body>
 </html>

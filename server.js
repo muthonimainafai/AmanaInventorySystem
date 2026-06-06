@@ -1113,6 +1113,18 @@ async function initDb() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS loan_repayments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      month_key TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
   const accBagsMigrated = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_bags_v1"]);
   if (!accBagsMigrated || accBagsMigrated.value !== "1") {
     await run(`UPDATE inventory SET accumulated_bags = quantity_in_stock`);
@@ -4232,7 +4244,7 @@ async function ensureCurrentBusinessMonth() {
           monthShortLabelFromKey(storedKey),
           snap.combinedProfit,
           snap.expenditure,
-          snap.balance,
+          snap.rawBalance,
           nowIso,
           "system",
         ]
@@ -4323,12 +4335,31 @@ async function computeOwnerBalanceRemaining(monthKey = null) {
   return combined - operational - totalExpenditure;
 }
 
+async function sumLoanRepaymentsForMonth(monthKey) {
+  const row = await get(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM loan_repayments WHERE month_key = ?`,
+    [String(monthKey || "").trim()]
+  );
+  return Number(row?.total) || 0;
+}
+
+async function computeEffectiveOwnerBalance(monthKey = null) {
+  const mk = monthKey || monthKeyFromDMY(todayDMY());
+  const raw = await computeOwnerBalanceRemaining(mk);
+  const loans = await sumLoanRepaymentsForMonth(mk);
+  return roundMoney(raw + loans);
+}
+
 async function computeMonthlyRecordsSnapshot(forMonthKey = null) {
   const monthKey = forMonthKey || monthKeyFromDMY(todayDMY());
+  const rawBalance = roundMoney(await computeOwnerBalanceRemaining(monthKey));
+  const loanRepayment = roundMoney(await sumLoanRepaymentsForMonth(monthKey));
   return {
     combinedProfit: roundMoney(await computeCombinedAccumulatedProfitTotal(monthKey)),
     expenditure: roundMoney(await computeTotalExpenditureMoneyOut(monthKey)),
-    balance: roundMoney(await computeOwnerBalanceRemaining(monthKey)),
+    loanRepayment,
+    rawBalance,
+    balance: roundMoney(rawBalance + loanRepayment),
   };
 }
 
@@ -4960,7 +4991,7 @@ app.post("/api/monthly-records/close", auth, allowRoles("owner"), async (req, re
         error: `${monthShortLabelFromKey(monthKey)} is already closed and saved.`,
       });
     }
-    const snap = await computeMonthlyRecordsSnapshot();
+    const snap = await computeMonthlyRecordsSnapshot(monthKey);
     const nowIso = new Date().toISOString();
     const result = await run(
       `INSERT INTO monthly_records (month_key, month_label, combined_profit, expenditure, balance, closed_at, created_by)
@@ -4970,7 +5001,7 @@ app.post("/api/monthly-records/close", auth, allowRoles("owner"), async (req, re
         monthShortLabelFromKey(monthKey),
         snap.combinedProfit,
         snap.expenditure,
-        snap.balance,
+        snap.rawBalance,
         nowIso,
         req.user.username,
       ]
@@ -4983,7 +5014,7 @@ app.post("/api/monthly-records/close", auth, allowRoles("owner"), async (req, re
         month_label: monthShortLabelFromKey(monthKey),
         combined_profit: snap.combinedProfit,
         expenditure: snap.expenditure,
-        balance: snap.balance,
+        balance: snap.rawBalance,
         closed_at: nowIso,
       },
     });
@@ -4991,6 +5022,126 @@ app.post("/api/monthly-records/close", auth, allowRoles("owner"), async (req, re
     // eslint-disable-next-line no-console
     console.error(err);
     res.status(500).json({ error: err.message || "Could not close monthly records." });
+  }
+});
+
+/* ── Loan Repayments (Amana & Ufaray – owner only) ─────────────────── */
+
+function parseLoanRepaymentMonthKey(val) {
+  const s = String(val || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(s)) return null;
+  const mo = Number(s.slice(5, 7));
+  if (mo < 1 || mo > 12) return null;
+  return s;
+}
+
+function parseLoanRepaymentAmount(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return roundMoney(n);
+}
+
+app.get("/api/loan-repayments", auth, allowRoles("owner"), async (_req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) return res.json([]);
+    const rows = await all("SELECT * FROM loan_repayments ORDER BY month_key DESC, id DESC");
+    res.json(rows);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not load loan repayments." });
+  }
+});
+
+app.get("/api/loan-repayments/balance-preview", auth, allowRoles("owner"), async (req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) {
+      return res.status(400).json({ error: "Loan repayments are only available for Amana and Ufaray." });
+    }
+    let monthKey = parseLoanRepaymentMonthKey(req.query?.month_key);
+    if (!monthKey) monthKey = monthKeyFromDMY(todayDMY());
+    if (!monthKey) return res.status(400).json({ error: "Invalid month." });
+    const rawBalance = roundMoney(await computeOwnerBalanceRemaining(monthKey));
+    const loanRepaymentTotal = roundMoney(await sumLoanRepaymentsForMonth(monthKey));
+    const closed = await get("SELECT id FROM monthly_records WHERE month_key = ?", [monthKey]);
+    res.json({
+      monthKey,
+      monthLabel: monthShortLabelFromKey(monthKey),
+      combinedProfit: roundMoney(await computeCombinedAccumulatedProfitTotal(monthKey)),
+      expenditure: roundMoney(await computeTotalExpenditureMoneyOut(monthKey)),
+      rawBalance,
+      loanRepaymentTotal,
+      effectiveBalance: roundMoney(rawBalance + loanRepaymentTotal),
+      monthClosed: !!closed,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not load balance preview." });
+  }
+});
+
+app.post("/api/loan-repayments", auth, allowRoles("owner"), async (req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) {
+      return res.status(400).json({ error: "Loan repayments are only available for Amana and Ufaray." });
+    }
+    const monthKey = parseLoanRepaymentMonthKey(req.body?.month_key);
+    if (!monthKey) return res.status(400).json({ error: "Month is required (YYYY-MM)." });
+    const amount = parseLoanRepaymentAmount(req.body?.amount);
+    if (amount == null) return res.status(400).json({ error: "Amount must be greater than zero." });
+    const note = String(req.body?.note || "").trim();
+    const nowIso = new Date().toISOString();
+    const result = await run(
+      `INSERT INTO loan_repayments (month_key, amount, note, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [monthKey, amount, note, req.user.username, nowIso, nowIso]
+    );
+    res.json({ ok: true, id: result.lastID });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not save loan repayment." });
+  }
+});
+
+app.put("/api/loan-repayments/:id", auth, allowRoles("owner"), async (req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) {
+      return res.status(400).json({ error: "Loan repayments are only available for Amana and Ufaray." });
+    }
+    const id = Number(req.params.id);
+    const existing = await get("SELECT * FROM loan_repayments WHERE id = ?", [id]);
+    if (!existing) return res.status(404).json({ error: "Record not found." });
+    const monthKey = parseLoanRepaymentMonthKey(req.body?.month_key);
+    if (!monthKey) return res.status(400).json({ error: "Month is required (YYYY-MM)." });
+    const amount = parseLoanRepaymentAmount(req.body?.amount);
+    if (amount == null) return res.status(400).json({ error: "Amount must be greater than zero." });
+    const note = String(req.body?.note || "").trim();
+    await run(
+      `UPDATE loan_repayments SET month_key = ?, amount = ?, note = ?, updated_at = ? WHERE id = ?`,
+      [monthKey, amount, note, new Date().toISOString(), id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not update loan repayment." });
+  }
+});
+
+app.delete("/api/loan-repayments/:id", auth, allowRoles("owner"), async (req, res) => {
+  try {
+    if (!monthlyRecordsTenantAllowed()) {
+      return res.status(400).json({ error: "Loan repayments are only available for Amana and Ufaray." });
+    }
+    const result = await run("DELETE FROM loan_repayments WHERE id = ?", [Number(req.params.id)]);
+    if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+    res.json({ ok: true });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not delete loan repayment." });
   }
 });
 

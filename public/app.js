@@ -88,6 +88,9 @@ const state = {
     currentClosed: false,
     preview: null,
   },
+  loanRepayments: [],
+  editLoanRepaymentId: null,
+  loanRepaymentPreview: null,
   nahashonEntries: [],
   editNahashonId: null,
   pigsEntries: [],
@@ -119,6 +122,7 @@ const PAGE_HEADINGS = {
   expenditure: "Expenditure",
   "monthly-report": "Monthly Report",
   "monthly-records": "Monthly Records",
+  "loan-repayment": "Loan Repayment",
   balance: "Balance",
 };
 
@@ -190,7 +194,15 @@ function isTerryOrCessTenant() {
 }
 
 /** Feed & retail inventory setup tabs — employees never see these. Chicken sales uses a shared page (`chicken-inventory`). */
-const OWNER_INVENTORY_PAGES = new Set(["inventory", "retail-inventory", "calculator", "balance", "monthly-report", "monthly-records"]);
+const OWNER_INVENTORY_PAGES = new Set([
+  "inventory",
+  "retail-inventory",
+  "calculator",
+  "balance",
+  "monthly-report",
+  "monthly-records",
+  "loan-repayment",
+]);
 const OWNER_ALLOWED_PAGES = new Set([
   "inventory",
   "retail-inventory",
@@ -209,6 +221,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "expenditure",
   "monthly-report",
   "monthly-records",
+  "loan-repayment",
   "balance",
 ]);
 /** Owner pages that show the combined accumulated profit footer (Amana & Ufaray). */
@@ -240,6 +253,18 @@ function creditTenantEnabled() {
 
 function monthlyRecordsTenantEnabled() {
   return state.user?.role === "owner" && creditTenantEnabled();
+}
+
+function loanRepaymentTenantEnabled() {
+  return monthlyRecordsTenantEnabled();
+}
+
+function loanRepaymentsForMonth(monthKey) {
+  const mk = String(monthKey || "").trim();
+  if (!mk) return 0;
+  return (state.loanRepayments || [])
+    .filter((r) => String(r.month_key || "").trim() === mk)
+    .reduce((s, r) => s + (Number(r.amount) || 0), 0);
 }
 
 /** Must match `public/chickenBreeds.json` / server list — used when the API returns no breeds yet. */
@@ -1278,7 +1303,9 @@ function updateBalanceBanner() {
   const totalExpenditure = expRows.reduce((s, r) => s + (Number(r.money_out) || 0), 0);
   const daysInMonth = calendarMonthOperationalDays(today);
   const operational = daysInMonth * dailyOps;
-  const remaining = combined - operational - totalExpenditure;
+  const monthKey = currentExpenditureMonthKey();
+  const loanTotal = loanRepaymentsForMonth(monthKey);
+  const remaining = combined - operational - totalExpenditure + loanTotal;
 
   document.querySelectorAll(".js-balance-remaining-value").forEach((el) => {
     const formatted = currency(Math.abs(remaining));
@@ -1291,9 +1318,11 @@ function updateBalanceBanner() {
     }
   });
   const cycleNote = `Calendar month: ${calendarMonthCycleLabel(today)}`;
+  const loanPart =
+    loanTotal > 0 ? ` + ${currency(loanTotal)} (loan repayment) = ${currency(remaining)}` : ` = ${currency(remaining)}`;
   const meta = `${currency(combined)} - (${currency(dailyOps)} × ${daysInMonth} day${daysInMonth === 1 ? "" : "s"}) - ${currency(
     totalExpenditure
-  )} (expenditure) = ${currency(remaining)} · ${cycleNote}. Accumulated profits reset at the start of each new month; expenditure history is kept on the Expenditure page.`;
+  )} (expenditure)${loanPart} · ${cycleNote}. Accumulated profits reset at the start of each new month; expenditure history is kept on the Expenditure page.`;
   document.querySelectorAll(".js-balance-remaining-meta").forEach((el) => {
     el.textContent = meta;
   });
@@ -2077,6 +2106,200 @@ async function loadMonthlyRecordsData() {
   }
 }
 
+async function loadLoanRepaymentsData() {
+  if (!loanRepaymentTenantEnabled()) {
+    state.loanRepayments = [];
+    state.loanRepaymentPreview = null;
+    return;
+  }
+  try {
+    state.loanRepayments = await api("/api/loan-repayments");
+  } catch {
+    state.loanRepayments = [];
+  }
+}
+
+function defaultLoanRepaymentMonthValue() {
+  const today = state.shopToday || clientShopTodayDMY();
+  const parts = parseDMYParts(today);
+  if (!parts) {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}`;
+}
+
+function resetLoanRepaymentForm() {
+  state.editLoanRepaymentId = null;
+  const monthEl = document.getElementById("loanRepaymentMonth");
+  const amountEl = document.getElementById("loanRepaymentAmount");
+  const noteEl = document.getElementById("loanRepaymentNote");
+  const saveBtn = document.getElementById("loanRepaymentSaveBtn");
+  if (monthEl instanceof HTMLInputElement) monthEl.value = defaultLoanRepaymentMonthValue();
+  if (amountEl instanceof HTMLInputElement) amountEl.value = "";
+  if (noteEl instanceof HTMLInputElement) noteEl.value = "";
+  if (saveBtn) saveBtn.textContent = "Save repayment";
+  refreshLoanRepaymentPreview();
+}
+
+function populateLoanRepaymentForm(row) {
+  const id = Number(row.id);
+  state.editLoanRepaymentId = Number.isFinite(id) ? id : null;
+  const monthEl = document.getElementById("loanRepaymentMonth");
+  const amountEl = document.getElementById("loanRepaymentAmount");
+  const noteEl = document.getElementById("loanRepaymentNote");
+  const saveBtn = document.getElementById("loanRepaymentSaveBtn");
+  if (monthEl instanceof HTMLInputElement) monthEl.value = String(row.month_key || "").trim();
+  if (amountEl instanceof HTMLInputElement) amountEl.value = String(Number(row.amount) || "");
+  if (noteEl instanceof HTMLInputElement) noteEl.value = String(row.note || "");
+  if (saveBtn) saveBtn.textContent = "Update repayment";
+  refreshLoanRepaymentPreview();
+}
+
+async function refreshLoanRepaymentPreview() {
+  if (!loanRepaymentTenantEnabled()) return;
+  const monthEl = document.getElementById("loanRepaymentMonth");
+  const amountEl = document.getElementById("loanRepaymentAmount");
+  const monthKey =
+    monthEl instanceof HTMLInputElement && /^\d{4}-\d{2}$/.test(monthEl.value)
+      ? monthEl.value
+      : defaultLoanRepaymentMonthValue();
+  const draftAmount = Number(amountEl instanceof HTMLInputElement ? amountEl.value : 0) || 0;
+  const editId = state.editLoanRepaymentId;
+  const existingForMonth = loanRepaymentsForMonth(monthKey);
+  const editingRow = editId
+    ? (state.loanRepayments || []).find((r) => Number(r.id) === Number(editId))
+    : null;
+  const editingAmount = editingRow ? Number(editingRow.amount) || 0 : 0;
+  const editingMonth = editingRow ? String(editingRow.month_key || "").trim() : "";
+  let preview = state.loanRepaymentPreview;
+  if (!preview || preview.monthKey !== monthKey) {
+    try {
+      preview = await api(`/api/loan-repayments/balance-preview?month_key=${encodeURIComponent(monthKey)}`);
+      state.loanRepaymentPreview = preview;
+    } catch {
+      preview = null;
+      state.loanRepaymentPreview = null;
+    }
+  }
+  const titleEl = document.getElementById("loanRepaymentPreviewTitle");
+  const subEl = document.getElementById("loanRepaymentPreviewSub");
+  const balEl = document.getElementById("loanRepaymentPreviewBalance");
+  const metaEl = document.getElementById("loanRepaymentPreviewMeta");
+  const panel = document.getElementById("loanRepaymentPreviewPanel");
+  if (!preview) {
+    if (titleEl) titleEl.textContent = "Balance preview";
+    if (subEl) subEl.textContent = "Could not load balance for the selected month.";
+    if (balEl) balEl.textContent = "KES 0";
+    if (metaEl) metaEl.textContent = "";
+    return;
+  }
+  let projectedLoanTotal = Number(preview.loanRepaymentTotal ?? existingForMonth);
+  if (draftAmount > 0) {
+    if (editId && editingRow) {
+      if (editingMonth === monthKey) {
+        projectedLoanTotal = projectedLoanTotal - editingAmount + draftAmount;
+      } else {
+        projectedLoanTotal = projectedLoanTotal + draftAmount;
+      }
+    } else if (!editId) {
+      projectedLoanTotal = projectedLoanTotal + draftAmount;
+    }
+  }
+  const projectedBalance = Number(preview.rawBalance ?? 0) + projectedLoanTotal;
+  const monthLabel = preview.monthLabel || monthLabelFromKey(monthKey);
+  if (titleEl) {
+    titleEl.textContent = preview.monthClosed ? `${monthLabel} — closed books` : `${monthLabel} — open month`;
+  }
+  if (subEl) {
+    subEl.textContent = preview.monthClosed
+      ? "This month is already closed. New repayments update the displayed balance for that month."
+      : "Repayments for this month also appear on the Balance page while the month is open.";
+  }
+  if (balEl) {
+    const formatted = currency(Math.abs(projectedBalance));
+    balEl.textContent = projectedBalance < 0 ? `- ${formatted}` : formatted;
+    if (panel) {
+      panel.classList.toggle("balance-negative", projectedBalance < 0);
+      panel.classList.toggle("balance-positive", projectedBalance >= 0);
+    }
+  }
+  if (metaEl) {
+    const parts = [
+      `Raw balance: ${currency(preview.rawBalance ?? 0)}`,
+      `Loan repayments: ${currency(preview.loanRepaymentTotal ?? 0)}`,
+      `Current effective balance: ${currency(preview.effectiveBalance ?? 0)}`,
+    ];
+    if (draftAmount > 0 && Math.abs(projectedBalance - Number(preview.effectiveBalance ?? 0)) > 0.005) {
+      parts.push(`After this entry: ${currency(projectedBalance)}`);
+    }
+    metaEl.textContent = parts.join(" · ");
+  }
+}
+
+function monthLabelFromKey(monthKey) {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthKey || "");
+  if (!m) return monthKey || "";
+  const mo = Number(m[2]);
+  const names = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  return `${names[mo - 1] || monthKey} ${m[1]}`;
+}
+
+function renderLoanRepaymentTable() {
+  const body = document.getElementById("loan-repayment-body");
+  if (!body) return;
+  const rows = [...(state.loanRepayments || [])].sort((a, b) => {
+    const mk = String(b.month_key || "").localeCompare(String(a.month_key || ""));
+    if (mk !== 0) return mk;
+    return Number(b.id) - Number(a.id);
+  });
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="empty">No loan repayments yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map((row) => {
+      const label = monthLabelFromKey(row.month_key);
+      return `<tr>
+        <td>${escapeHtmlCell(label)}</td>
+        <td>${currency(row.amount ?? 0)}</td>
+        <td>${escapeHtmlCell(row.note || "—")}</td>
+        <td>${escapeHtmlCell(row.created_by || "—")}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="loan" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="loan" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function renderLoanRepaymentPage() {
+  if (state.currentPage !== "loan-repayment") return;
+  if (!loanRepaymentTenantEnabled()) return;
+  renderLoanRepaymentTable();
+  const monthEl = document.getElementById("loanRepaymentMonth");
+  if (monthEl instanceof HTMLInputElement && !monthEl.value) {
+    monthEl.value = defaultLoanRepaymentMonthValue();
+  }
+  refreshLoanRepaymentPreview();
+}
+
 function renderMonthlyRecords() {
   if (state.currentPage !== "monthly-records") return;
   if (!monthlyRecordsTenantEnabled()) return;
@@ -2110,9 +2333,13 @@ function renderMonthlyRecords() {
     }
   }
   if (metaEl) {
+    const loanPart =
+      Number(preview.loanRepayment ?? 0) > 0
+        ? ` · Loan repayment: ${currency(preview.loanRepayment ?? 0)}`
+        : "";
     metaEl.textContent = `Combined profits: ${currency(preview.combinedProfit ?? 0)} · Expenditure: ${currency(
       preview.expenditure ?? 0
-    )} · Balance: ${currency(balanceVal)}`;
+    )}${loanPart} · Balance: ${currency(balanceVal)}`;
   }
   if (closeBtn) {
     closeBtn.disabled = !!payload.currentClosed;
@@ -2128,7 +2355,8 @@ function renderMonthlyRecords() {
   }
   body.innerHTML = records
     .map((row) => {
-      const bal = Number(row.balance ?? 0);
+      const loanAdd = loanRepaymentsForMonth(row.month_key);
+      const bal = Number(row.balance ?? 0) + loanAdd;
       const balClass = bal < 0 ? ' style="color:var(--danger,#d32f2f)"' : "";
       const balText = bal < 0 ? `- ${currency(Math.abs(bal))}` : currency(bal);
       return `<tr>
@@ -2312,6 +2540,170 @@ function meterBillsPdfBillToText(entries) {
   return names.join("\n");
 }
 
+const METER_BILLS_PDF_PAYMENT_LINE = "Send Money to 0114 784 478";
+
+function meterBillsChronologicalEntries(entries) {
+  return [...(entries || [])].sort((a, b) => {
+    const ak = billingMonthKey(parseBillingMonthValue(a?.date_to || a?.date_from || a?.date));
+    const bk = billingMonthKey(parseBillingMonthValue(b?.date_to || b?.date_from || b?.date));
+    if (ak !== bk) return ak - bk;
+    return Number(a?.id || 0) - Number(b?.id || 0);
+  });
+}
+
+function meterBillsBalanceBroughtForward(row, chronological) {
+  const idx = chronological.findIndex((r) => Number(r.id) === Number(row.id));
+  if (idx <= 0) return 0;
+  return Number(chronological[idx - 1].total_billing || 0);
+}
+
+function meterBillsBillingPeriodLabel(row) {
+  const from = formatBillingMonthDisplay(row.date_from);
+  const to = formatBillingMonthDisplay(row.date_to);
+  if (from === "—" && to === "—") return "—";
+  if (from === to || from === "—") return to;
+  if (to === "—") return from;
+  return `${from} – ${to}`;
+}
+
+function formatBillDateShort(dmy) {
+  const parts = parseDMYParts(dmy);
+  if (!parts) return "—";
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${String(parts.d).padStart(2, "0")}-${months[parts.m - 1]}-${parts.y}`;
+}
+
+/** Two-column label/value grid (invoice header block). */
+function drawMeterBillsInvoiceInfoGrid(doc, { margin, pageW, startY, rows }) {
+  const colGap = 24;
+  const colW = (pageW - margin * 2 - colGap) / 2;
+  const leftX = margin;
+  const rightX = margin + colW + colGap;
+  const labelW = 92;
+  const lineH = 12;
+  let y = startY;
+  doc.setFontSize(9);
+  for (const pair of rows) {
+    const blocks = [];
+    let maxLines = 1;
+    for (let c = 0; c < 2; c += 1) {
+      const item = pair[c];
+      if (!item) continue;
+      const valueLines = doc.splitTextToSize(String(item.value || "—"), colW - labelW - 4);
+      maxLines = Math.max(maxLines, valueLines.length);
+      blocks.push({ x: c === 0 ? leftX : rightX, label: item.label, valueLines });
+    }
+    for (const block of blocks) {
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...PDF_PAGE_THEME.dark);
+      doc.text(block.label, block.x, y);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(33, 33, 33);
+      doc.text(block.valueLines, block.x + labelW, y);
+    }
+    y += maxLines * lineH + 4;
+  }
+  return y + 4;
+}
+
+function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, chronological, pageIndex, pageCount }) {
+  const margin = 36;
+  const pageW = doc.internal.pageSize.getWidth();
+  const rightX = pageW - margin;
+  let y = 28;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(...PDF_PAGE_THEME.dark);
+  doc.text(pageTitle, margin, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(80, 80, 80);
+  doc.text("Meter billing statement", margin, y);
+  y += 22;
+
+  const billTo = String(row.bill_to || "").trim() || "—";
+  const billingPeriod = meterBillsBillingPeriodLabel(row);
+  const billDate = row.date ? formatBillDateShort(row.date) : "—";
+  y = drawMeterBillsInvoiceInfoGrid(doc, {
+    margin,
+    pageW,
+    startY: y,
+    rows: [
+      [
+        { label: "Bill To", value: billTo },
+        { label: "Billing period", value: billingPeriod },
+      ],
+      [
+        { label: "Billing month from", value: formatBillingMonthDisplay(row.date_from) },
+        { label: "Billing month to", value: formatBillingMonthDisplay(row.date_to) },
+      ],
+      [{ label: "Bill date", value: billDate }, null],
+    ],
+  });
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...PDF_PAGE_THEME.dark);
+  doc.text("Meter readings & charges", margin, y);
+  y += 12;
+
+  const balanceBf = meterBillsBalanceBroughtForward(row, chronological);
+  const prevReading = Number(row.previous_meter_reading || 0);
+  const currReading = Number(row.current_meter_reading || 0);
+  const unitsUsed = Number(row.units_used || 0);
+  const currentBilling = Number(row.current_billing || 0);
+  const totalDue = Number(row.total_billing || 0);
+  const pricePerM3 = Number(row.price_per_m3 || 0);
+
+  runPdfAutoTable(doc, jsPdfNs, {
+    startY: y,
+    head: [["Prev reading (m³)", "Curr reading (m³)", "Consumption (m³)", "Item", "Amount (Ksh)"]],
+    body: [
+      ["", "", "", "Balance B/F", formatKshPlainNumber(balanceBf)],
+      [
+        String(prevReading),
+        String(currReading),
+        String(unitsUsed),
+        `${serviceItem} @ ${formatKshPlainNumber(pricePerM3)}/m³`,
+        formatKshPlainNumber(currentBilling),
+      ],
+      ["", "", "", "Total amount due", formatKshPlainNumber(totalDue)],
+    ],
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak" },
+    headStyles: { fillColor: PDF_PAGE_THEME.dark, textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      4: { halign: "right" },
+    },
+    alternateRowStyles: { fillColor: PDF_PAGE_THEME.mint },
+    theme: "grid",
+  });
+
+  y = (doc.lastAutoTable?.finalY || y) + 24;
+  doc.setDrawColor(...PDF_PAGE_THEME.edge);
+  doc.setLineWidth(0.5);
+  doc.line(margin, y, rightX, y);
+  y += 18;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...PDF_PAGE_THEME.dark);
+  doc.text("Payment details", margin, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(33, 33, 33);
+  doc.text(METER_BILLS_PDF_PAYMENT_LINE, margin, y);
+
+  if (pageCount > 1) {
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`${pageIndex} / ${pageCount}`, rightX, doc.internal.pageSize.getHeight() - 24, { align: "right" });
+  }
+}
+
 function meterBillsPdfSectionsFromEntries(entries, sectionTitle) {
   const rows = sortRowsLatestFirst(entries || []);
   const headers = [
@@ -2366,19 +2758,45 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle) {
 }
 
 function downloadMeterBillsPagePdf() {
+  const ctx = ensureJsPdfReady();
+  if (!ctx) return;
   const page = state.currentPage;
   const pageTitle = PAGE_HEADINGS[page] || "Bills";
+  const serviceItem = page === "electricity-bills" ? "Electricity" : "Water";
   const entries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
-  const sections = meterBillsPdfSectionsFromEntries(entries, pageTitle);
+  const rows = sortRowsLatestFirst(entries || []);
+  const chronological = meterBillsChronologicalEntries(entries);
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
-  downloadStandardPageTablePdf({
-    pageTitle,
-    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
-    filename: `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`,
-    sections,
-    landscape: true,
-    billToText: meterBillsPdfBillToText(entries),
+  const filename = `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`;
+  const { jsPdfNs, JsPdfCtor } = ctx;
+  const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+
+  if (!rows.length) {
+    const margin = 36;
+    let y = drawStandardPagePdfHeader(doc, {
+      pageTitle,
+      subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    });
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(10);
+    doc.setTextColor(...PDF_PAGE_THEME.dark);
+    doc.text("No records to export on this page.", margin, y + 10);
+    doc.save(filename);
+    return;
+  }
+
+  const pageCount = rows.length;
+  rows.forEach((row, idx) => {
+    if (idx > 0) doc.addPage();
+    drawMeterBillsInvoicePage(doc, jsPdfNs, row, {
+      pageTitle,
+      serviceItem,
+      chronological,
+      pageIndex: idx + 1,
+      pageCount,
+    });
   });
+  doc.save(filename);
 }
 
 function downloadGenericCurrentPagePdf() {
@@ -2455,20 +2873,23 @@ function downloadBalancePagePdf() {
   );
   const daysInMonth = calendarMonthOperationalDays(today);
   const operational = daysInMonth * dailyOps;
-  const remaining = combined - operational - totalExpenditure;
+  const loanTotal = loanRepaymentsForMonth(currentExpenditureMonthKey());
+  const remaining = combined - operational - totalExpenditure + loanTotal;
   const { jsPdfNs, JsPdfCtor } = ctx;
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
   const margin = 36;
   let y = drawStandardPagePdfHeader(doc, { pageTitle: "Balance", subtitle: calendarMonthCycleLabel(today) });
+  const pdfRows = [
+    ["Combined accumulated profits", currency(combined)],
+    [`Operational costs (${currency(dailyOps)} × ${daysInMonth} days)`, currency(operational)],
+    ["Expenditure (current month)", currency(totalExpenditure)],
+  ];
+  if (loanTotal > 0) pdfRows.push(["Loan repayment (current month)", currency(loanTotal)]);
+  pdfRows.push(["Remaining balance", currency(remaining)]);
   runPdfAutoTable(doc, jsPdfNs, {
     startY: y,
     head: [["Item", "Amount"]],
-    body: [
-      ["Combined accumulated profits", currency(combined)],
-      [`Operational costs (${currency(dailyOps)} × ${daysInMonth} days)`, currency(operational)],
-      ["Expenditure (current month)", currency(totalExpenditure)],
-      ["Remaining balance", currency(remaining)],
-    ],
+    body: pdfRows,
     margin: { left: margin, right: margin },
     styles: { fontSize: 10, cellPadding: 6 },
     headStyles: { fillColor: PDF_PAGE_THEME.dark, textColor: 255 },
@@ -2476,6 +2897,44 @@ function downloadBalancePagePdf() {
     theme: "grid",
   });
   doc.save(`${pdfSafeSlug(pdfBusinessTitle())}-balance-${today.replace(/\//g, "")}.pdf`);
+}
+
+function downloadLoanRepaymentPagePdf() {
+  const rows = [...(state.loanRepayments || [])].sort((a, b) => {
+    const mk = String(b.month_key || "").localeCompare(String(a.month_key || ""));
+    if (mk !== 0) return mk;
+    return Number(b.id) - Number(a.id);
+  });
+  const preview = state.loanRepaymentPreview || {};
+  const sections = [];
+  if (preview.monthKey) {
+    sections.push({
+      title: `${preview.monthLabel || preview.monthKey} preview`,
+      headers: ["Metric", "Amount"],
+      body: [
+        ["Raw balance", currency(preview.rawBalance ?? 0)],
+        ["Loan repayments", currency(preview.loanRepaymentTotal ?? 0)],
+        ["Effective balance", currency(preview.effectiveBalance ?? 0)],
+      ],
+    });
+  }
+  sections.push({
+    title: "Repayment history",
+    headers: ["Month", "Amount", "Note", "Recorded by"],
+    body: rows.map((r) => [
+      monthLabelFromKey(r.month_key),
+      currency(r.amount ?? 0),
+      r.note || "—",
+      r.created_by || "—",
+    ]),
+  });
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle: "Loan Repayment",
+    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-loan-repayment-${today || "export"}.pdf`,
+    sections,
+  });
 }
 
 function downloadMonthlyRecordsPagePdf() {
@@ -2492,6 +2951,9 @@ function downloadMonthlyRecordsPagePdf() {
       body: [
         ["Combined accumulated profits", currency(preview.combinedProfit ?? 0)],
         ["Expenditure", currency(preview.expenditure ?? 0)],
+        ...(Number(preview.loanRepayment ?? 0) > 0
+          ? [["Loan repayment", currency(preview.loanRepayment ?? 0)]]
+          : []),
         ["Balance", currency(preview.balance ?? 0)],
       ],
     });
@@ -2499,12 +2961,16 @@ function downloadMonthlyRecordsPagePdf() {
   sections.push({
     title: "Closed months",
     headers: ["Month", "Combined profits", "Expenditure", "Balance"],
-    body: records.map((r) => [
-      r.month_label || r.month_key || "—",
-      currency(r.combined_profit ?? 0),
-      currency(r.expenditure ?? 0),
-      currency(r.balance ?? 0),
-    ]),
+    body: records.map((r) => {
+      const loanAdd = loanRepaymentsForMonth(r.month_key);
+      const bal = Number(r.balance ?? 0) + loanAdd;
+      return [
+        r.month_label || r.month_key || "—",
+        currency(r.combined_profit ?? 0),
+        currency(r.expenditure ?? 0),
+        currency(bal),
+      ];
+    }),
   });
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   downloadStandardPageTablePdf({
@@ -2568,6 +3034,10 @@ function downloadCurrentPagePdf() {
   }
   if (page === "monthly-records") {
     downloadMonthlyRecordsPagePdf();
+    return;
+  }
+  if (page === "loan-repayment") {
+    downloadLoanRepaymentPagePdf();
     return;
   }
   if (page === "credit") {
@@ -3796,6 +4266,9 @@ function showLoggedIn() {
     }
     if (page === "monthly-records") {
       shouldShow = monthlyRecordsTenantEnabled();
+    }
+    if (page === "loan-repayment") {
+      shouldShow = loanRepaymentTenantEnabled();
     }
     if (isWaterBillsTenant()) {
       shouldShow = page === "water-bills";
@@ -6610,6 +7083,10 @@ function showPage(page) {
     if (state.user?.role !== "owner") return showPage("sales-bags");
     if (!creditTenantEnabled()) return showPage("inventory");
   }
+  if (page === "loan-repayment") {
+    if (state.user?.role !== "owner") return showPage("sales-bags");
+    if (!loanRepaymentTenantEnabled()) return showPage("inventory");
+  }
   state.currentPage = page;
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
@@ -6721,6 +7198,7 @@ function showPage(page) {
   if (page === "balance") updateBalanceBanner();
   if (page === "monthly-report") renderMonthlyReport();
   if (page === "monthly-records") renderMonthlyRecords();
+  if (page === "loan-repayment") renderLoanRepaymentPage();
   updateOwnerCombinedProfitDockVisibility();
   updateOwnerCombinedProfitDisplay();
 }
@@ -6991,6 +7469,7 @@ async function loadAllData() {
   state.creditEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
 
   await loadMonthlyRecordsData();
+  await loadLoanRepaymentsData();
 
   updateTodayProfitDisplay();
   updateRetailCumulativeProfitDisplay();
@@ -7034,6 +7513,7 @@ async function loadAllData() {
   renderPigsTable();
   if (state.currentPage === "monthly-report") renderMonthlyReport();
   if (state.currentPage === "monthly-records") renderMonthlyRecords();
+  if (state.currentPage === "loan-repayment") renderLoanRepaymentPage();
   applyEmployeeFeedSalePricingUi();
   if (state.currentPage === "sales-kg") applyDefaultSkBagOpened();
   restoreInventoryFormDraft(inventoryDraft);
@@ -7581,6 +8061,41 @@ document.getElementById("mrDownloadPdfBtn")?.addEventListener("click", () => {
     alert("Could not generate the Monthly Report PDF. Refresh and try again.");
   }
 });
+document.getElementById("loanRepaymentMonth")?.addEventListener("change", () => {
+  state.loanRepaymentPreview = null;
+  refreshLoanRepaymentPreview();
+});
+document.getElementById("loanRepaymentAmount")?.addEventListener("input", () => refreshLoanRepaymentPreview());
+document.getElementById("loanRepaymentClearBtn")?.addEventListener("click", () => resetLoanRepaymentForm());
+document.getElementById("loan-repayment-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!loanRepaymentTenantEnabled()) return;
+  const monthKey = String(document.getElementById("loanRepaymentMonth")?.value || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) return alert("Choose a valid month.");
+  const amount = Number(document.getElementById("loanRepaymentAmount")?.value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return alert("Amount must be greater than zero.");
+  const payload = {
+    month_key: monthKey,
+    amount,
+    note: String(document.getElementById("loanRepaymentNote")?.value || "").trim(),
+  };
+  try {
+    if (state.editLoanRepaymentId) {
+      await api(`/api/loan-repayments/${state.editLoanRepaymentId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api("/api/loan-repayments", { method: "POST", body: JSON.stringify(payload) });
+    }
+    state.loanRepaymentPreview = null;
+    resetLoanRepaymentForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
 document.getElementById("monthlyRecordsCloseBtn")?.addEventListener("click", async () => {
   const payload = state.monthlyRecordsPayload || {};
   const label = payload.currentMonthLabel || "this month";
@@ -9908,6 +10423,33 @@ gasBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this record?")) return;
     try {
       await api(`/api/gas/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+document.getElementById("loan-repayment-body")?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "loan") return;
+  if (!loanRepaymentTenantEnabled()) return;
+  const row = (state.loanRepayments || []).find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.loanRepaymentPreview = null;
+    populateLoanRepaymentForm(row);
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this loan repayment? The balance for that month will be updated.")) return;
+    try {
+      await api(`/api/loan-repayments/${id}`, { method: "DELETE" });
+      state.loanRepaymentPreview = null;
       await loadAllData();
     } catch (error) {
       alert(error.message);
