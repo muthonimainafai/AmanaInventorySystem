@@ -1703,7 +1703,7 @@
         <div id="page-water-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Water Bills</h3>
-            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner may enter a pending balance from before; total billing = current billing + balance.</p>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner may enter a previous balance amount; total billing = current billing + previous balance.</p>
             <form id="water-bills-form">
               <div class="grid meter-bills-form-grid">
                 <label class="billing-month-field">
@@ -1724,6 +1724,10 @@
                   Bill To
                   <input type="text" id="waterBillsBillTo" placeholder="Name of person or account" />
                 </label>
+                <label class="owner-only-meter-balance-field" id="waterBillsBalanceField">
+                  Previous balance (Ksh)
+                  <input type="number" id="waterBillsBalance" min="0" step="0.01" placeholder="Amount owed from before, if any" />
+                </label>
                 <label>
                   Current meter reading (m³)
                   <input type="number" id="waterBillsCurrentMeter" min="0" step="0.01" required />
@@ -1743,10 +1747,6 @@
                 <label>
                   Current billing (Ksh)
                   <input type="text" id="waterBillsCurrentBilling" readonly tabindex="-1" />
-                </label>
-                <label class="owner-only-meter-balance-field" id="waterBillsBalanceField">
-                  Balance (Ksh)
-                  <input type="number" id="waterBillsBalance" min="0" step="0.01" placeholder="Pending balance, if any" />
                 </label>
                 <label>
                   Total billing (Ksh)
@@ -1773,7 +1773,7 @@
                     <th>Units used (m³)</th>
                     <th>Price per m³</th>
                     <th>Current billing (Ksh)</th>
-                    <th>Balance</th>
+                    <th>Previous balance</th>
                     <th>Total billing</th>
                     <th>Actions</th>
                   </tr>
@@ -1796,7 +1796,7 @@
         <div id="page-electricity-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Electricity Bills</h3>
-            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner may enter a pending balance from before; total billing = current billing + balance.</p>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner may enter a previous balance amount; total billing = current billing + previous balance.</p>
             <form id="electricity-bills-form">
               <div class="grid meter-bills-form-grid">
                 <label class="billing-month-field">
@@ -1817,6 +1817,10 @@
                   Bill To
                   <input type="text" id="electricityBillsBillTo" placeholder="Name of person or account" />
                 </label>
+                <label class="owner-only-meter-balance-field" id="electricityBillsBalanceField">
+                  Previous balance (Ksh)
+                  <input type="number" id="electricityBillsBalance" min="0" step="0.01" placeholder="Amount owed from before, if any" />
+                </label>
                 <label>
                   Current meter reading (m³)
                   <input type="number" id="electricityBillsCurrentMeter" min="0" step="0.01" required />
@@ -1836,10 +1840,6 @@
                 <label>
                   Current billing (Ksh)
                   <input type="text" id="electricityBillsCurrentBilling" readonly tabindex="-1" />
-                </label>
-                <label class="owner-only-meter-balance-field" id="electricityBillsBalanceField">
-                  Balance (Ksh)
-                  <input type="number" id="electricityBillsBalance" min="0" step="0.01" placeholder="Pending balance, if any" />
                 </label>
                 <label>
                   Total billing (Ksh)
@@ -1866,7 +1866,7 @@
                     <th>Units used (m³)</th>
                     <th>Price per m³</th>
                     <th>Current billing (Ksh)</th>
-                    <th>Balance</th>
+                    <th>Previous balance</th>
                     <th>Total billing</th>
                     <th>Actions</th>
                   </tr>
@@ -2620,6 +2620,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-27-bills-balance-visible"></script>
+    <script src="app.js?v=2026-05-27-previous-balance"></script>
   </body>
 </html>

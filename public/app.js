@@ -2632,7 +2632,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
     startY: y,
     head: [["Prev reading (m³)", "Curr reading (m³)", "Consumption (m³)", "Item", "Amount (Ksh)"]],
     body: [
-      ["", "", "", "Balance B/F", formatKshPlainNumber(balanceBf)],
+      ["", "", "", "Previous balance", formatKshPlainNumber(balanceBf)],
       [
         String(prevReading),
         String(currReading),
@@ -2687,7 +2687,7 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle) {
     "Units used (m³)",
     "Price per m³",
     "Current billing (Ksh)",
-    "Balance",
+    "Previous balance",
     "Total billing",
   ];
   const body = rows.map((row, idx) => [
