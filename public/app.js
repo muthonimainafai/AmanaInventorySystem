@@ -4301,9 +4301,9 @@ function showLoggedIn() {
   if (medSaveBtn) medSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
   const gasSaveBtn = document.getElementById("gasSaveBtn");
   if (gasSaveBtn) gasSaveBtn.textContent = isOwner ? "Save record" : "Save sale";
-  applyMeterBillsOwnerBalanceUi();
   // Re-apply tenant-specific visibility after role-based show/hide rules.
   applyAppTheme();
+  applyMeterBillsOwnerBalanceUi();
 }
 
 function showVehicleLoggedIn() {
@@ -6112,7 +6112,9 @@ function computeMeterBillsDerived(currentMeter, previousMeter, pricePerM3) {
 function meterBillsBalanceFromForm(prefix) {
   if (state.user?.role !== "owner") return 0;
   const balanceEl = document.getElementById(`${prefix}Balance`);
-  const balance = Number(balanceEl instanceof HTMLInputElement ? balanceEl.value : 0);
+  const raw = balanceEl instanceof HTMLInputElement ? balanceEl.value.trim() : "";
+  if (raw === "") return 0;
+  const balance = Number(raw);
   return Number.isFinite(balance) && balance >= 0 ? balance : 0;
 }
 
@@ -6155,10 +6157,10 @@ function applyMeterBillsOwnerBalanceUi() {
   const isOwner = state.user?.role === "owner";
   document.querySelectorAll(".owner-only-meter-balance-field").forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
-    const input = el.querySelector("input");
+    const input = el.querySelector("input[type='number']");
     if (input instanceof HTMLInputElement) {
       input.disabled = !isOwner;
-      if (!isOwner) input.value = "0";
+      if (!isOwner) input.value = "";
     }
   });
   updateMeterBillsFormCalc("waterBills");
@@ -6289,7 +6291,7 @@ function resetWaterBillsForm() {
   const totalEl = document.getElementById("waterBillsTotalBilling");
   if (unitsEl) unitsEl.value = "";
   if (billingEl) billingEl.value = "";
-  if (balanceEl instanceof HTMLInputElement) balanceEl.value = "0";
+  if (balanceEl instanceof HTMLInputElement) balanceEl.value = "";
   if (totalEl) totalEl.value = "";
   const saveBtn = document.getElementById("waterBillsSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
@@ -6309,7 +6311,7 @@ function resetElectricityBillsForm() {
   const totalEl = document.getElementById("electricityBillsTotalBilling");
   if (unitsEl) unitsEl.value = "";
   if (billingEl) billingEl.value = "";
-  if (balanceEl instanceof HTMLInputElement) balanceEl.value = "0";
+  if (balanceEl instanceof HTMLInputElement) balanceEl.value = "";
   if (totalEl) totalEl.value = "";
   const saveBtn = document.getElementById("electricityBillsSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
@@ -6330,7 +6332,8 @@ function fillMeterBillsFormFromRow(prefix, row) {
   if (price) price.value = row.price_per_m3 ?? 0;
   const balanceEl = document.getElementById(`${prefix}Balance`);
   if (balanceEl instanceof HTMLInputElement && state.user?.role === "owner") {
-    balanceEl.value = String(Number(row.balance) || 0);
+    const bal = Number(row.balance) || 0;
+    balanceEl.value = bal > 0 ? String(bal) : "";
   }
   updateMeterBillsFormCalc(prefix);
 }
@@ -7329,6 +7332,7 @@ async function loadBillsTenantData() {
       renderElectricityBillsTable();
     }
   }
+  applyMeterBillsOwnerBalanceUi();
 }
 
 async function loadAllData() {
@@ -7898,6 +7902,7 @@ async function boot() {
     await loadAllData();
     applyEmployeeSalesDateRules();
     applyEmployeeFeedSalePricingUi();
+    applyMeterBillsOwnerBalanceUi();
     startAutoRefresh();
   } catch (_error) {
     stopAutoRefresh();
