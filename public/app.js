@@ -149,6 +149,10 @@ function isBillsTenant() {
   return isWaterBillsTenant() || isElectricityBillsTenant();
 }
 
+function meterBillsOwnerOnlyTenant() {
+  return isBillsTenant();
+}
+
 function defaultPageForLoggedInUser() {
   if (isWaterBillsTenant()) return "water-bills";
   if (isElectricityBillsTenant()) return "electricity-bills";
@@ -4239,11 +4243,11 @@ function showLoggedIn() {
     if (page === "loan-repayment") {
       shouldShow = loanRepaymentTenantEnabled();
     }
-    if (isWaterBillsTenant()) {
-      shouldShow = page === "water-bills";
-    }
-    if (isElectricityBillsTenant()) {
-      shouldShow = page === "electricity-bills";
+    if (page === "water-bills" || page === "electricity-bills") {
+      shouldShow =
+        isOwner &&
+        ((isWaterBillsTenant() && page === "water-bills") ||
+          (isElectricityBillsTenant() && page === "electricity-bills"));
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -6156,12 +6160,12 @@ function wireMeterBillsFormCalc(prefix) {
 function applyMeterBillsOwnerBalanceUi() {
   const isOwner = state.user?.role === "owner";
   document.querySelectorAll(".owner-only-meter-balance-field").forEach((el) => {
-    el.classList.remove("hidden");
+    el.classList.toggle("hidden", !isOwner);
     const input = el.querySelector("input[type='number']");
     if (input instanceof HTMLInputElement) {
       input.disabled = !isOwner;
       input.readOnly = !isOwner;
-      input.placeholder = isOwner ? "Enter amount, if any" : "Owner only";
+      input.placeholder = "Enter amount, if any";
       if (!isOwner) input.value = "";
     }
   });
@@ -7029,11 +7033,20 @@ function resetChickenForm() {
 }
 
 function showPage(page) {
+  if (meterBillsOwnerOnlyTenant() && state.user?.role !== "owner") {
+    clearAuth();
+    stopAutoRefresh();
+    showLoggedOut();
+    return;
+  }
   if (isWaterBillsTenant() && page !== "water-bills") {
     return showPage("water-bills");
   }
   if (isElectricityBillsTenant() && page !== "electricity-bills") {
     return showPage("electricity-bills");
+  }
+  if ((page === "water-bills" || page === "electricity-bills") && state.user?.role !== "owner") {
+    return showPage(defaultPageForLoggedInUser());
   }
   if (
     (state.appInstance === "ufaray" || state.appInstance === "amana") &&
@@ -7648,6 +7661,12 @@ loginForm.addEventListener("submit", async (event) => {
     });
     state.token = String(result.token || "").trim();
     state.user = result.user;
+    if (meterBillsOwnerOnlyTenant() && state.user?.role !== "owner") {
+      clearAuth();
+      throw new Error(
+        isWaterBillsTenant() ? "Water Bills is owner-only." : "Electricity Bills is owner-only."
+      );
+    }
     persistAuth();
     showLoggedIn();
     showPage(defaultPageForLoggedInUser());
@@ -7924,6 +7943,7 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
     if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return;
     if (page === "credit" && !creditTenantEnabled()) return;
     if (page === "nahashon-records" && state.appInstance !== "terry") return;
+    if ((page === "water-bills" || page === "electricity-bills") && state.user.role !== "owner") return;
     showPage(page);
   });
 });

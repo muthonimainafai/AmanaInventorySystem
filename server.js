@@ -251,6 +251,7 @@ function tenantLoginEnv(tenant) {
     const employeeFullName = String(process.env.WATER_BILLS_EMPLOYEE_FULL_NAME || "").trim();
     return {
       tenant: "water-bills",
+      ownerOnly: true,
       owner: {
         username: ownerUsername || AMANA_OWNER_USERNAME,
         password: ownerPassword || AMANA_OWNER_PASSWORD,
@@ -276,6 +277,7 @@ function tenantLoginEnv(tenant) {
     const employeeFullName = String(process.env.ELECTRICITY_BILLS_EMPLOYEE_FULL_NAME || "").trim();
     return {
       tenant: "electricity-bills",
+      ownerOnly: true,
       owner: {
         username: ownerUsername || AMANA_OWNER_USERNAME,
         password: ownerPassword || AMANA_OWNER_PASSWORD,
@@ -2718,6 +2720,17 @@ app.post("/api/login", async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials." });
 
+  const loginCfg = tenantLoginEnv(activeTenant());
+  if (loginCfg.ownerOnly && user.role === "employee") {
+    const tenantLabel =
+      activeTenant() === "water-bills"
+        ? "Water Bills"
+        : activeTenant() === "electricity-bills"
+          ? "Electricity Bills"
+          : "This workspace";
+    return res.status(403).json({ error: `${tenantLabel} is owner-only.` });
+  }
+
   const token = jwt.sign(
     { userId: user.id, username: user.username, role: user.role, fullName: user.full_name },
     JWT_SECRET,
@@ -4765,14 +4778,11 @@ function meterBillsTotalsFromEntry(currentBilling, balance) {
 
 function mountBillsEntriesApi(routeSlug, tableName) {
   const base = `/api/${routeSlug}`;
-  app.get(base, auth, allowRoles("owner", "employee"), async (req, res) => {
-    const rows =
-      req.user.role === "owner"
-        ? await all(`SELECT * FROM ${tableName} ORDER BY id DESC`)
-        : await all(`SELECT * FROM ${tableName} WHERE created_by = ? ORDER BY id DESC`, [req.user.username]);
+  app.get(base, auth, allowRoles("owner"), async (req, res) => {
+    const rows = await all(`SELECT * FROM ${tableName} ORDER BY id DESC`);
     res.json(rows);
   });
-  app.post(base, auth, allowRoles("owner", "employee"), async (req, res) => {
+  app.post(base, auth, allowRoles("owner"), async (req, res) => {
     let parsed;
     try {
       parsed = parseMeterBillsEntryBody(req.body || {});
@@ -4808,12 +4818,9 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     );
     res.json({ ok: true });
   });
-  app.put(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
+  app.put(`${base}/:id`, auth, allowRoles("owner"), async (req, res) => {
     const id = Number(req.params.id);
-    const existing =
-      req.user.role === "owner"
-        ? await get(`SELECT * FROM ${tableName} WHERE id = ?`, [id])
-        : await get(`SELECT * FROM ${tableName} WHERE id = ? AND created_by = ?`, [id, req.user.username]);
+    const existing = await get(`SELECT * FROM ${tableName} WHERE id = ?`, [id]);
     if (!existing) return res.status(404).json({ error: "Record not found." });
     let parsed;
     try {
@@ -4852,14 +4859,8 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     );
     res.json({ ok: true });
   });
-  app.delete(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
-    const result =
-      req.user.role === "owner"
-        ? await run(`DELETE FROM ${tableName} WHERE id = ?`, [Number(req.params.id)])
-        : await run(`DELETE FROM ${tableName} WHERE id = ? AND created_by = ?`, [
-            Number(req.params.id),
-            req.user.username,
-          ]);
+  app.delete(`${base}/:id`, auth, allowRoles("owner"), async (req, res) => {
+    const result = await run(`DELETE FROM ${tableName} WHERE id = ?`, [Number(req.params.id)]);
     if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
     res.json({ ok: true });
   });
