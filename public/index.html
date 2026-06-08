@@ -2677,7 +2677,7 @@
         </div>
 
         <div id="page-balance" class="app-page hidden">
-          <div class="card">
+          <div id="amanaBalancePanel" class="card">
             <h3 class="card-title">Balance</h3>
             <div class="profit-highlight-above-table" aria-live="polite">
               <div class="profit-highlight-inner">
@@ -2690,6 +2690,36 @@
                 <span class="js-balance-remaining-value profit-highlight-amount">KES 0</span>
               </div>
               <p class="profit-highlight-example js-balance-remaining-meta"></p>
+            </div>
+          </div>
+          <div id="faithRoseBalancePanel" class="card hidden">
+            <h3 class="card-title">Balance</h3>
+            <p class="field-hint" id="faithRoseBalanceLotHint">
+              Money in is the Sales page total. Money out is the Expenses page total. Profit is money in minus money out.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Money in (Sales total)</td>
+                    <td id="faithRoseBalanceMoneyIn">KES 0</td>
+                  </tr>
+                  <tr>
+                    <td>Money out (Expenses total)</td>
+                    <td id="faithRoseBalanceMoneyOut">KES 0</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Profit</strong></td>
+                    <td id="faithRoseBalanceProfit"><strong>KES 0</strong></td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2781,6 +2811,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-27-inventory-lots"></script>
+    <script src="app.js?v=2026-05-27-faith-rose-balance"></script>
   </body>
 </html>

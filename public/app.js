@@ -210,6 +210,53 @@ function inventoryLotsTenantEnabled() {
   return expensesPageTenantEnabled();
 }
 
+function faithRoseBalancePageEnabled() {
+  return expensesPageTenantEnabled();
+}
+
+function faithRoseSalesTotalAmount() {
+  return (state.faithSalesEntries || []).reduce((s, r) => s + (Number(r.total_amount) || 0), 0);
+}
+
+function faithRoseExpensesTotalMoneyOut() {
+  return (state.faithExpensesEntries || []).reduce((s, r) => s + (Number(r.money_out) || 0), 0);
+}
+
+function faithRoseBalanceProfit() {
+  return roundMoney(faithRoseSalesTotalAmount() - faithRoseExpensesTotalMoneyOut());
+}
+
+function applyFaithRoseBalancePanelVisibility() {
+  const amanaPanel = document.getElementById("amanaBalancePanel");
+  const faithPanel = document.getElementById("faithRoseBalancePanel");
+  const useFaithRose = faithRoseBalancePageEnabled();
+  amanaPanel?.classList.toggle("hidden", useFaithRose);
+  faithPanel?.classList.toggle("hidden", !useFaithRose);
+}
+
+function renderFaithRoseBalancePage() {
+  if (!faithRoseBalancePageEnabled()) return;
+  applyFaithRoseBalancePanelVisibility();
+  const moneyIn = faithRoseSalesTotalAmount();
+  const moneyOut = faithRoseExpensesTotalMoneyOut();
+  const profit = faithRoseBalanceProfit();
+  const inEl = document.getElementById("faithRoseBalanceMoneyIn");
+  const outEl = document.getElementById("faithRoseBalanceMoneyOut");
+  const profitEl = document.getElementById("faithRoseBalanceProfit");
+  const hintEl = document.getElementById("faithRoseBalanceLotHint");
+  if (inEl) inEl.textContent = currency(moneyIn);
+  if (outEl) outEl.textContent = currency(moneyOut);
+  if (profitEl) {
+    profitEl.innerHTML = `<strong>${currency(profit)}</strong>`;
+    profitEl.style.color = profit < 0 ? "var(--danger,#d32f2f)" : "";
+  }
+  if (hintEl) {
+    const lotPart =
+      inventoryLotsTenantEnabled() && activeLotName() ? ` for ${activeLotName()}` : "";
+    hintEl.textContent = `Money in is the Sales page total. Money out is the Expenses page total. Profit is money in minus money out${lotPart}.`;
+  }
+}
+
 function activeLotStorageKey() {
   return `amanaActiveLotId:${state.appInstance}`;
 }
@@ -1374,6 +1421,10 @@ function ensureExpenditureStatementMonth() {
 }
 
 function updateBalanceBanner() {
+  if (faithRoseBalancePageEnabled()) {
+    renderFaithRoseBalancePage();
+    return;
+  }
   if (state.user?.role !== "owner") return;
   const combined = getOwnerCombinedProfitTotal();
   const today = state.shopToday || clientShopTodayDMY();
@@ -2939,7 +2990,35 @@ function downloadExpenditurePagePdf() {
   });
 }
 
+function downloadFaithRoseBalancePagePdf() {
+  const moneyIn = faithRoseSalesTotalAmount();
+  const moneyOut = faithRoseExpensesTotalMoneyOut();
+  const profit = faithRoseBalanceProfit();
+  const lotLabel = inventoryLotsTenantEnabled() && activeLotName() ? ` · ${activeLotName()}` : "";
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle: "Balance",
+    subtitle: `Sales and Expenses${lotLabel}`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-balance-${today || "export"}.pdf`,
+    sections: {
+      headers: ["Item", "Amount"],
+      body: [
+        ["Money in (Sales total)", currency(moneyIn)],
+        ["Money out (Expenses total)", currency(moneyOut)],
+        [
+          { content: "Profit", styles: { fontStyle: "bold" } },
+          { content: currency(profit), styles: { fontStyle: "bold" } },
+        ],
+      ],
+    },
+  });
+}
+
 function downloadBalancePagePdf() {
+  if (faithRoseBalancePageEnabled()) {
+    downloadFaithRoseBalancePagePdf();
+    return;
+  }
   const ctx = ensureJsPdfReady();
   if (!ctx) return;
   const combined = getOwnerCombinedProfitTotal();
@@ -4273,8 +4352,10 @@ function showLoggedIn() {
   const isOwner = state.user.role === "owner";
   document.querySelectorAll(".owner-only-tab").forEach((el) => {
     const isCalculatorTab = el instanceof HTMLElement && el.dataset?.page === "calculator";
+    const isFaithRoseBalanceTab =
+      el instanceof HTMLElement && el.dataset?.page === "balance" && faithRoseBalancePageEnabled();
     const allowCalculatorForStaff = isCalculatorTab && staffMayAccessCalculatorTenant();
-    el.classList.toggle("hidden", !(isOwner || allowCalculatorForStaff));
+    el.classList.toggle("hidden", !(isOwner || allowCalculatorForStaff || isFaithRoseBalanceTab));
   });
   document.querySelectorAll(".owner-only-highlight").forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
@@ -4310,17 +4391,17 @@ function showLoggedIn() {
     let shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : state.appInstance === "terry"
-      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "faith-expenses" || page === "faith-sales"
+      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : state.appInstance === "cess" ||
           state.appInstance === "maina-faith-cess" ||
           state.appInstance === "terry-and-cess"
-      ? page === "rose-inventory" || page === "calculator" || page === "faith-expenses" || page === "faith-sales"
+      ? page === "rose-inventory" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : state.appInstance === "shop"
-      ? page === "inventory" || page === "sales-bags" || page === "calculator" || page === "faith-expenses" || page === "faith-sales"
+      ? page === "inventory" || page === "sales-bags" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : terryCessShopTenant
       ? page === "inventory"
       : recordsTenant
-      ? page === "rose-inventory" || page === "faith-expenses" || page === "faith-sales"
+      ? page === "rose-inventory" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : page === "rose-inventory"
         ? false
         : isOwner
@@ -4343,6 +4424,11 @@ function showLoggedIn() {
     }
     if (page === "faith-sales") {
       shouldShow = faithSalesPageTenantEnabled();
+    }
+    if (page === "balance" && faithRoseBalancePageEnabled()) {
+      shouldShow = true;
+    } else if (page === "balance") {
+      shouldShow = isOwner && (state.appInstance === "amana" || state.appInstance === "ufaray");
     }
     if (page === "expenditure") {
       shouldShow = !expensesPageTenantEnabled() && shouldShow;
@@ -7323,8 +7409,8 @@ function showPage(page) {
     return showPage("inventory");
   }
   if (state.appInstance === "shop" && page !== "inventory" && page !== "sales-bags") {
-    if (page === "calculator" || page === "faith-expenses" || page === "faith-sales") {
-      // Calculator, Expenses, and Sales are allowed for Faith Inventory shop users.
+    if (page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance") {
+      // Calculator, Expenses, Sales, and Balance are allowed for Faith Inventory shop users.
     } else {
       return showPage("inventory");
     }
@@ -7352,7 +7438,8 @@ function showPage(page) {
     page !== "nahashon-records" &&
     page !== "calculator" &&
     page !== "faith-expenses" &&
-    page !== "faith-sales"
+    page !== "faith-sales" &&
+    page !== "balance"
   ) {
     return showPage("rose-inventory");
   }
@@ -7363,11 +7450,18 @@ function showPage(page) {
     page !== "rose-inventory" &&
     page !== "calculator" &&
     page !== "faith-expenses" &&
-    page !== "faith-sales"
+    page !== "faith-sales" &&
+    page !== "balance"
   ) {
     return showPage("rose-inventory");
   }
-  if (isRecordsTenant() && page !== "rose-inventory" && page !== "faith-expenses" && page !== "faith-sales") {
+  if (
+    isRecordsTenant() &&
+    page !== "rose-inventory" &&
+    page !== "faith-expenses" &&
+    page !== "faith-sales" &&
+    page !== "balance"
+  ) {
     return showPage("rose-inventory");
   }
   if (page === "faith-expenses" && !expensesPageTenantEnabled()) {
@@ -7381,7 +7475,7 @@ function showPage(page) {
   } else if (page === "calculator" && state.user?.role !== "owner") {
     return showPage("inventory");
   }
-  if (page === "balance" && state.user?.role !== "owner") {
+  if (page === "balance" && !faithRoseBalancePageEnabled() && state.user?.role !== "owner") {
     return showPage("sales-bags");
   }
   if (page === "monthly-report") {
@@ -7439,7 +7533,7 @@ function showPage(page) {
   if (page === "calculator" && state.appInstance === "ufaray") {
     pageHeading.textContent = "Ufaray Feeds";
   }
-  const lotScopedPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales"]);
+  const lotScopedPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales", "balance"]);
   if (lotScopedPages.has(page) && inventoryLotsTenantEnabled() && activeLotName()) {
     const baseTitle = pageHeading.textContent || PAGE_HEADINGS[page] || page;
     pageHeading.textContent = `${baseTitle} — ${activeLotName()}`;
@@ -7515,7 +7609,10 @@ function showPage(page) {
     ensureExpenditureStatementMonth();
     renderExpenditureTable();
   }
-  if (page === "balance") updateBalanceBanner();
+  if (page === "balance") {
+    updateBalanceBanner();
+    renderFaithRoseBalancePage();
+  }
   if (page === "monthly-report") renderMonthlyReport();
   if (page === "monthly-records") renderMonthlyRecords();
   if (page === "loan-repayment") renderLoanRepaymentPage();
@@ -7688,6 +7785,7 @@ function refreshLotScopedPageTables() {
   if (state.currentPage === "nahashon-records") renderNahashonTable();
   if (state.currentPage === "faith-expenses") renderFaithExpensesTable();
   if (state.currentPage === "faith-sales") renderFaithSalesTable();
+  if (state.currentPage === "balance") renderFaithRoseBalancePage();
 }
 
 function updateInventoryLotBarUi() {
@@ -8321,6 +8419,7 @@ async function boot() {
 
 function userMayNavigateToPage(page) {
   if (!page || !state.user) return false;
+  if (page === "balance" && faithRoseBalancePageEnabled()) return true;
   if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return false;
   if (page === "credit" && !creditTenantEnabled()) return false;
   if (page === "nahashon-records" && state.appInstance !== "terry") return false;
