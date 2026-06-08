@@ -167,6 +167,25 @@ function meterBillRecipientsTenantEnabled() {
   return isBillsTenant();
 }
 
+const DEFAULT_METER_BILL_RECIPIENT_NAMES = ["Nahashon", "Nzuki"];
+
+async function ensureDefaultMeterBillRecipientsPresent() {
+  const existing = new Set(
+    (state.meterBillRecipients || []).map((r) => String(r.name || "").trim().toLowerCase())
+  );
+  let created = false;
+  for (const name of DEFAULT_METER_BILL_RECIPIENT_NAMES) {
+    if (existing.has(name.toLowerCase())) continue;
+    try {
+      await api("/api/meter-bill-recipients", { method: "POST", body: JSON.stringify({ name }) });
+      created = true;
+    } catch (_error) {
+      /* keep loading other defaults */
+    }
+  }
+  return created;
+}
+
 function activeMeterBillRecipientStorageKey() {
   return `amanaMeterBillRecipientId:${state.appInstance}`;
 }
@@ -7928,8 +7947,12 @@ async function loadMeterBillRecipients() {
     return;
   }
   try {
-    const recipients = await api("/api/meter-bill-recipients");
+    let recipients = await api("/api/meter-bill-recipients");
     state.meterBillRecipients = Array.isArray(recipients) ? recipients : [];
+    if (await ensureDefaultMeterBillRecipientsPresent()) {
+      recipients = await api("/api/meter-bill-recipients");
+      state.meterBillRecipients = Array.isArray(recipients) ? recipients : [];
+    }
     let recipientId = readPersistedActiveMeterBillRecipientId();
     if (!state.meterBillRecipients.some((r) => Number(r.id) === Number(recipientId))) {
       recipientId = state.meterBillRecipients[0]?.id ?? 1;
@@ -7954,7 +7977,11 @@ function updateMeterBillRecipientBarUi() {
   if (!enabled) return;
   const current = String(state.activeMeterBillRecipientId || "");
   select.innerHTML = "";
-  for (const recipient of state.meterBillRecipients || []) {
+  const recipients =
+    (state.meterBillRecipients || []).length > 0
+      ? state.meterBillRecipients
+      : DEFAULT_METER_BILL_RECIPIENT_NAMES.map((name, idx) => ({ id: idx + 1, name }));
+  for (const recipient of recipients) {
     const opt = document.createElement("option");
     opt.value = String(recipient.id);
     opt.textContent = recipient.name || `Recipient ${recipient.id}`;
@@ -7989,7 +8016,7 @@ async function onActiveMeterBillRecipientChange(recipientId) {
 }
 
 async function loadBillsTenantData() {
-  if (!state.meterBillRecipients.length && meterBillRecipientsTenantEnabled()) {
+  if (meterBillRecipientsTenantEnabled()) {
     await loadMeterBillRecipients();
   }
   const q = meterBillRecipientApiQuery();

@@ -170,7 +170,10 @@
           <div class="inventory-lot-toolbar">
             <label class="inventory-lot-select-field">
               <span>Bill for</span>
-              <select id="meterBillRecipientSelect" aria-label="Select bill recipient"></select>
+              <select id="meterBillRecipientSelect" aria-label="Select bill recipient">
+                <option value="1">Nahashon</option>
+                <option value="2">Nzuki</option>
+              </select>
             </label>
             <button type="button" id="meterBillRecipientAddBtn" class="secondary">Add person</button>
             <div id="meterBillRecipientNewWrap" class="inventory-lot-new-wrap hidden">
@@ -2839,6 +2842,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-27-electricity-money-paid"></script>
+    <script src="app.js?v=2026-05-27-bill-recipients"></script>
   </body>
 </html>

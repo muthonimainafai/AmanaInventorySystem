@@ -601,11 +601,16 @@ async function resolveLotIdForRequest(req) {
   return lotId;
 }
 
+const DEFAULT_METER_BILL_RECIPIENT_NAMES = ["Nahashon", "Nzuki"];
+
 async function ensureMeterBillRecipientsSeeded() {
-  const count = await get("SELECT COUNT(*) AS c FROM meter_bill_recipients");
-  if ((count?.c || 0) > 0) return;
   const now = new Date().toISOString();
-  for (const name of ["Nahashon", "Nzuki"]) {
+  for (const name of DEFAULT_METER_BILL_RECIPIENT_NAMES) {
+    const existing = await get(
+      "SELECT id FROM meter_bill_recipients WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
+      [name]
+    );
+    if (existing?.id) continue;
     await run(
       "INSERT INTO meter_bill_recipients (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)",
       [name, "system", now, now]
@@ -5210,6 +5215,7 @@ app.post("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, re
   if (!meterBillsTenantEnabled()) {
     return res.status(403).json({ error: "Bill recipients are not available for this workspace." });
   }
+  await ensureMeterBillRecipientsSeeded();
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "Recipient name is required." });
   const nowIso = new Date().toISOString();
