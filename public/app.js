@@ -245,6 +245,8 @@ const OWNER_ALLOWED_PAGES = new Set([
   "gas",
   "rose-inventory",
   "nahashon-records",
+  "faith-expenses",
+  "faith-sales",
   "cess-accounts",
   "credit",
   "pigs",
@@ -8159,20 +8161,27 @@ async function boot() {
   }
 }
 
+function userMayNavigateToPage(page) {
+  if (!page || !state.user) return false;
+  if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return false;
+  if (page === "credit" && !creditTenantEnabled()) return false;
+  if (page === "nahashon-records" && state.appInstance !== "terry") return false;
+  if ((page === "water-bills" || page === "electricity-bills") && state.user.role !== "owner") return false;
+  if (page === "faith-expenses" && !expensesPageTenantEnabled()) return false;
+  if (page === "faith-sales" && !faithSalesPageTenantEnabled()) return false;
+  if (state.user.role === "owner") {
+    return OWNER_ALLOWED_PAGES.has(page);
+  }
+  if (OWNER_INVENTORY_PAGES.has(page)) {
+    return page === "calculator" && staffMayAccessCalculatorTenant();
+  }
+  return true;
+}
+
 document.querySelectorAll(".nav-tab").forEach((btn) => {
   btn.addEventListener("click", () => {
     const page = btn.dataset.page;
-    if (state.user.role === "owner" && !OWNER_ALLOWED_PAGES.has(page)) return;
-    if (state.user.role !== "owner" && OWNER_INVENTORY_PAGES.has(page)) {
-      const staffMayUseCalculator = page === "calculator" && staffMayAccessCalculatorTenant();
-      if (!staffMayUseCalculator) return;
-    }
-    if (page === "cess-accounts" && (state.appInstance !== "amana" || state.user.role !== "owner")) return;
-    if (page === "credit" && !creditTenantEnabled()) return;
-    if (page === "nahashon-records" && state.appInstance !== "terry") return;
-    if ((page === "water-bills" || page === "electricity-bills") && state.user.role !== "owner") return;
-    if (page === "faith-expenses" && !expensesPageTenantEnabled()) return;
-    if (page === "faith-sales" && !faithSalesPageTenantEnabled()) return;
+    if (!userMayNavigateToPage(page)) return;
     showPage(page);
   });
 });
