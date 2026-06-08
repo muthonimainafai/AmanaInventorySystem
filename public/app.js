@@ -97,6 +97,8 @@ const state = {
   editFaithExpensesId: null,
   faithSalesEntries: [],
   editFaithSalesId: null,
+  inventoryLots: [],
+  activeLotId: null,
   pigsEntries: [],
   editPigsId: null,
   waterBillsEntries: [],
@@ -202,6 +204,40 @@ function expensesPageTenantEnabled() {
 
 function faithSalesPageTenantEnabled() {
   return isFaithInventoryTenant() || isRecordsTenant();
+}
+
+function inventoryLotsTenantEnabled() {
+  return expensesPageTenantEnabled();
+}
+
+function activeLotStorageKey() {
+  return `amanaActiveLotId:${state.appInstance}`;
+}
+
+function persistActiveLotId(lotId) {
+  if (!inventoryLotsTenantEnabled() || !lotId) return;
+  sessionStorage.setItem(activeLotStorageKey(), String(lotId));
+}
+
+function readPersistedActiveLotId() {
+  const raw = sessionStorage.getItem(activeLotStorageKey());
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function activeLotName() {
+  const lot = (state.inventoryLots || []).find((l) => Number(l.id) === Number(state.activeLotId));
+  return lot?.name || (state.activeLotId ? `Lot ${state.activeLotId}` : "");
+}
+
+function lotScopedApiQuery() {
+  if (!inventoryLotsTenantEnabled() || !state.activeLotId) return "";
+  return `?lot_id=${encodeURIComponent(state.activeLotId)}`;
+}
+
+function withActiveLotId(payload) {
+  if (!inventoryLotsTenantEnabled() || !state.activeLotId) return payload;
+  return { ...payload, lot_id: state.activeLotId };
 }
 
 const FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN = 450;
@@ -2484,6 +2520,19 @@ function drawStandardPagePdfHeader(doc, { pageTitle, subtitle }) {
   return 74;
 }
 
+function pdfRowFromTableCells(cells, headerCount) {
+  const row = [];
+  for (const cell of cells) {
+    if (cell.querySelector(".row-actions")) continue;
+    const text = cell.textContent.trim().replace(/\s+/g, " ");
+    const span = Number(cell.colSpan) || 1;
+    for (let i = 0; i < span; i++) row.push(i === 0 ? text : "");
+  }
+  while (row.length < headerCount) row.push("");
+  if (row.length > headerCount) row.length = headerCount;
+  return row.map((c) => ({ content: c || "—", styles: { fontStyle: "bold" } }));
+}
+
 function tableElementToPdfData(table) {
   if (!(table instanceof HTMLTableElement)) return null;
   const ths = [...table.querySelectorAll("thead th")];
@@ -2501,6 +2550,13 @@ function tableElementToPdfData(table) {
     while (row.length < headers.length) row.push("");
     body.push(row);
   }
+  for (const tr of table.querySelectorAll("tfoot tr")) {
+    const cells = [...tr.querySelectorAll("th, td")];
+    if (!cells.length) continue;
+    const footerRow = pdfRowFromTableCells(cells, headers.length);
+    if (footerRow.some((c) => c.content && c.content !== "—")) body.push(footerRow);
+  }
+  if (!body.length) return null;
   return { headers, body };
 }
 
@@ -2816,7 +2872,10 @@ function downloadMeterBillsPagePdf() {
 
 function downloadGenericCurrentPagePdf() {
   const page = state.currentPage;
-  const pageTitle = PAGE_HEADINGS[page] || pageHeading?.textContent || "Page";
+  const lotPdfPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales"]);
+  const lotSuffix =
+    lotPdfPages.has(page) && inventoryLotsTenantEnabled() && activeLotName() ? ` — ${activeLotName()}` : "";
+  const pageTitle = (PAGE_HEADINGS[page] || pageHeading?.textContent || "Page") + lotSuffix;
   const pageEl = document.getElementById(`page-${page}`);
   if (!pageEl) {
     alert("Nothing to export on this page.");
@@ -2835,15 +2894,19 @@ function downloadGenericCurrentPagePdf() {
     "gas",
     "rose-inventory",
     "nahashon-records",
+    "faith-expenses",
+    "faith-sales",
     "cess-accounts",
     "credit",
     "pigs",
     "water-bills",
     "electricity-bills",
   ]);
+  const lotLabel =
+    inventoryLotsTenantEnabled() && activeLotName() ? ` · ${activeLotName()}` : "";
   downloadStandardPageTablePdf({
     pageTitle,
-    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}${lotLabel}`,
     filename: `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`,
     sections,
     landscape: widePages.has(page),
@@ -4361,6 +4424,7 @@ function showLoggedIn() {
   // Re-apply tenant-specific visibility after role-based show/hide rules.
   applyAppTheme();
   applyMeterBillsOwnerBalanceUi();
+  updateInventoryLotBarUi();
 }
 
 function showVehicleLoggedIn() {
@@ -7375,6 +7439,11 @@ function showPage(page) {
   if (page === "calculator" && state.appInstance === "ufaray") {
     pageHeading.textContent = "Ufaray Feeds";
   }
+  const lotScopedPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales"]);
+  if (lotScopedPages.has(page) && inventoryLotsTenantEnabled() && activeLotName()) {
+    const baseTitle = pageHeading.textContent || PAGE_HEADINGS[page] || page;
+    pageHeading.textContent = `${baseTitle} — ${activeLotName()}`;
+  }
   if (
     page === "sales-bags" ||
     page === "sales-kg" ||
@@ -7573,11 +7642,100 @@ async function loadBillsTenantData() {
   applyMeterBillsOwnerBalanceUi();
 }
 
+async function loadInventoryLots() {
+  if (!inventoryLotsTenantEnabled()) {
+    state.inventoryLots = [];
+    state.activeLotId = null;
+    updateInventoryLotBarUi();
+    return;
+  }
+  try {
+    const lots = await api("/api/inventory-lots");
+    state.inventoryLots = Array.isArray(lots) ? lots : [];
+    let lotId = readPersistedActiveLotId();
+    if (!state.inventoryLots.some((l) => Number(l.id) === Number(lotId))) {
+      lotId = state.inventoryLots[0]?.id ?? 1;
+    }
+    state.activeLotId = lotId;
+    persistActiveLotId(lotId);
+  } catch (_error) {
+    state.inventoryLots = [];
+    state.activeLotId = 1;
+  }
+  updateInventoryLotBarUi();
+}
+
+async function loadLotScopedEntries() {
+  if (!inventoryLotsTenantEnabled() || !state.activeLotId) return;
+  const q = lotScopedApiQuery();
+  const requests = [
+    api(`/api/rose/inventory${q}`),
+    state.appInstance === "terry" ? api(`/api/nahashon-accounts${q}`) : Promise.resolve(null),
+    api(`/api/faith-expenses${q}`),
+    api(`/api/faith-sales${q}`),
+  ];
+  const [rose, nahashon, faithExp, faithSales] = await Promise.allSettled(requests);
+  state.roseEntries = rose.status === "fulfilled" ? rose.value : [];
+  if (state.appInstance === "terry" && nahashon.status === "fulfilled") {
+    state.nahashonEntries = nahashon.value || [];
+  }
+  state.faithExpensesEntries = faithExp.status === "fulfilled" ? faithExp.value : [];
+  state.faithSalesEntries = faithSales.status === "fulfilled" ? faithSales.value : [];
+}
+
+function refreshLotScopedPageTables() {
+  if (state.currentPage === "rose-inventory") renderRoseTable();
+  if (state.currentPage === "nahashon-records") renderNahashonTable();
+  if (state.currentPage === "faith-expenses") renderFaithExpensesTable();
+  if (state.currentPage === "faith-sales") renderFaithSalesTable();
+}
+
+function updateInventoryLotBarUi() {
+  const bar = document.getElementById("inventoryLotBar");
+  const select = document.getElementById("inventoryLotSelect");
+  if (!bar || !select) return;
+  const enabled = inventoryLotsTenantEnabled();
+  bar.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+  const current = String(state.activeLotId || "");
+  select.innerHTML = "";
+  for (const lot of state.inventoryLots || []) {
+    const opt = document.createElement("option");
+    opt.value = String(lot.id);
+    opt.textContent = lot.name || `Lot ${lot.id}`;
+    select.appendChild(opt);
+  }
+  if (current && [...select.options].some((o) => o.value === current)) {
+    select.value = current;
+  } else if (select.options.length) {
+    select.value = select.options[0].value;
+    state.activeLotId = Number(select.value);
+    persistActiveLotId(state.activeLotId);
+  }
+}
+
+async function onActiveLotChange(lotId) {
+  const nextId = Number(lotId);
+  if (!Number.isFinite(nextId) || nextId <= 0) return;
+  state.activeLotId = nextId;
+  persistActiveLotId(nextId);
+  resetRoseForm();
+  resetNahashonForm();
+  resetFaithExpensesForm();
+  resetFaithSalesForm();
+  updateInventoryLotBarUi();
+  await loadLotScopedEntries();
+  refreshLotScopedPageTables();
+  if (state.currentPage) showPage(state.currentPage);
+}
+
 async function loadAllData() {
   if (isBillsTenant()) {
     await loadBillsTenantData();
     return;
   }
+  await loadInventoryLots();
+  const lotQ = lotScopedApiQuery();
   const inventoryDraft = captureInventoryFormDraft();
   const salesKgDraft = captureSalesKgFormDraft();
   state.catalog = await loadCatalogFromServer();
@@ -7693,10 +7851,10 @@ async function loadAllData() {
     api("/api/gas/employee-items"),
     api("/api/gas/sales"),
     api("/api/expenditure"),
-    api("/api/rose/inventory"),
-    api("/api/nahashon-accounts"),
-    api("/api/faith-expenses"),
-    api("/api/faith-sales"),
+    api(`/api/rose/inventory${lotQ}`),
+    api(`/api/nahashon-accounts${lotQ}`),
+    api(`/api/faith-expenses${lotQ}`),
+    api(`/api/faith-sales${lotQ}`),
     api("/api/cess-accounts"),
     api("/api/pigs"),
     api("/api/credit-accounts"),
@@ -9447,7 +9605,7 @@ roseForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = roseDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  const payload = {
+  const payload = withActiveLotId({
     date: dateValue,
     description: String(document.getElementById("roseDescription")?.value || "").trim(),
     quantity: Number(document.getElementById("roseQuantity")?.value || 0),
@@ -9456,7 +9614,7 @@ roseForm?.addEventListener("submit", async (event) => {
     money_out: Number(document.getElementById("roseMoneyOut")?.value || 0),
     mortality: Number(document.getElementById("roseMortality")?.value || 0),
     sale_via: String(document.getElementById("roseSaleVia")?.value || "Shop").trim(),
-  };
+  });
   try {
     if (state.editRoseId) {
       await api(`/api/rose/inventory/${state.editRoseId}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -9637,13 +9795,13 @@ faithSalesForm?.addEventListener("submit", async (event) => {
   if (!Number.isFinite(numChickens) || numChickens <= 0) return alert("Enter a valid number of chickens.");
   if (!Number.isFinite(pricePerChicken) || pricePerChicken < 0) return alert("Enter a valid price per chicken.");
   if (!Number.isFinite(amountPaid) || amountPaid < 0) return alert("Enter a valid amount paid.");
-  const payload = {
+  const payload = withActiveLotId({
     date: dateValue,
     num_chickens: numChickens,
     price_per_chicken: pricePerChicken,
     description: String(document.getElementById("faithSalesDescription")?.value || "").trim(),
     amount_paid: amountPaid,
-  };
+  });
   try {
     if (state.editFaithSalesId) {
       await api(`/api/faith-sales/${state.editFaithSalesId}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -9663,11 +9821,11 @@ faithExpensesForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = faithExpDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  const payload = {
+  const payload = withActiveLotId({
     date: dateValue,
     description: String(document.getElementById("faithExpDescription")?.value || "").trim(),
     money_out: Number(document.getElementById("faithExpMoneyOut")?.value || 0),
-  };
+  });
   if (!payload.description) return alert("Description is required.");
   try {
     if (state.editFaithExpensesId) {
@@ -9688,7 +9846,7 @@ nahashonForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = nahashonDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  const payload = {
+  const payload = withActiveLotId({
     date: dateValue,
     description: String(document.getElementById("nahashonDescription")?.value || "").trim(),
     quantity: Number(document.getElementById("nahashonQuantity")?.value || 0),
@@ -9697,7 +9855,7 @@ nahashonForm?.addEventListener("submit", async (event) => {
     money_out: Number(document.getElementById("nahashonMoneyOut")?.value || 0),
     mortality: Number(document.getElementById("nahashonMortality")?.value || 0),
     sale_via: String(document.getElementById("nahashonSaleVia")?.value || "Shop").trim(),
-  };
+  });
   try {
     if (state.editNahashonId) {
       await api(`/api/nahashon-accounts/${state.editNahashonId}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -11153,6 +11311,37 @@ pigsBody?.addEventListener("click", async (event) => {
     } catch (error) {
       alert(error.message);
     }
+  }
+});
+
+document.getElementById("inventoryLotSelect")?.addEventListener("change", (event) => {
+  const value = event.target instanceof HTMLSelectElement ? event.target.value : "";
+  if (value) onActiveLotChange(value);
+});
+
+document.getElementById("inventoryLotAddBtn")?.addEventListener("click", () => {
+  document.getElementById("inventoryLotNewWrap")?.classList.remove("hidden");
+  document.getElementById("inventoryLotNewName")?.focus();
+});
+
+document.getElementById("inventoryLotCancelNewBtn")?.addEventListener("click", () => {
+  document.getElementById("inventoryLotNewWrap")?.classList.add("hidden");
+  const nameInput = document.getElementById("inventoryLotNewName");
+  if (nameInput) nameInput.value = "";
+});
+
+document.getElementById("inventoryLotSaveNewBtn")?.addEventListener("click", async () => {
+  const name = String(document.getElementById("inventoryLotNewName")?.value || "").trim();
+  if (!name) return alert("Enter a lot name.");
+  try {
+    const result = await api("/api/inventory-lots", { method: "POST", body: JSON.stringify({ name }) });
+    document.getElementById("inventoryLotNewWrap")?.classList.add("hidden");
+    const nameInput = document.getElementById("inventoryLotNewName");
+    if (nameInput) nameInput.value = "";
+    await loadInventoryLots();
+    if (result?.id) await onActiveLotChange(result.id);
+  } catch (error) {
+    alert(error.message);
   }
 });
 

@@ -166,6 +166,25 @@
           </div>
         </div>
 
+        <div id="inventoryLotBar" class="card inventory-lot-bar hidden">
+          <div class="inventory-lot-toolbar">
+            <label class="inventory-lot-select-field">
+              <span>Active lot</span>
+              <select id="inventoryLotSelect" aria-label="Select inventory lot"></select>
+            </label>
+            <button type="button" id="inventoryLotAddBtn" class="secondary">Add lot</button>
+            <div id="inventoryLotNewWrap" class="inventory-lot-new-wrap hidden">
+              <label>
+                New lot name
+                <input type="text" id="inventoryLotNewName" placeholder="e.g. Lot 11" />
+              </label>
+              <button type="button" id="inventoryLotSaveNewBtn">Save lot</button>
+              <button type="button" class="secondary" id="inventoryLotCancelNewBtn">Cancel</button>
+            </div>
+          </div>
+          <p class="field-hint" id="inventoryLotHint">Records on Rose Inventory, Sales, Expenses, and Nahashon Records are saved per lot. Switch lots to view or add entries for a different batch.</p>
+        </div>
+
         <div id="page-inventory" class="app-page">
           <div class="card">
           <form id="inventory-form">
@@ -2762,6 +2781,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-06-06-faith-nav-fix"></script>
+    <script src="app.js?v=2026-05-27-inventory-lots"></script>
   </body>
 </html>

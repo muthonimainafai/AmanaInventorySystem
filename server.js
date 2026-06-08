@@ -558,6 +558,49 @@ async function ensureChickenBreedsSeeded() {
   }
 }
 
+async function ensureInventoryLotsSeeded() {
+  const count = await get("SELECT COUNT(*) AS c FROM inventory_lots");
+  if ((count?.c || 0) > 0) return;
+  const now = new Date().toISOString();
+  for (let i = 1; i <= 10; i++) {
+    await run(
+      "INSERT INTO inventory_lots (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)",
+      [`Lot ${i}`, "system", now, now]
+    );
+  }
+}
+
+function inventoryLotsTenantEnabled() {
+  const t = activeTenant();
+  return (
+    t === "rose" ||
+    t === "nahah" ||
+    t === "terry" ||
+    t === "cess" ||
+    t === "terry-and-cess" ||
+    t === "maina-faith-cess" ||
+    t === "shop"
+  );
+}
+
+function parseLotIdParam(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) return null;
+  return n;
+}
+
+async function resolveLotIdForRequest(req) {
+  const raw = req.query?.lot_id ?? req.body?.lot_id;
+  let lotId = parseLotIdParam(raw);
+  if (!inventoryLotsTenantEnabled()) {
+    return lotId || 1;
+  }
+  if (!lotId) return null;
+  const lot = await get("SELECT id FROM inventory_lots WHERE id = ?", [lotId]);
+  if (!lot) return null;
+  return lotId;
+}
+
 /** One-time: accumulated_profit = total profit from bags recorded as sold (historical sales × current margin). */
 async function migrateAccumulatedProfitFromSalesIfNeeded() {
   const row = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_profit_v2"]);
@@ -1003,6 +1046,25 @@ async function initDb() {
       updated_at TEXT NOT NULL
     )
   `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS inventory_lots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  for (const table of [
+    "rose_inventory_entries",
+    "nahashon_accounts_entries",
+    "faith_expenses_entries",
+    "faith_sales_entries",
+  ]) {
+    await run(`ALTER TABLE ${table} ADD COLUMN lot_id INTEGER NOT NULL DEFAULT 1`).catch(() => {});
+  }
+  await ensureInventoryLotsSeeded();
 
   await run(`
     CREATE TABLE IF NOT EXISTS water_bills_entries (
@@ -4465,11 +4527,37 @@ app.delete("/api/expenditure/:id", auth, allowRoles("owner", "employee"), async 
   res.json({ ok: true });
 });
 
+app.get("/api/inventory-lots", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!inventoryLotsTenantEnabled()) return res.json([]);
+  await ensureInventoryLotsSeeded();
+  const rows = await all("SELECT * FROM inventory_lots ORDER BY id ASC");
+  res.json(rows);
+});
+
+app.post("/api/inventory-lots", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!inventoryLotsTenantEnabled()) {
+    return res.status(403).json({ error: "Lots are not available for this workspace." });
+  }
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Lot name is required." });
+  const nowIso = new Date().toISOString();
+  const result = await run(
+    "INSERT INTO inventory_lots (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    [name, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true, id: result.lastID, name });
+});
+
 app.get("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const rows =
     req.user.role === "owner"
-      ? await all("SELECT * FROM rose_inventory_entries ORDER BY id DESC")
-      : await all("SELECT * FROM rose_inventory_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+      ? await all("SELECT * FROM rose_inventory_entries WHERE lot_id = ? ORDER BY id DESC", [lotId])
+      : await all("SELECT * FROM rose_inventory_entries WHERE lot_id = ? AND created_by = ? ORDER BY id DESC", [
+          lotId,
+          req.user.username,
+        ]);
   res.json(rows);
 });
 
@@ -4491,6 +4579,8 @@ function normalizeRoseSaleVia(raw) {
 }
 
 app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -4513,9 +4603,9 @@ app.post("/api/rose/inventory", auth, allowRoles("owner", "employee"), async (re
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO rose_inventory_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, req.user.username, nowIso, nowIso]
+    `INSERT INTO rose_inventory_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, lot_id, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, lotId, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -4566,14 +4656,21 @@ app.delete("/api/rose/inventory/:id", auth, allowRoles("owner", "employee"), asy
 });
 
 app.get("/api/nahashon-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const rows =
     req.user.role === "owner"
-      ? await all("SELECT * FROM nahashon_accounts_entries ORDER BY id DESC")
-      : await all("SELECT * FROM nahashon_accounts_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+      ? await all("SELECT * FROM nahashon_accounts_entries WHERE lot_id = ? ORDER BY id DESC", [lotId])
+      : await all("SELECT * FROM nahashon_accounts_entries WHERE lot_id = ? AND created_by = ? ORDER BY id DESC", [
+          lotId,
+          req.user.username,
+        ]);
   res.json(rows);
 });
 
 app.post("/api/nahashon-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -4592,9 +4689,9 @@ app.post("/api/nahashon-accounts", auth, allowRoles("owner", "employee"), async 
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO nahashon_accounts_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, req.user.username, nowIso, nowIso]
+    `INSERT INTO nahashon_accounts_entries (date, description, quantity, unit_price, money_in, money_out, mortality, sale_via, lot_id, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, lotId, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -4632,14 +4729,21 @@ app.put("/api/nahashon-accounts/:id", auth, allowRoles("owner", "employee"), asy
 });
 
 app.get("/api/faith-expenses", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const rows =
     req.user.role === "owner"
-      ? await all("SELECT * FROM faith_expenses_entries ORDER BY id DESC")
-      : await all("SELECT * FROM faith_expenses_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+      ? await all("SELECT * FROM faith_expenses_entries WHERE lot_id = ? ORDER BY id DESC", [lotId])
+      : await all("SELECT * FROM faith_expenses_entries WHERE lot_id = ? AND created_by = ? ORDER BY id DESC", [
+          lotId,
+          req.user.username,
+        ]);
   res.json(rows);
 });
 
 app.post("/api/faith-expenses", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -4653,9 +4757,9 @@ app.post("/api/faith-expenses", auth, allowRoles("owner", "employee"), async (re
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO faith_expenses_entries (date, description, money_out, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, moneyOut, req.user.username, nowIso, nowIso]
+    `INSERT INTO faith_expenses_entries (date, description, money_out, lot_id, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, moneyOut, lotId, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -4743,14 +4847,21 @@ function parseFaithSalesBody(p) {
 }
 
 app.get("/api/faith-sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   const rows =
     req.user.role === "owner"
-      ? await all("SELECT * FROM faith_sales_entries ORDER BY id DESC")
-      : await all("SELECT * FROM faith_sales_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+      ? await all("SELECT * FROM faith_sales_entries WHERE lot_id = ? ORDER BY id DESC", [lotId])
+      : await all("SELECT * FROM faith_sales_entries WHERE lot_id = ? AND created_by = ? ORDER BY id DESC", [
+          lotId,
+          req.user.username,
+        ]);
   res.json(rows);
 });
 
 app.post("/api/faith-sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const lotId = await resolveLotIdForRequest(req);
+  if (lotId == null) return res.status(400).json({ error: "lot_id is required." });
   let parsed;
   try {
     parsed = parseFaithSalesBody(req.body || {});
@@ -4760,8 +4871,8 @@ app.post("/api/faith-sales", auth, allowRoles("owner", "employee"), async (req, 
   const nowIso = new Date().toISOString();
   await run(
     `INSERT INTO faith_sales_entries
-     (date, num_chickens, price_per_chicken, description, total_amount, amount_paid, amount_balance, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (date, num_chickens, price_per_chicken, description, total_amount, amount_paid, amount_balance, lot_id, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       parsed.dateCanon,
       parsed.numChickens,
@@ -4770,6 +4881,7 @@ app.post("/api/faith-sales", auth, allowRoles("owner", "employee"), async (req, 
       parsed.totalAmount,
       parsed.amountPaid,
       parsed.amountBalance,
+      lotId,
       req.user.username,
       nowIso,
       nowIso,

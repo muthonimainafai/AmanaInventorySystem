@@ -895,3 +895,32 @@ tr.table-date-separator td {
   font-size: 1.05rem;
   font-weight: 600;
 }
+
+.inventory-lot-bar {
+  margin-bottom: 12px;
+}
+
+.inventory-lot-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.inventory-lot-select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+}
+
+.inventory-lot-new-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.inventory-lot-new-wrap.hidden {
+  display: none;
+}
