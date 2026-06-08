@@ -166,6 +166,25 @@
           </div>
         </div>
 
+        <div id="meterBillRecipientBar" class="card inventory-lot-bar hidden">
+          <div class="inventory-lot-toolbar">
+            <label class="inventory-lot-select-field">
+              <span>Bill for</span>
+              <select id="meterBillRecipientSelect" aria-label="Select bill recipient"></select>
+            </label>
+            <button type="button" id="meterBillRecipientAddBtn" class="secondary">Add person</button>
+            <div id="meterBillRecipientNewWrap" class="inventory-lot-new-wrap hidden">
+              <label>
+                New name
+                <input type="text" id="meterBillRecipientNewName" placeholder="e.g. Maina" />
+              </label>
+              <button type="button" id="meterBillRecipientSaveNewBtn">Save</button>
+              <button type="button" class="secondary" id="meterBillRecipientCancelNewBtn">Cancel</button>
+            </div>
+          </div>
+          <p class="field-hint" id="meterBillRecipientHint">Water and electricity bill entries are saved separately for each person. Switch to view or add billings for Nahashon, Nzuki, or another recipient.</p>
+        </div>
+
         <div id="inventoryLotBar" class="card inventory-lot-bar hidden">
           <div class="inventory-lot-toolbar">
             <label class="inventory-lot-select-field">
@@ -1882,8 +1901,9 @@
                   </div>
                 </label>
                 <label>
-                  Bill To
-                  <input type="text" id="waterBillsBillTo" placeholder="Name of person or account" />
+                  Bill to
+                  <input type="text" id="waterBillsBillTo" readonly tabindex="-1" />
+                  <span class="field-hint">Set from the person selected above.</span>
                 </label>
                 <label>
                   Current meter reading (m³)
@@ -1957,7 +1977,7 @@
         <div id="page-electricity-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Electricity Bills</h3>
-            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner enters any balance amount on the last row; total billing = current billing + balance.</p>
+            <p class="field-hint">Enter meter readings in kWh (same units as on your electricity meter or token receipt). Units used and current billing are calculated automatically. The owner enters any balance amount on the last row; total billing = current billing + balance.</p>
             <form id="electricity-bills-form">
               <div class="grid meter-bills-form-grid">
                 <label class="billing-month-field">
@@ -1975,23 +1995,24 @@
                   </div>
                 </label>
                 <label>
-                  Bill To
-                  <input type="text" id="electricityBillsBillTo" placeholder="Name of person or account" />
+                  Bill to
+                  <input type="text" id="electricityBillsBillTo" readonly tabindex="-1" />
+                  <span class="field-hint">Set from the person selected above.</span>
                 </label>
                 <label>
-                  Current meter reading (m³)
+                  Current meter reading (kWh)
                   <input type="number" id="electricityBillsCurrentMeter" min="0" step="0.01" required />
                 </label>
                 <label>
-                  Previous meter reading (m³)
+                  Previous meter reading (kWh)
                   <input type="number" id="electricityBillsPreviousMeter" min="0" step="0.01" required />
                 </label>
                 <label>
-                  Units used (m³)
+                  Units used (kWh)
                   <input type="text" id="electricityBillsUnitsUsed" readonly tabindex="-1" />
                 </label>
                 <label>
-                  Price per m³
+                  Price per kWh
                   <input type="number" id="electricityBillsPricePerM3" min="0" step="0.01" required />
                 </label>
                 <label>
@@ -2022,10 +2043,10 @@
                     <th>Billing month from</th>
                     <th>Billing month to</th>
                     <th>Bill to</th>
-                    <th>Current meter (m³)</th>
-                    <th>Previous meter (m³)</th>
-                    <th>Units used (m³)</th>
-                    <th>Price per m³</th>
+                    <th>Current meter (kWh)</th>
+                    <th>Previous meter (kWh)</th>
+                    <th>Units used (kWh)</th>
+                    <th>Price per kWh</th>
                     <th>Current billing (Ksh)</th>
                     <th>Previous balance</th>
                     <th>Total billing</th>
@@ -2811,6 +2832,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-27-faith-rose-balance"></script>
+    <script src="app.js?v=2026-05-27-electricity-kwh"></script>
   </body>
 </html>

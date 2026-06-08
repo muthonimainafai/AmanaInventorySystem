@@ -105,6 +105,8 @@ const state = {
   editWaterBillsId: null,
   electricityBillsEntries: [],
   editElectricityBillsId: null,
+  meterBillRecipients: [],
+  activeMeterBillRecipientId: null,
   calculatorValues: {},
 };
 
@@ -159,6 +161,97 @@ function isBillsTenant() {
 
 function meterBillsOwnerOnlyTenant() {
   return isBillsTenant();
+}
+
+function meterBillRecipientsTenantEnabled() {
+  return isBillsTenant();
+}
+
+function activeMeterBillRecipientStorageKey() {
+  return `amanaMeterBillRecipientId:${state.appInstance}`;
+}
+
+function persistActiveMeterBillRecipientId(recipientId) {
+  if (!meterBillRecipientsTenantEnabled() || !recipientId) return;
+  sessionStorage.setItem(activeMeterBillRecipientStorageKey(), String(recipientId));
+}
+
+function readPersistedActiveMeterBillRecipientId() {
+  const raw = sessionStorage.getItem(activeMeterBillRecipientStorageKey());
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function activeMeterBillRecipientName() {
+  const recipient = (state.meterBillRecipients || []).find(
+    (r) => Number(r.id) === Number(state.activeMeterBillRecipientId)
+  );
+  return recipient?.name || (state.activeMeterBillRecipientId ? `Recipient ${state.activeMeterBillRecipientId}` : "");
+}
+
+function meterBillRecipientApiQuery() {
+  if (!meterBillRecipientsTenantEnabled() || !state.activeMeterBillRecipientId) return "";
+  return `?recipient_id=${encodeURIComponent(state.activeMeterBillRecipientId)}`;
+}
+
+function withActiveMeterBillRecipientId(payload) {
+  if (!meterBillRecipientsTenantEnabled() || !state.activeMeterBillRecipientId) return payload;
+  const name = activeMeterBillRecipientName();
+  return {
+    ...payload,
+    recipient_id: state.activeMeterBillRecipientId,
+    bill_to: payload.bill_to || name,
+  };
+}
+
+function syncMeterBillsBillToFromRecipient(prefix) {
+  const billToEl = document.getElementById(`${prefix}BillTo`);
+  if (!(billToEl instanceof HTMLInputElement)) return;
+  const name = activeMeterBillRecipientName();
+  if (name) billToEl.value = name;
+}
+
+function isElectricityBillsKind(kind) {
+  return kind === "electricity-bills" || kind === "electricityBills" || kind === "Electricity";
+}
+
+function meterBillsUnitConfig(kind) {
+  const isElectricity =
+    isElectricityBillsKind(kind) || isElectricityBillsTenant() || state.currentPage === "electricity-bills";
+  if (isElectricity) {
+    return {
+      unit: "kWh",
+      priceLabel: "Price per kWh",
+      priceError: "price per kWh",
+      currentReadingLabel: "Current meter reading (kWh)",
+      previousReadingLabel: "Previous meter reading (kWh)",
+      unitsUsedLabel: "Units used (kWh)",
+      pdfStatementSub: "Electricity & token billing statement",
+      pdfSectionTitle: "Meter readings & units (kWh)",
+      pdfPrevHeader: "Prev reading (kWh)",
+      pdfCurrHeader: "Curr reading (kWh)",
+      pdfConsumptionHeader: "Consumption (kWh)",
+      pdfRateSuffix: "/kWh",
+    };
+  }
+  return {
+    unit: "m³",
+    priceLabel: "Price per m³",
+    priceError: "price per m³",
+    currentReadingLabel: "Current meter reading (m³)",
+    previousReadingLabel: "Previous meter reading (m³)",
+    unitsUsedLabel: "Units used (m³)",
+    pdfStatementSub: "Meter billing statement",
+    pdfSectionTitle: "Meter readings & charges",
+    pdfPrevHeader: "Prev reading (m³)",
+    pdfCurrHeader: "Curr reading (m³)",
+    pdfConsumptionHeader: "Consumption (m³)",
+    pdfRateSuffix: "/m³",
+  };
+}
+
+function meterBillsPrefixKind(prefix) {
+  return prefix === "electricityBills" ? "electricity-bills" : "water-bills";
 }
 
 function defaultPageForLoggedInUser() {
@@ -2733,6 +2826,7 @@ function drawMeterBillsInvoiceInfoGrid(doc, { margin, pageW, startY, rows }) {
 }
 
 function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, pageIndex, pageCount }) {
+  const units = meterBillsUnitConfig(serviceItem);
   const margin = 36;
   const pageW = doc.internal.pageSize.getWidth();
   const rightX = pageW - margin;
@@ -2746,7 +2840,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(80, 80, 80);
-  doc.text("Meter billing statement", margin, y);
+  doc.text(units.pdfStatementSub, margin, y);
   y += 22;
 
   const billTo = String(row.bill_to || "").trim() || "—";
@@ -2770,7 +2864,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(...PDF_PAGE_THEME.dark);
-  doc.text("Meter readings & charges", margin, y);
+  doc.text(units.pdfSectionTitle, margin, y);
   y += 12;
 
   const balanceBf = Number(row.balance || 0);
@@ -2783,14 +2877,14 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
 
   runPdfAutoTable(doc, jsPdfNs, {
     startY: y,
-    head: [["Prev reading (m³)", "Curr reading (m³)", "Consumption (m³)", "Item", "Amount (Ksh)"]],
+    head: [[units.pdfPrevHeader, units.pdfCurrHeader, units.pdfConsumptionHeader, "Item", "Amount (Ksh)"]],
     body: [
       ["", "", "", "Previous balance", formatKshPlainNumber(balanceBf)],
       [
         String(prevReading),
         String(currReading),
         String(unitsUsed),
-        `${serviceItem} @ ${formatKshPlainNumber(pricePerM3)}/m³`,
+        `${serviceItem} @ ${formatKshPlainNumber(pricePerM3)}${units.pdfRateSuffix}`,
         formatKshPlainNumber(currentBilling),
       ],
       ["", "", "", "Total amount due", formatKshPlainNumber(totalDue)],
@@ -2828,17 +2922,18 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   }
 }
 
-function meterBillsPdfSectionsFromEntries(entries, sectionTitle) {
+function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "water-bills") {
   const rows = sortRowsLatestFirst(entries || []);
+  const units = meterBillsUnitConfig(billKind);
   const headers = [
     "No",
     "Billing month from",
     "Billing month to",
     "Bill to",
-    "Current meter (m³)",
-    "Previous meter (m³)",
-    "Units used (m³)",
-    "Price per m³",
+    `Current meter (${units.unit})`,
+    `Previous meter (${units.unit})`,
+    `Units used (${units.unit})`,
+    units.priceLabel,
     "Current billing (Ksh)",
     "Previous balance",
     "Total billing",
@@ -2885,12 +2980,16 @@ function downloadMeterBillsPagePdf() {
   const ctx = ensureJsPdfReady();
   if (!ctx) return;
   const page = state.currentPage;
-  const pageTitle = PAGE_HEADINGS[page] || "Bills";
+  const recipientSuffix = activeMeterBillRecipientName() ? ` — ${activeMeterBillRecipientName()}` : "";
+  const pageTitle = (PAGE_HEADINGS[page] || "Bills") + recipientSuffix;
   const serviceItem = page === "electricity-bills" ? "Electricity" : "Water";
   const entries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
   const rows = sortRowsLatestFirst(entries || []);
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   const filename = `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`;
+  const exportSubtitle = activeMeterBillRecipientName()
+    ? `Billings for ${activeMeterBillRecipientName()} · ${state.shopToday || clientShopTodayDMY()}`
+    : `Exported ${state.shopToday || clientShopTodayDMY()}`;
   const { jsPdfNs, JsPdfCtor } = ctx;
   const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
 
@@ -2898,7 +2997,7 @@ function downloadMeterBillsPagePdf() {
     const margin = 36;
     let y = drawStandardPagePdfHeader(doc, {
       pageTitle,
-      subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+      subtitle: exportSubtitle,
     });
     doc.setFont("helvetica", "italic");
     doc.setFontSize(10);
@@ -4511,6 +4610,7 @@ function showLoggedIn() {
   applyAppTheme();
   applyMeterBillsOwnerBalanceUi();
   updateInventoryLotBarUi();
+  updateMeterBillRecipientBarUi();
 }
 
 function showVehicleLoggedIn() {
@@ -6576,20 +6676,20 @@ function meterBillsPayloadFromForm(prefix) {
   if (!Number.isFinite(current) || current < 0) throw new Error("Enter a valid current meter reading.");
   if (!Number.isFinite(previous) || previous < 0) throw new Error("Enter a valid previous meter reading.");
   if (current < previous) throw new Error("Current meter reading must be at least the previous reading.");
-  if (!Number.isFinite(price) || price < 0) throw new Error("Enter a valid price per m³.");
-  const payload = {
+  const units = meterBillsUnitConfig(meterBillsPrefixKind(prefix));
+  if (!Number.isFinite(price) || price < 0) throw new Error(`Enter a valid ${units.priceError}.`);
+  const body = {
     ...meterBillsPeriodDatesFromForm(prefix),
-    bill_to: String(document.getElementById(`${prefix}BillTo`)?.value || "").trim(),
+    bill_to: String(document.getElementById(`${prefix}BillTo`)?.value || activeMeterBillRecipientName() || "").trim(),
     description: "",
     current_meter_reading: current,
     previous_meter_reading: previous,
     price_per_m3: price,
   };
   if (state.user?.role === "owner") {
-    const balance = meterBillsBalanceFromForm(prefix);
-    payload.balance = balance;
+    body.balance = meterBillsBalanceFromForm(prefix);
   }
-  return payload;
+  return withActiveMeterBillRecipientId(body);
 }
 
 function suggestPreviousMeterForNewEntry(prefix, entries, editingId) {
@@ -7533,6 +7633,10 @@ function showPage(page) {
   if (page === "calculator" && state.appInstance === "ufaray") {
     pageHeading.textContent = "Ufaray Feeds";
   }
+  if ((page === "water-bills" || page === "electricity-bills") && activeMeterBillRecipientName()) {
+    const baseTitle = PAGE_HEADINGS[page] || pageHeading.textContent || page;
+    pageHeading.textContent = `${baseTitle} — ${activeMeterBillRecipientName()}`;
+  }
   const lotScopedPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales", "balance"]);
   if (lotScopedPages.has(page) && inventoryLotsTenantEnabled() && activeLotName()) {
     const baseTitle = pageHeading.textContent || PAGE_HEADINGS[page] || page;
@@ -7581,11 +7685,13 @@ function showPage(page) {
   if (page === "cess-accounts") renderCessAccountsTable();
   if (page === "water-bills") {
     applyMeterBillsOwnerBalanceUi();
+    syncMeterBillsBillToFromRecipient("waterBills");
     renderWaterBillsTable();
     suggestPreviousMeterForNewEntry("waterBills", state.waterBillsEntries, state.editWaterBillsId);
   }
   if (page === "electricity-bills") {
     applyMeterBillsOwnerBalanceUi();
+    syncMeterBillsBillToFromRecipient("electricityBills");
     renderElectricityBillsTable();
     suggestPreviousMeterForNewEntry("electricityBills", state.electricityBillsEntries, state.editElectricityBillsId);
   }
@@ -7714,8 +7820,79 @@ async function loadCatalogFromServer() {
   }
 }
 
+async function loadMeterBillRecipients() {
+  if (!meterBillRecipientsTenantEnabled()) {
+    state.meterBillRecipients = [];
+    state.activeMeterBillRecipientId = null;
+    updateMeterBillRecipientBarUi();
+    return;
+  }
+  try {
+    const recipients = await api("/api/meter-bill-recipients");
+    state.meterBillRecipients = Array.isArray(recipients) ? recipients : [];
+    let recipientId = readPersistedActiveMeterBillRecipientId();
+    if (!state.meterBillRecipients.some((r) => Number(r.id) === Number(recipientId))) {
+      recipientId = state.meterBillRecipients[0]?.id ?? 1;
+    }
+    state.activeMeterBillRecipientId = recipientId;
+    persistActiveMeterBillRecipientId(recipientId);
+  } catch (_error) {
+    state.meterBillRecipients = [];
+    state.activeMeterBillRecipientId = 1;
+  }
+  updateMeterBillRecipientBarUi();
+  syncMeterBillsBillToFromRecipient("waterBills");
+  syncMeterBillsBillToFromRecipient("electricityBills");
+}
+
+function updateMeterBillRecipientBarUi() {
+  const bar = document.getElementById("meterBillRecipientBar");
+  const select = document.getElementById("meterBillRecipientSelect");
+  if (!bar || !select) return;
+  const enabled = meterBillRecipientsTenantEnabled();
+  bar.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+  const current = String(state.activeMeterBillRecipientId || "");
+  select.innerHTML = "";
+  for (const recipient of state.meterBillRecipients || []) {
+    const opt = document.createElement("option");
+    opt.value = String(recipient.id);
+    opt.textContent = recipient.name || `Recipient ${recipient.id}`;
+    select.appendChild(opt);
+  }
+  if (current && [...select.options].some((o) => o.value === current)) {
+    select.value = current;
+  } else if (select.options.length) {
+    select.value = select.options[0].value;
+    state.activeMeterBillRecipientId = Number(select.value);
+    persistActiveMeterBillRecipientId(state.activeMeterBillRecipientId);
+  }
+  const hintEl = document.getElementById("meterBillRecipientHint");
+  if (hintEl && activeMeterBillRecipientName()) {
+    hintEl.textContent = `Showing billings for ${activeMeterBillRecipientName()}. Switch person to view or add entries for someone else.`;
+  }
+}
+
+async function onActiveMeterBillRecipientChange(recipientId) {
+  const nextId = Number(recipientId);
+  if (!Number.isFinite(nextId) || nextId <= 0) return;
+  state.activeMeterBillRecipientId = nextId;
+  persistActiveMeterBillRecipientId(nextId);
+  resetWaterBillsForm();
+  resetElectricityBillsForm();
+  updateMeterBillRecipientBarUi();
+  syncMeterBillsBillToFromRecipient("waterBills");
+  syncMeterBillsBillToFromRecipient("electricityBills");
+  await loadBillsTenantData();
+  if (state.currentPage) showPage(state.currentPage);
+}
+
 async function loadBillsTenantData() {
-  const apiPath = isWaterBillsTenant() ? "/api/water-bills" : "/api/electricity-bills";
+  if (!state.meterBillRecipients.length && meterBillRecipientsTenantEnabled()) {
+    await loadMeterBillRecipients();
+  }
+  const q = meterBillRecipientApiQuery();
+  const apiPath = isWaterBillsTenant() ? `/api/water-bills${q}` : `/api/electricity-bills${q}`;
   try {
     const rows = await api(apiPath);
     if (isWaterBillsTenant()) {
@@ -11427,6 +11604,37 @@ document.getElementById("inventoryLotCancelNewBtn")?.addEventListener("click", (
   document.getElementById("inventoryLotNewWrap")?.classList.add("hidden");
   const nameInput = document.getElementById("inventoryLotNewName");
   if (nameInput) nameInput.value = "";
+});
+
+document.getElementById("meterBillRecipientSelect")?.addEventListener("change", (event) => {
+  const value = event.target instanceof HTMLSelectElement ? event.target.value : "";
+  if (value) onActiveMeterBillRecipientChange(value);
+});
+
+document.getElementById("meterBillRecipientAddBtn")?.addEventListener("click", () => {
+  document.getElementById("meterBillRecipientNewWrap")?.classList.remove("hidden");
+  document.getElementById("meterBillRecipientNewName")?.focus();
+});
+
+document.getElementById("meterBillRecipientCancelNewBtn")?.addEventListener("click", () => {
+  document.getElementById("meterBillRecipientNewWrap")?.classList.add("hidden");
+  const nameInput = document.getElementById("meterBillRecipientNewName");
+  if (nameInput) nameInput.value = "";
+});
+
+document.getElementById("meterBillRecipientSaveNewBtn")?.addEventListener("click", async () => {
+  const name = String(document.getElementById("meterBillRecipientNewName")?.value || "").trim();
+  if (!name) return alert("Enter a name.");
+  try {
+    const result = await api("/api/meter-bill-recipients", { method: "POST", body: JSON.stringify({ name }) });
+    document.getElementById("meterBillRecipientNewWrap")?.classList.add("hidden");
+    const nameInput = document.getElementById("meterBillRecipientNewName");
+    if (nameInput) nameInput.value = "";
+    await loadMeterBillRecipients();
+    if (result?.id) await onActiveMeterBillRecipientChange(result.id);
+  } catch (error) {
+    alert(error.message);
+  }
 });
 
 document.getElementById("inventoryLotSaveNewBtn")?.addEventListener("click", async () => {

@@ -601,6 +601,51 @@ async function resolveLotIdForRequest(req) {
   return lotId;
 }
 
+async function ensureMeterBillRecipientsSeeded() {
+  const count = await get("SELECT COUNT(*) AS c FROM meter_bill_recipients");
+  if ((count?.c || 0) > 0) return;
+  const now = new Date().toISOString();
+  for (const name of ["Nahashon", "Nzuki"]) {
+    await run(
+      "INSERT INTO meter_bill_recipients (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)",
+      [name, "system", now, now]
+    );
+  }
+}
+
+async function migrateMeterBillsRecipientIds() {
+  const done = await get("SELECT value FROM app_meta WHERE key = ?", ["meter_bills_recipient_v1"]);
+  if (done?.value === "1") return;
+  const nzuki = await get("SELECT id FROM meter_bill_recipients WHERE LOWER(TRIM(name)) = 'nzuki' LIMIT 1");
+  if (nzuki?.id) {
+    for (const table of ["water_bills_entries", "electricity_bills_entries"]) {
+      await run(`UPDATE ${table} SET recipient_id = ? WHERE LOWER(TRIM(bill_to)) = 'nzuki'`, [nzuki.id]).catch(() => {});
+    }
+  }
+  await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, ["meter_bills_recipient_v1", "1"]);
+}
+
+function meterBillsTenantEnabled() {
+  const t = activeTenant();
+  return t === "water-bills" || t === "electricity-bills";
+}
+
+function parseRecipientIdParam(raw) {
+  return parseLotIdParam(raw);
+}
+
+async function resolveMeterBillRecipientIdForRequest(req) {
+  const raw = req.query?.recipient_id ?? req.body?.recipient_id;
+  let recipientId = parseRecipientIdParam(raw);
+  if (!meterBillsTenantEnabled()) {
+    return recipientId || 1;
+  }
+  if (!recipientId) return null;
+  const row = await get("SELECT id FROM meter_bill_recipients WHERE id = ?", [recipientId]);
+  if (!row) return null;
+  return recipientId;
+}
+
 /** One-time: accumulated_profit = total profit from bags recorded as sold (historical sales × current margin). */
 async function migrateAccumulatedProfitFromSalesIfNeeded() {
   const row = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_profit_v2"]);
@@ -1117,7 +1162,20 @@ async function initDb() {
     await run(`ALTER TABLE ${table} ADD COLUMN date_from TEXT NOT NULL DEFAULT ''`).catch(() => {});
     await run(`ALTER TABLE ${table} ADD COLUMN date_to TEXT NOT NULL DEFAULT ''`).catch(() => {});
     await run(`ALTER TABLE ${table} ADD COLUMN bill_to TEXT NOT NULL DEFAULT ''`).catch(() => {});
+    await run(`ALTER TABLE ${table} ADD COLUMN recipient_id INTEGER NOT NULL DEFAULT 1`).catch(() => {});
   }
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS meter_bill_recipients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await ensureMeterBillRecipientsSeeded();
+  await migrateMeterBillsRecipientIds();
 
   await run(`
     CREATE TABLE IF NOT EXISTS hadifa_accounts_entries (
@@ -5042,7 +5100,25 @@ function billingMonthSortKeyFromDMY(dmy) {
   return parts.year * 12 + parts.month;
 }
 
+function meterBillsEntryUnitLabels() {
+  if (activeTenant() === "electricity-bills") {
+    return {
+      current: "Current meter reading (kWh)",
+      previous: "Previous meter reading (kWh)",
+      price: "Price per kWh",
+      unit: "kWh",
+    };
+  }
+  return {
+    current: "Current meter reading (m³)",
+    previous: "Previous meter reading (m³)",
+    price: "Price per m³",
+    unit: "m³",
+  };
+}
+
 function parseMeterBillsEntryBody(p) {
+  const unitLabels = meterBillsEntryUnitLabels();
   const dateFrom = parseMeterBillsPeriodDateOptional(p.date_from, "Billing Month From");
   const dateTo = parseMeterBillsPeriodDateOptional(p.date_to, "Billing Month To");
   const dateCanon =
@@ -5061,9 +5137,9 @@ function parseMeterBillsEntryBody(p) {
   let previousMeter;
   let pricePerM3;
   try {
-    currentMeter = parseRoseNonNegativeField(p.current_meter_reading, "Current meter reading");
-    previousMeter = parseRoseNonNegativeField(p.previous_meter_reading, "Previous meter reading");
-    pricePerM3 = parseRoseNonNegativeField(p.price_per_m3, "Price per m³");
+    currentMeter = parseRoseNonNegativeField(p.current_meter_reading, unitLabels.current);
+    previousMeter = parseRoseNonNegativeField(p.previous_meter_reading, unitLabels.previous);
+    pricePerM3 = parseRoseNonNegativeField(p.price_per_m3, unitLabels.price);
   } catch (error) {
     const err = new Error(error.message || "Invalid values.");
     err.status = 400;
@@ -5109,18 +5185,48 @@ function meterBillsTotalsFromEntry(currentBilling, balance) {
   return { balance: bal, totalBilling };
 }
 
+app.get("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, res) => {
+  if (!meterBillsTenantEnabled()) return res.json([]);
+  await ensureMeterBillRecipientsSeeded();
+  const rows = await all("SELECT * FROM meter_bill_recipients ORDER BY id ASC");
+  res.json(rows);
+});
+
+app.post("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, res) => {
+  if (!meterBillsTenantEnabled()) {
+    return res.status(403).json({ error: "Bill recipients are not available for this workspace." });
+  }
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Recipient name is required." });
+  const nowIso = new Date().toISOString();
+  const result = await run(
+    "INSERT INTO meter_bill_recipients (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)",
+    [name, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true, id: result.lastID, name });
+});
+
 function mountBillsEntriesApi(routeSlug, tableName) {
   const base = `/api/${routeSlug}`;
   app.get(base, auth, allowRoles("owner"), async (req, res) => {
-    const rows = await all(`SELECT * FROM ${tableName} ORDER BY id DESC`);
+    const recipientId = await resolveMeterBillRecipientIdForRequest(req);
+    if (recipientId == null) return res.status(400).json({ error: "recipient_id is required." });
+    const rows = await all(`SELECT * FROM ${tableName} WHERE recipient_id = ? ORDER BY id DESC`, [recipientId]);
     res.json(rows);
   });
   app.post(base, auth, allowRoles("owner"), async (req, res) => {
+    const recipientId = await resolveMeterBillRecipientIdForRequest(req);
+    if (recipientId == null) return res.status(400).json({ error: "recipient_id is required." });
     let parsed;
     try {
       parsed = parseMeterBillsEntryBody(req.body || {});
     } catch (error) {
       return res.status(error.status || 400).json({ error: error.message });
+    }
+    let billTo = parsed.billTo;
+    if (!billTo) {
+      const recipient = await get("SELECT name FROM meter_bill_recipients WHERE id = ?", [recipientId]);
+      billTo = String(recipient?.name || "").trim();
     }
     const isOwner = req.user.role === "owner";
     const balance = isOwner ? parseMeterBillsBalanceFromBody(req.body, true) : 0;
@@ -5129,13 +5235,13 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     await run(
       `INSERT INTO ${tableName}
        (date, date_from, date_to, bill_to, description, current_meter_reading, previous_meter_reading, units_used, price_per_m3,
-        current_billing, balance, total_billing, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        current_billing, balance, total_billing, recipient_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         parsed.dateCanon,
         parsed.dateFrom,
         parsed.dateTo,
-        parsed.billTo,
+        billTo,
         parsed.description,
         parsed.currentMeter,
         parsed.previousMeter,
@@ -5144,6 +5250,7 @@ function mountBillsEntriesApi(routeSlug, tableName) {
         parsed.currentBilling,
         totals.balance,
         totals.totalBilling,
+        recipientId,
         req.user.username,
         nowIso,
         nowIso,
