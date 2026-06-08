@@ -142,6 +142,8 @@
           </button>
           <button type="button" class="nav-tab" data-page="rose-inventory" id="roseInventoryTabLabel">Rose Inventory</button>
           <button type="button" class="nav-tab" data-page="nahashon-records" id="nahashonRecordsTab">Nahashon Records</button>
+          <button type="button" class="nav-tab hidden" data-page="faith-sales" id="faithSalesTab">Sales</button>
+          <button type="button" class="nav-tab hidden" data-page="faith-expenses" id="faithExpensesTab">Expenses</button>
           <button type="button" class="nav-tab" data-page="cess-accounts" id="cessAccountsTab">Cess Accounts</button>
           <button type="button" class="nav-tab hidden" data-page="water-bills" id="waterBillsTab">Water Bills</button>
           <button type="button" class="nav-tab hidden" data-page="electricity-bills" id="electricityBillsTab">Electricity Bills</button>
@@ -1700,6 +1702,146 @@
           </div>
         </div>
 
+        <div id="page-faith-sales" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Sales</h3>
+            <p class="field-hint">Record chicken sales. Total amount and balance are calculated automatically.</p>
+            <form id="faith-sales-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input
+                      type="text"
+                      id="faithSalesDateDisplay"
+                      placeholder="DD/MM/YYYY"
+                      pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}"
+                      required
+                    />
+                    <button type="button" id="faithSalesOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="faithSalesDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Number of chickens
+                  <input type="number" id="faithSalesNumChickens" min="1" step="1" required />
+                </label>
+                <label>
+                  Price per chicken
+                  <input type="number" id="faithSalesPricePerChicken" min="0" step="0.01" value="450" required />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="faithSalesDescription" />
+                </label>
+                <label>
+                  Total amount
+                  <input type="text" id="faithSalesTotalAmount" readonly tabindex="-1" />
+                </label>
+                <label>
+                  Amount paid
+                  <input type="number" id="faithSalesAmountPaid" min="0" step="0.01" value="0" required />
+                </label>
+                <label>
+                  Amount balance
+                  <input type="text" id="faithSalesAmountBalance" readonly tabindex="-1" />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="faithSalesSaveBtn">Save entry</button>
+                <button type="button" class="secondary" id="faithSalesClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Number of chickens</th>
+                    <th>Price per chicken</th>
+                    <th>Description</th>
+                    <th>Total amount</th>
+                    <th>Amount paid</th>
+                    <th>Amount balance</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="faith-sales-body"><tr><td colspan="8" class="empty">No records.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="4">Total</th>
+                    <th id="faithSalesTotalAmountSum">0</th>
+                    <th id="faithSalesAmountPaidSum">0</th>
+                    <th id="faithSalesAmountBalanceSum">0</th>
+                    <th>—</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-faith-expenses" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Expenses</h3>
+            <p class="field-hint">Record money going out with a date and description.</p>
+            <form id="faith-expenses-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input
+                      type="text"
+                      id="faithExpDateDisplay"
+                      placeholder="DD/MM/YYYY"
+                      pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}"
+                      required
+                    />
+                    <button type="button" id="faithExpOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="faithExpDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="faithExpDescription" required />
+                </label>
+                <label>
+                  Money out
+                  <input type="number" id="faithExpMoneyOut" min="0" step="0.01" required />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="faithExpSaveBtn">Save entry</button>
+                <button type="button" class="secondary" id="faithExpClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Money out</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="faith-expenses-body"><tr><td colspan="4" class="empty">No records.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="2">Total</th>
+                    <th id="faithExpensesTotalMoneyOut">0</th>
+                    <th>—</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <div id="page-water-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Water Bills</h3>
@@ -2620,6 +2762,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-06-06-billing-month-fix"></script>
+    <script src="app.js?v=2026-06-06-rose-sales"></script>
   </body>
 </html>

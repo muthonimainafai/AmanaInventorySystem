@@ -977,6 +977,34 @@ async function initDb() {
   await run("ALTER TABLE cess_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
 
   await run(`
+    CREATE TABLE IF NOT EXISTS faith_expenses_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL,
+      money_out REAL NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS faith_sales_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      num_chickens REAL NOT NULL DEFAULT 0,
+      price_per_chicken REAL NOT NULL DEFAULT 450,
+      description TEXT NOT NULL DEFAULT '',
+      total_amount REAL NOT NULL DEFAULT 0,
+      amount_paid REAL NOT NULL DEFAULT 0,
+      amount_balance REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS water_bills_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
@@ -1355,6 +1383,8 @@ const CREATED_BY_TABLES = [
   "gas_inventory",
   "gas_sales",
   "employee_expenditure",
+  "faith_expenses_entries",
+  "faith_sales_entries",
 ];
 
 async function renameCreatedByEverywhere(oldName, newName) {
@@ -4598,6 +4628,197 @@ app.put("/api/nahashon-accounts/:id", auth, allowRoles("owner", "employee"), asy
      WHERE id = ?`,
     [dateCanon, description, quantity, unitPrice, moneyIn, moneyOut, mortality, saleVia, new Date().toISOString(), id]
   );
+  res.json({ ok: true });
+});
+
+app.get("/api/faith-expenses", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM faith_expenses_entries ORDER BY id DESC")
+      : await all("SELECT * FROM faith_expenses_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/faith-expenses", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  let moneyOut;
+  try {
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Invalid money out." });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO faith_expenses_entries (date, description, money_out, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, moneyOut, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/faith-expenses/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM faith_expenses_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM faith_expenses_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  let moneyOut;
+  try {
+    moneyOut = parseRoseNonNegativeField(p.money_out, "Money out");
+  } catch (error) {
+    return res.status(400).json({ error: error.message || "Invalid money out." });
+  }
+  await run(
+    `UPDATE faith_expenses_entries SET date = ?, description = ?, money_out = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, moneyOut, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/faith-expenses/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM faith_expenses_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM faith_expenses_entries WHERE id = ? AND created_by = ?", [
+          Number(req.params.id),
+          req.user.username,
+        ]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
+const FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN = 450;
+
+function parseFaithSalesBody(p) {
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) {
+    const err = new Error("Invalid date. Use DD/MM/YYYY.");
+    err.status = 400;
+    throw err;
+  }
+  const description = String(p.description || "").trim();
+  let numChickens;
+  let pricePerChicken;
+  let amountPaid;
+  try {
+    numChickens = parseRoseNonNegativeField(p.num_chickens, "Number of chickens");
+    const rawPrice = p.price_per_chicken;
+    if (rawPrice === undefined || rawPrice === null || String(rawPrice).trim() === "") {
+      pricePerChicken = FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN;
+    } else {
+      pricePerChicken = parseRoseNonNegativeField(rawPrice, "Price per chicken");
+    }
+    amountPaid = parseRoseNonNegativeField(p.amount_paid, "Amount paid");
+  } catch (error) {
+    const err = new Error(error.message || "Invalid values.");
+    err.status = 400;
+    throw err;
+  }
+  if (numChickens <= 0) {
+    const err = new Error("Number of chickens must be greater than zero.");
+    err.status = 400;
+    throw err;
+  }
+  const totalAmount = roundMoney(numChickens * pricePerChicken);
+  const amountBalance = roundMoney(totalAmount - amountPaid);
+  return {
+    dateCanon,
+    description,
+    numChickens,
+    pricePerChicken,
+    totalAmount,
+    amountPaid,
+    amountBalance,
+  };
+}
+
+app.get("/api/faith-sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM faith_sales_entries ORDER BY id DESC")
+      : await all("SELECT * FROM faith_sales_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/faith-sales", auth, allowRoles("owner", "employee"), async (req, res) => {
+  let parsed;
+  try {
+    parsed = parseFaithSalesBody(req.body || {});
+  } catch (error) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO faith_sales_entries
+     (date, num_chickens, price_per_chicken, description, total_amount, amount_paid, amount_balance, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      parsed.dateCanon,
+      parsed.numChickens,
+      parsed.pricePerChicken,
+      parsed.description,
+      parsed.totalAmount,
+      parsed.amountPaid,
+      parsed.amountBalance,
+      req.user.username,
+      nowIso,
+      nowIso,
+    ]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/faith-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM faith_sales_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM faith_sales_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  let parsed;
+  try {
+    parsed = parseFaithSalesBody(req.body || {});
+  } catch (error) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+  await run(
+    `UPDATE faith_sales_entries
+     SET date = ?, num_chickens = ?, price_per_chicken = ?, description = ?, total_amount = ?, amount_paid = ?, amount_balance = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      parsed.dateCanon,
+      parsed.numChickens,
+      parsed.pricePerChicken,
+      parsed.description,
+      parsed.totalAmount,
+      parsed.amountPaid,
+      parsed.amountBalance,
+      new Date().toISOString(),
+      id,
+    ]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/faith-sales/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM faith_sales_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM faith_sales_entries WHERE id = ? AND created_by = ?", [
+          Number(req.params.id),
+          req.user.username,
+        ]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });
 

@@ -93,6 +93,10 @@ const state = {
   loanRepaymentPreview: null,
   nahashonEntries: [],
   editNahashonId: null,
+  faithExpensesEntries: [],
+  editFaithExpensesId: null,
+  faithSalesEntries: [],
+  editFaithSalesId: null,
   pigsEntries: [],
   editPigsId: null,
   waterBillsEntries: [],
@@ -113,6 +117,8 @@ const PAGE_HEADINGS = {
   gas: "Gas Inventory",
   "rose-inventory": "Rose Inventory",
   "nahashon-records": "Nahashon Records",
+  "faith-expenses": "Expenses",
+  "faith-sales": "Sales",
   "cess-accounts": "Cess Accounts",
   "water-bills": "Water Bills",
   "electricity-bills": "Electricity Bills",
@@ -178,6 +184,27 @@ function isTerryCessOrShopTenant() {
     state.appInstance === "shop"
   );
 }
+
+function isFaithInventoryTenant() {
+  return (
+    state.appInstance === "nahah" ||
+    state.appInstance === "terry" ||
+    state.appInstance === "cess" ||
+    state.appInstance === "terry-and-cess" ||
+    state.appInstance === "maina-faith-cess" ||
+    state.appInstance === "shop"
+  );
+}
+
+function expensesPageTenantEnabled() {
+  return isFaithInventoryTenant() || isRecordsTenant();
+}
+
+function faithSalesPageTenantEnabled() {
+  return isFaithInventoryTenant() || isRecordsTenant();
+}
+
+const FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN = 450;
 
 /** Calculator tab + page (with PDFs) allowed for staff on these tenants — same UI as owner. */
 function staffMayAccessCalculatorTenant() {
@@ -425,6 +452,16 @@ const nahashonBody = document.getElementById("nahashon-body");
 const nahashonDateDisplay = document.getElementById("nahashonDateDisplay");
 const nahashonDate = document.getElementById("nahashonDate");
 const nahashonOpenCalendarBtn = document.getElementById("nahashonOpenCalendarBtn");
+const faithExpensesForm = document.getElementById("faith-expenses-form");
+const faithExpensesBody = document.getElementById("faith-expenses-body");
+const faithExpDateDisplay = document.getElementById("faithExpDateDisplay");
+const faithExpDate = document.getElementById("faithExpDate");
+const faithExpOpenCalendarBtn = document.getElementById("faithExpOpenCalendarBtn");
+const faithSalesForm = document.getElementById("faith-sales-form");
+const faithSalesBody = document.getElementById("faith-sales-body");
+const faithSalesDateDisplay = document.getElementById("faithSalesDateDisplay");
+const faithSalesDate = document.getElementById("faithSalesDate");
+const faithSalesOpenCalendarBtn = document.getElementById("faithSalesOpenCalendarBtn");
 const pigsForm = document.getElementById("pigs-form");
 const pigsBody = document.getElementById("pigs-body");
 const pigsDateDisplay = document.getElementById("pigsDateDisplay");
@@ -3375,6 +3412,8 @@ function applyEmployeeSalesDateRules() {
     ["roseDateDisplay", "roseDate", "roseOpenCalendarBtn"],
     ["cessAccDateDisplay", "cessAccDate", "cessAccOpenCalendarBtn"],
     ["nahashonDateDisplay", "nahashonDate", "nahashonOpenCalendarBtn"],
+    ["faithExpDateDisplay", "faithExpDate", "faithExpOpenCalendarBtn"],
+    ["faithSalesDateDisplay", "faithSalesDate", "faithSalesOpenCalendarBtn"],
   ];
   for (const [dispId, nativeId, btnId] of triples) {
     const disp = document.getElementById(dispId);
@@ -4206,17 +4245,17 @@ function showLoggedIn() {
     let shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
       : state.appInstance === "terry"
-      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator"
+      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "faith-expenses" || page === "faith-sales"
       : state.appInstance === "cess" ||
           state.appInstance === "maina-faith-cess" ||
           state.appInstance === "terry-and-cess"
-      ? page === "rose-inventory" || page === "calculator"
+      ? page === "rose-inventory" || page === "calculator" || page === "faith-expenses" || page === "faith-sales"
       : state.appInstance === "shop"
-      ? page === "inventory" || page === "sales-bags" || page === "calculator"
+      ? page === "inventory" || page === "sales-bags" || page === "calculator" || page === "faith-expenses" || page === "faith-sales"
       : terryCessShopTenant
       ? page === "inventory"
       : recordsTenant
-      ? page === "rose-inventory"
+      ? page === "rose-inventory" || page === "faith-expenses" || page === "faith-sales"
       : page === "rose-inventory"
         ? false
         : isOwner
@@ -4233,6 +4272,15 @@ function showLoggedIn() {
     }
     if (page === "nahashon-records") {
       shouldShow = state.appInstance === "terry";
+    }
+    if (page === "faith-expenses") {
+      shouldShow = expensesPageTenantEnabled();
+    }
+    if (page === "faith-sales") {
+      shouldShow = faithSalesPageTenantEnabled();
+    }
+    if (page === "expenditure") {
+      shouldShow = !expensesPageTenantEnabled() && shouldShow;
     }
     if (page === "pigs") {
       shouldShow = state.appInstance === "amana" && isOwner;
@@ -6568,6 +6616,150 @@ function renderHadifaAccountsTable() {
   }
 }
 
+function updateFaithSalesFormCalc() {
+  const numEl = document.getElementById("faithSalesNumChickens");
+  const priceEl = document.getElementById("faithSalesPricePerChicken");
+  const paidEl = document.getElementById("faithSalesAmountPaid");
+  const totalEl = document.getElementById("faithSalesTotalAmount");
+  const balanceEl = document.getElementById("faithSalesAmountBalance");
+  if (!numEl || !priceEl || !paidEl || !totalEl || !balanceEl) return;
+  const num = Number(numEl.value);
+  const priceRaw = priceEl.value.trim();
+  const price = priceRaw === "" ? FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN : Number(priceRaw);
+  const paid = Number(paidEl.value);
+  if (!Number.isFinite(num) || num <= 0 || !Number.isFinite(price) || price < 0) {
+    totalEl.value = "";
+    balanceEl.value = "";
+    return;
+  }
+  const total = roundMoney(num * price);
+  const paidSafe = Number.isFinite(paid) && paid >= 0 ? paid : 0;
+  totalEl.value = currency(total);
+  balanceEl.value = currency(roundMoney(total - paidSafe));
+}
+
+function wireFaithSalesFormCalc() {
+  const ids = ["faithSalesNumChickens", "faithSalesPricePerChicken", "faithSalesAmountPaid"];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.faithSalesCalcWired === "1") continue;
+    el.dataset.faithSalesCalcWired = "1";
+    el.addEventListener("input", updateFaithSalesFormCalc);
+  }
+}
+
+function resetFaithSalesForm() {
+  if (!faithSalesForm) return;
+  faithSalesForm.reset();
+  state.editFaithSalesId = null;
+  if (faithSalesDate) faithSalesDate.value = "";
+  if (faithSalesDateDisplay) faithSalesDateDisplay.value = "";
+  const priceEl = document.getElementById("faithSalesPricePerChicken");
+  const paidEl = document.getElementById("faithSalesAmountPaid");
+  const totalEl = document.getElementById("faithSalesTotalAmount");
+  const balanceEl = document.getElementById("faithSalesAmountBalance");
+  if (priceEl) priceEl.value = String(FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN);
+  if (paidEl) paidEl.value = "0";
+  if (totalEl) totalEl.value = "";
+  if (balanceEl) balanceEl.value = "";
+  const saveBtn = document.getElementById("faithSalesSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+  updateFaithSalesFormCalc();
+}
+
+function renderFaithSalesTable() {
+  if (!faithSalesBody) return;
+  const rows = sortRowsLatestFirst(state.faithSalesEntries || []);
+  if (!rows.length) {
+    faithSalesBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
+    const totEl = document.getElementById("faithSalesTotalAmountSum");
+    const paidEl = document.getElementById("faithSalesAmountPaidSum");
+    const balEl = document.getElementById("faithSalesAmountBalanceSum");
+    if (totEl) totEl.textContent = currency(0);
+    if (paidEl) paidEl.textContent = currency(0);
+    if (balEl) balEl.textContent = currency(0);
+    return;
+  }
+  let sumTotal = 0;
+  let sumPaid = 0;
+  let sumBalance = 0;
+  faithSalesBody.innerHTML = rows
+    .map((row) => {
+      const total = Number(row.total_amount || 0);
+      const paid = Number(row.amount_paid || 0);
+      const balance = Number(row.amount_balance || 0);
+      sumTotal += total;
+      sumPaid += paid;
+      sumBalance += balance;
+      return `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${Number(row.num_chickens || 0)}</td>
+        <td>${currency(Number(row.price_per_chicken || 0))}</td>
+        <td>${escapeHtmlCell(row.description || "")}</td>
+        <td>${currency(total)}</td>
+        <td>${currency(paid)}</td>
+        <td>${currency(balance)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="faith-sale" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="faith-sale" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const totEl = document.getElementById("faithSalesTotalAmountSum");
+  const paidEl = document.getElementById("faithSalesAmountPaidSum");
+  const balEl = document.getElementById("faithSalesAmountBalanceSum");
+  if (totEl) totEl.textContent = currency(sumTotal);
+  if (paidEl) paidEl.textContent = currency(sumPaid);
+  if (balEl) balEl.textContent = currency(sumBalance);
+}
+
+function resetFaithExpensesForm() {
+  if (!faithExpensesForm) return;
+  faithExpensesForm.reset();
+  state.editFaithExpensesId = null;
+  if (faithExpDate) faithExpDate.value = "";
+  if (faithExpDateDisplay) faithExpDateDisplay.value = "";
+  const saveBtn = document.getElementById("faithExpSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+  applyEmployeeSalesDateRules();
+}
+
+function renderFaithExpensesTable() {
+  if (!faithExpensesBody) return;
+  const rows = sortRowsLatestFirst(state.faithExpensesEntries || []);
+  if (!rows.length) {
+    faithExpensesBody.innerHTML = '<tr><td colspan="4" class="empty">No records.</td></tr>';
+    const totEl = document.getElementById("faithExpensesTotalMoneyOut");
+    if (totEl) totEl.textContent = currency(0);
+    return;
+  }
+  let sumOut = 0;
+  faithExpensesBody.innerHTML = rows
+    .map((row) => {
+      sumOut += Number(row.money_out || 0);
+      return `
+      <tr>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description)}</td>
+        <td>${currency(row.money_out)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="faith-exp" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="faith-exp" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  const totEl = document.getElementById("faithExpensesTotalMoneyOut");
+  if (totEl) totEl.textContent = currency(sumOut);
+}
+
 function resetNahashonForm() {
   if (!nahashonForm) return;
   nahashonForm.reset();
@@ -7065,8 +7257,8 @@ function showPage(page) {
     return showPage("inventory");
   }
   if (state.appInstance === "shop" && page !== "inventory" && page !== "sales-bags") {
-    if (page === "calculator") {
-      // Calculator is allowed for all Nahah users (Terry/Cess/Shop).
+    if (page === "calculator" || page === "faith-expenses" || page === "faith-sales") {
+      // Calculator, Expenses, and Sales are allowed for Faith Inventory shop users.
     } else {
       return showPage("inventory");
     }
@@ -7088,7 +7280,14 @@ function showPage(page) {
   if (page === "nahashon-records" && state.appInstance !== "terry") {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
-  if (state.appInstance === "terry" && page !== "rose-inventory" && page !== "nahashon-records" && page !== "calculator") {
+  if (
+    state.appInstance === "terry" &&
+    page !== "rose-inventory" &&
+    page !== "nahashon-records" &&
+    page !== "calculator" &&
+    page !== "faith-expenses" &&
+    page !== "faith-sales"
+  ) {
     return showPage("rose-inventory");
   }
   if (
@@ -7096,9 +7295,20 @@ function showPage(page) {
       state.appInstance === "maina-faith-cess" ||
       state.appInstance === "terry-and-cess") &&
     page !== "rose-inventory" &&
-    page !== "calculator"
+    page !== "calculator" &&
+    page !== "faith-expenses" &&
+    page !== "faith-sales"
   ) {
     return showPage("rose-inventory");
+  }
+  if (isRecordsTenant() && page !== "rose-inventory" && page !== "faith-expenses" && page !== "faith-sales") {
+    return showPage("rose-inventory");
+  }
+  if (page === "faith-expenses" && !expensesPageTenantEnabled()) {
+    return showPage(defaultPageForLoggedInUser());
+  }
+  if (page === "faith-sales" && !faithSalesPageTenantEnabled()) {
+    return showPage(defaultPageForLoggedInUser());
   }
   if (staffMayAccessCalculatorTenant() && page === "calculator") {
     // Allow calculator for owner and staff on Amana, Ufaray, and Nahah shop tenants.
@@ -7201,6 +7411,8 @@ function showPage(page) {
   if (page === "gas") renderGasTable();
   if (page === "rose-inventory") renderRoseTable();
   if (page === "nahashon-records") renderNahashonTable();
+  if (page === "faith-expenses") renderFaithExpensesTable();
+  if (page === "faith-sales") renderFaithSalesTable();
   if (page === "cess-accounts") renderCessAccountsTable();
   if (page === "water-bills") {
     applyMeterBillsOwnerBalanceUi();
@@ -7481,6 +7693,8 @@ async function loadAllData() {
     api("/api/expenditure"),
     api("/api/rose/inventory"),
     api("/api/nahashon-accounts"),
+    api("/api/faith-expenses"),
+    api("/api/faith-sales"),
     api("/api/cess-accounts"),
     api("/api/pigs"),
     api("/api/credit-accounts"),
@@ -7501,10 +7715,12 @@ async function loadAllData() {
   ensureExpenditureStatementMonth();
   state.roseEntries = extras[12].status === "fulfilled" ? extras[12].value : [];
   state.nahashonEntries = extras[13].status === "fulfilled" ? extras[13].value : [];
-  state.cessAccountsEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
-  state.pigsEntries = extras[15].status === "fulfilled" ? extras[15].value : [];
-  state.creditAccounts = extras[16].status === "fulfilled" ? extras[16].value : [];
-  state.creditEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
+  state.faithExpensesEntries = extras[14].status === "fulfilled" ? extras[14].value : [];
+  state.faithSalesEntries = extras[15].status === "fulfilled" ? extras[15].value : [];
+  state.cessAccountsEntries = extras[16].status === "fulfilled" ? extras[16].value : [];
+  state.pigsEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
+  state.creditAccounts = extras[18].status === "fulfilled" ? extras[18].value : [];
+  state.creditEntries = extras[19].status === "fulfilled" ? extras[19].value : [];
 
   await loadMonthlyRecordsData();
   await loadLoanRepaymentsData();
@@ -7548,6 +7764,8 @@ async function loadAllData() {
   renderCreditDashboard();
   renderHadifaAccountsTable();
   renderNahashonTable();
+  renderFaithExpensesTable();
+  renderFaithSalesTable();
   renderPigsTable();
   if (state.currentPage === "monthly-report") renderMonthlyReport();
   if (state.currentPage === "monthly-records") renderMonthlyRecords();
@@ -7953,6 +8171,8 @@ document.querySelectorAll(".nav-tab").forEach((btn) => {
     if (page === "credit" && !creditTenantEnabled()) return;
     if (page === "nahashon-records" && state.appInstance !== "terry") return;
     if ((page === "water-bills" || page === "electricity-bills") && state.user.role !== "owner") return;
+    if (page === "faith-expenses" && !expensesPageTenantEnabled()) return;
+    if (page === "faith-sales" && !faithSalesPageTenantEnabled()) return;
     showPage(page);
   });
 });
@@ -8067,6 +8287,13 @@ if (calcChDateDisplay && calcChDate && calcChOpenCalendarBtn) {
 if (nahashonDateDisplay && nahashonDate && nahashonOpenCalendarBtn) {
   wireDatePicker(nahashonDateDisplay, nahashonDate, nahashonOpenCalendarBtn);
 }
+if (faithExpDateDisplay && faithExpDate && faithExpOpenCalendarBtn) {
+  wireDatePicker(faithExpDateDisplay, faithExpDate, faithExpOpenCalendarBtn);
+}
+if (faithSalesDateDisplay && faithSalesDate && faithSalesOpenCalendarBtn) {
+  wireDatePicker(faithSalesDateDisplay, faithSalesDate, faithSalesOpenCalendarBtn);
+}
+wireFaithSalesFormCalc();
 if (cessAccDateDisplay && cessAccDate && cessAccOpenCalendarBtn) {
   wireDatePicker(cessAccDateDisplay, cessAccDate, cessAccOpenCalendarBtn);
 }
@@ -9391,6 +9618,63 @@ document.getElementById("creditBackBtn")?.addEventListener("click", () => {
   renderCreditDashboard();
 });
 
+faithSalesForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = faithSalesDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const numChickens = Number(document.getElementById("faithSalesNumChickens")?.value || 0);
+  const pricePerChicken = Number(document.getElementById("faithSalesPricePerChicken")?.value || FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN);
+  const amountPaid = Number(document.getElementById("faithSalesAmountPaid")?.value || 0);
+  if (!Number.isFinite(numChickens) || numChickens <= 0) return alert("Enter a valid number of chickens.");
+  if (!Number.isFinite(pricePerChicken) || pricePerChicken < 0) return alert("Enter a valid price per chicken.");
+  if (!Number.isFinite(amountPaid) || amountPaid < 0) return alert("Enter a valid amount paid.");
+  const payload = {
+    date: dateValue,
+    num_chickens: numChickens,
+    price_per_chicken: pricePerChicken,
+    description: String(document.getElementById("faithSalesDescription")?.value || "").trim(),
+    amount_paid: amountPaid,
+  };
+  try {
+    if (state.editFaithSalesId) {
+      await api(`/api/faith-sales/${state.editFaithSalesId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/faith-sales", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetFaithSalesForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+document.getElementById("faithSalesClearBtn")?.addEventListener("click", () => resetFaithSalesForm());
+
+faithExpensesForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = faithExpDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("faithExpDescription")?.value || "").trim(),
+    money_out: Number(document.getElementById("faithExpMoneyOut")?.value || 0),
+  };
+  if (!payload.description) return alert("Description is required.");
+  try {
+    if (state.editFaithExpensesId) {
+      await api(`/api/faith-expenses/${state.editFaithExpensesId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/faith-expenses", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetFaithExpensesForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+document.getElementById("faithExpClearBtn")?.addEventListener("click", () => resetFaithExpensesForm());
+
 nahashonForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = nahashonDateDisplay?.value?.trim() || "";
@@ -10708,6 +10992,75 @@ hadifaAccountsBody?.addEventListener("click", async (event) => {
       await api(`/api/credit-entries/${id}`, { method: "DELETE" });
       await loadAllData();
       renderHadifaAccountsTable();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+faithSalesBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "faith-sale") return;
+  const row = (state.faithSalesEntries || []).find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editFaithSalesId = row.id;
+    if (faithSalesDate) faithSalesDate.value = toIsoDate(row.date);
+    if (faithSalesDateDisplay) faithSalesDateDisplay.value = formatDateDMY(row.date);
+    const numEl = document.getElementById("faithSalesNumChickens");
+    const priceEl = document.getElementById("faithSalesPricePerChicken");
+    const descEl = document.getElementById("faithSalesDescription");
+    const paidEl = document.getElementById("faithSalesAmountPaid");
+    if (numEl) numEl.value = row.num_chickens ?? 0;
+    if (priceEl) priceEl.value = row.price_per_chicken ?? FAITH_SALES_DEFAULT_PRICE_PER_CHICKEN;
+    if (descEl) descEl.value = row.description || "";
+    if (paidEl) paidEl.value = row.amount_paid ?? 0;
+    updateFaithSalesFormCalc();
+    const saveBtn = document.getElementById("faithSalesSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this sale?")) return;
+    try {
+      await api(`/api/faith-sales/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+faithExpensesBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "faith-exp") return;
+  const row = (state.faithExpensesEntries || []).find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editFaithExpensesId = row.id;
+    if (faithExpDate) faithExpDate.value = toIsoDate(row.date);
+    if (faithExpDateDisplay) faithExpDateDisplay.value = formatDateDMY(row.date);
+    const desc = document.getElementById("faithExpDescription");
+    const out = document.getElementById("faithExpMoneyOut");
+    if (desc) desc.value = row.description || "";
+    if (out) out.value = row.money_out ?? 0;
+    const saveBtn = document.getElementById("faithExpSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/faith-expenses/${id}`, { method: "DELETE" });
+      await loadAllData();
     } catch (error) {
       alert(error.message);
     }
