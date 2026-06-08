@@ -1164,6 +1164,7 @@ async function initDb() {
     await run(`ALTER TABLE ${table} ADD COLUMN bill_to TEXT NOT NULL DEFAULT ''`).catch(() => {});
     await run(`ALTER TABLE ${table} ADD COLUMN recipient_id INTEGER NOT NULL DEFAULT 1`).catch(() => {});
   }
+  await run(`ALTER TABLE electricity_bills_entries ADD COLUMN money_paid REAL NOT NULL DEFAULT 0`).catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS meter_bill_recipients (
@@ -5179,6 +5180,19 @@ function parseMeterBillsBalanceFromBody(p, isOwner) {
   }
 }
 
+function parseMeterBillsMoneyPaidFromBody(p, isOwner) {
+  if (!isOwner) return null;
+  const raw = p?.money_paid;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return 0;
+  try {
+    return parseRoseNonNegativeField(raw, "Money paid during the billing period");
+  } catch (error) {
+    const err = new Error(error.message || "Invalid money paid.");
+    err.status = 400;
+    throw err;
+  }
+}
+
 function meterBillsTotalsFromEntry(currentBilling, balance) {
   const bal = roundMoney(Number(balance) || 0);
   const totalBilling = roundMoney((Number(currentBilling) || 0) + bal);
@@ -5206,7 +5220,8 @@ app.post("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, re
   res.json({ ok: true, id: result.lastID, name });
 });
 
-function mountBillsEntriesApi(routeSlug, tableName) {
+function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
+  const trackMoneyPaid = Boolean(options.trackMoneyPaid);
   const base = `/api/${routeSlug}`;
   app.get(base, auth, allowRoles("owner"), async (req, res) => {
     const recipientId = await resolveMeterBillRecipientIdForRequest(req);
@@ -5230,31 +5245,53 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     }
     const isOwner = req.user.role === "owner";
     const balance = isOwner ? parseMeterBillsBalanceFromBody(req.body, true) : 0;
+    const moneyPaid = trackMoneyPaid && isOwner ? parseMeterBillsMoneyPaidFromBody(req.body, true) : 0;
     const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance);
     const nowIso = new Date().toISOString();
+    const insertCols = [
+      "date",
+      "date_from",
+      "date_to",
+      "bill_to",
+      "description",
+      "current_meter_reading",
+      "previous_meter_reading",
+      "units_used",
+      "price_per_m3",
+      "current_billing",
+      "balance",
+      "total_billing",
+      "recipient_id",
+      "created_by",
+      "created_at",
+      "updated_at",
+    ];
+    const insertVals = [
+      parsed.dateCanon,
+      parsed.dateFrom,
+      parsed.dateTo,
+      billTo,
+      parsed.description,
+      parsed.currentMeter,
+      parsed.previousMeter,
+      parsed.unitsUsed,
+      parsed.pricePerM3,
+      parsed.currentBilling,
+      totals.balance,
+      totals.totalBilling,
+      recipientId,
+      req.user.username,
+      nowIso,
+      nowIso,
+    ];
+    if (trackMoneyPaid) {
+      insertCols.splice(11, 0, "money_paid");
+      insertVals.splice(11, 0, moneyPaid);
+    }
+    const placeholders = insertCols.map(() => "?").join(", ");
     await run(
-      `INSERT INTO ${tableName}
-       (date, date_from, date_to, bill_to, description, current_meter_reading, previous_meter_reading, units_used, price_per_m3,
-        current_billing, balance, total_billing, recipient_id, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        parsed.dateCanon,
-        parsed.dateFrom,
-        parsed.dateTo,
-        billTo,
-        parsed.description,
-        parsed.currentMeter,
-        parsed.previousMeter,
-        parsed.unitsUsed,
-        parsed.pricePerM3,
-        parsed.currentBilling,
-        totals.balance,
-        totals.totalBilling,
-        recipientId,
-        req.user.username,
-        nowIso,
-        nowIso,
-      ]
+      `INSERT INTO ${tableName} (${insertCols.join(", ")}) VALUES (${placeholders})`,
+      insertVals
     );
     res.json({ ok: true });
   });
@@ -5270,33 +5307,47 @@ function mountBillsEntriesApi(routeSlug, tableName) {
     }
     const isOwner = req.user.role === "owner";
     let balance = Number(existing.balance) || 0;
+    let moneyPaid = Number(existing.money_paid) || 0;
     if (isOwner) {
       const parsedBalance = parseMeterBillsBalanceFromBody(req.body, true);
       balance = parsedBalance == null ? balance : parsedBalance;
+      if (trackMoneyPaid) {
+        const parsedMoneyPaid = parseMeterBillsMoneyPaidFromBody(req.body, true);
+        moneyPaid = parsedMoneyPaid == null ? moneyPaid : parsedMoneyPaid;
+      }
     }
     const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance);
-    await run(
-      `UPDATE ${tableName}
-       SET date = ?, date_from = ?, date_to = ?, bill_to = ?, description = ?, current_meter_reading = ?, previous_meter_reading = ?,
-           units_used = ?, price_per_m3 = ?, current_billing = ?, balance = ?, total_billing = ?, updated_at = ?
-       WHERE id = ?`,
-      [
-        parsed.dateCanon,
-        parsed.dateFrom,
-        parsed.dateTo,
-        parsed.billTo,
-        parsed.description,
-        parsed.currentMeter,
-        parsed.previousMeter,
-        parsed.unitsUsed,
-        parsed.pricePerM3,
-        parsed.currentBilling,
-        totals.balance,
-        totals.totalBilling,
-        new Date().toISOString(),
-        id,
-      ]
-    );
+    const updateSets = [
+      "date = ?",
+      "date_from = ?",
+      "date_to = ?",
+      "bill_to = ?",
+      "description = ?",
+      "current_meter_reading = ?",
+      "previous_meter_reading = ?",
+      "units_used = ?",
+      "price_per_m3 = ?",
+      "current_billing = ?",
+    ];
+    const updateVals = [
+      parsed.dateCanon,
+      parsed.dateFrom,
+      parsed.dateTo,
+      parsed.billTo,
+      parsed.description,
+      parsed.currentMeter,
+      parsed.previousMeter,
+      parsed.unitsUsed,
+      parsed.pricePerM3,
+      parsed.currentBilling,
+    ];
+    if (trackMoneyPaid) {
+      updateSets.push("money_paid = ?");
+      updateVals.push(moneyPaid);
+    }
+    updateSets.push("balance = ?", "total_billing = ?", "updated_at = ?");
+    updateVals.push(totals.balance, totals.totalBilling, new Date().toISOString(), id);
+    await run(`UPDATE ${tableName} SET ${updateSets.join(", ")} WHERE id = ?`, updateVals);
     res.json({ ok: true });
   });
   app.delete(`${base}/:id`, auth, allowRoles("owner"), async (req, res) => {
@@ -5307,7 +5358,7 @@ function mountBillsEntriesApi(routeSlug, tableName) {
 }
 
 mountBillsEntriesApi("water-bills", "water_bills_entries");
-mountBillsEntriesApi("electricity-bills", "electricity_bills_entries");
+mountBillsEntriesApi("electricity-bills", "electricity_bills_entries", { trackMoneyPaid: true });
 
 /* ── Credit Accounts (Amana & Ufaray – owner and employee) ──────────── */
 

@@ -254,6 +254,30 @@ function meterBillsPrefixKind(prefix) {
   return prefix === "electricityBills" ? "electricity-bills" : "water-bills";
 }
 
+const METER_BILL_ELECTRICITY_METERS = {
+  nahashon: "2025-08070736",
+};
+
+function electricityMeterNumberForActiveRecipient() {
+  const name = activeMeterBillRecipientName().trim().toLowerCase();
+  return METER_BILL_ELECTRICITY_METERS[name] || "";
+}
+
+function updateElectricityBillsMeterInfoUi() {
+  const el = document.getElementById("electricityBillsMeterNumberHint");
+  if (!el) return;
+  const meterNo = electricityMeterNumberForActiveRecipient();
+  const show =
+    (state.currentPage === "electricity-bills" || isElectricityBillsTenant()) && Boolean(meterNo);
+  if (show) {
+    el.textContent = `Electricity meter number: ${meterNo}`;
+    el.classList.remove("hidden");
+  } else {
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
+}
+
 function defaultPageForLoggedInUser() {
   if (isWaterBillsTenant()) return "water-bills";
   if (isElectricityBillsTenant()) return "electricity-bills";
@@ -2783,7 +2807,43 @@ function meterBillsPdfBillToText(entries) {
   return names.join("\n");
 }
 
-const METER_BILLS_PDF_PAYMENT_LINE = "Send Money to 0114 784 478";
+const METER_BILLS_PDF_WATER_PAYMENT_LINE = "Send Money to 0114 784 478";
+
+function drawMeterBillsPaymentDetails(doc, { margin, pageW, startY, serviceItem, totalDue }) {
+  let y = startY;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...PDF_PAGE_THEME.dark);
+  doc.text("Payment details", margin, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(33, 33, 33);
+  const maxW = pageW - margin * 2;
+  const amountDue = formatKshPlainNumber(totalDue);
+  if (isElectricityBillsKind(serviceItem)) {
+    const paymentLines = [
+      `For Payment, kindly buy token directly using Paybill 888880 Account Number 37195247590. Amount Due: Ksh ${amountDue}.`,
+      "Then share the KPLC token message to WhatsApp number: 0114 784 478.",
+    ];
+    for (const line of paymentLines) {
+      const wrapped = doc.splitTextToSize(line, maxW);
+      doc.text(wrapped, margin, y);
+      y += wrapped.length * 14;
+    }
+    y += 8;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    const noteWrapped = doc.splitTextToSize("Note: Pay before 10th of every month.", maxW);
+    doc.text(noteWrapped, margin, y);
+    y += noteWrapped.length * 12;
+  } else {
+    doc.text(METER_BILLS_PDF_WATER_PAYMENT_LINE, margin, y);
+    y += 14;
+  }
+  return y;
+}
 
 function formatBillDateShort(dmy) {
   const parts = parseDMYParts(dmy);
@@ -2905,15 +2965,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   doc.line(margin, y, rightX, y);
   y += 18;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(...PDF_PAGE_THEME.dark);
-  doc.text("Payment details", margin, y);
-  y += 16;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(33, 33, 33);
-  doc.text(METER_BILLS_PDF_PAYMENT_LINE, margin, y);
+  drawMeterBillsPaymentDetails(doc, { margin, pageW, startY: y, serviceItem, totalDue });
 
   if (pageCount > 1) {
     doc.setFontSize(8);
@@ -6431,6 +6483,15 @@ function meterBillsBalanceFromForm(prefix) {
   return Number.isFinite(balance) && balance >= 0 ? balance : 0;
 }
 
+function electricityBillsMoneyPaidFromForm() {
+  if (state.user?.role !== "owner") return 0;
+  const moneyPaidEl = document.getElementById("electricityBillsMoneyPaid");
+  const raw = moneyPaidEl instanceof HTMLInputElement ? moneyPaidEl.value.trim() : "";
+  if (raw === "") return 0;
+  const moneyPaid = Number(raw);
+  return Number.isFinite(moneyPaid) && moneyPaid >= 0 ? moneyPaid : 0;
+}
+
 function updateMeterBillsFormCalc(prefix) {
   const currentEl = document.getElementById(`${prefix}CurrentMeter`);
   const previousEl = document.getElementById(`${prefix}PreviousMeter`);
@@ -6466,18 +6527,23 @@ function wireMeterBillsFormCalc(prefix) {
   }
 }
 
-function applyMeterBillsOwnerBalanceUi() {
+function applyMeterBillsOwnerFieldUi(selector, placeholder) {
   const isOwner = state.user?.role === "owner";
-  document.querySelectorAll(".owner-only-meter-balance-field").forEach((el) => {
+  document.querySelectorAll(selector).forEach((el) => {
     el.classList.toggle("hidden", !isOwner);
     const input = el.querySelector("input[type='number']");
     if (input instanceof HTMLInputElement) {
       input.disabled = !isOwner;
       input.readOnly = !isOwner;
-      input.placeholder = "Enter amount, if any";
+      input.placeholder = placeholder;
       if (!isOwner) input.value = "";
     }
   });
+}
+
+function applyMeterBillsOwnerBalanceUi() {
+  applyMeterBillsOwnerFieldUi(".owner-only-meter-balance-field", "Enter amount, if any");
+  applyMeterBillsOwnerFieldUi(".owner-only-electricity-paid-field", "Enter amount paid, if any");
   updateMeterBillsFormCalc("waterBills");
   updateMeterBillsFormCalc("electricityBills");
 }
@@ -6491,15 +6557,27 @@ function latestMeterReadingFromEntries(entries) {
   return Number.isFinite(reading) ? reading : null;
 }
 
-function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, totalBalId, totalBillingId, rowKind }) {
+function renderBillsEntriesTable({
+  bodyEl,
+  entries,
+  totalCurrentBillingId,
+  totalBalId,
+  totalBillingId,
+  rowKind,
+  showMoneyPaid = false,
+  totalMoneyPaidId = "",
+}) {
   if (!bodyEl) return;
+  const colCount = showMoneyPaid ? 13 : 12;
   const rows = sortRowsLatestFirst(entries || []);
   if (!rows.length) {
-    bodyEl.innerHTML = '<tr><td colspan="12" class="empty">No records.</td></tr>';
+    bodyEl.innerHTML = `<tr><td colspan="${colCount}" class="empty">No records.</td></tr>`;
     const curEl = document.getElementById(totalCurrentBillingId);
+    const moneyPaidEl = totalMoneyPaidId ? document.getElementById(totalMoneyPaidId) : null;
     const balEl = document.getElementById(totalBalId);
     const totEl = document.getElementById(totalBillingId);
     if (curEl) curEl.textContent = currency(0);
+    if (moneyPaidEl) moneyPaidEl.textContent = currency(0);
     if (balEl) {
       balEl.textContent = currency(0);
       balEl.classList.remove("cess-acc-balance-negative");
@@ -6511,17 +6589,21 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
     return;
   }
   let sumCurrentBilling = 0;
+  let sumMoneyPaid = 0;
   let sumBalance = 0;
   let sumTotalBilling = 0;
   for (const row of rows) {
     sumCurrentBilling += Number(row.current_billing || 0);
+    sumMoneyPaid += Number(row.money_paid || 0);
     sumBalance += Number(row.balance || 0);
     sumTotalBilling += Number(row.total_billing || 0);
   }
   bodyEl.innerHTML = rows
     .map((row, idx) => {
       const balance = Number(row.balance || 0);
+      const moneyPaid = Number(row.money_paid || 0);
       const totalBilling = Number(row.total_billing || 0);
+      const moneyPaidCell = showMoneyPaid ? `<td>${currency(moneyPaid)}</td>` : "";
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -6533,6 +6615,7 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
         <td>${Number(row.units_used || 0)}</td>
         <td>${Number(row.price_per_m3 || 0)}</td>
         <td>${currency(Number(row.current_billing || 0))}</td>
+        ${moneyPaidCell}
         <td>${formatCessAccountBalanceCell(balance)}</td>
         <td>${formatCessAccountBalanceCell(totalBilling)}</td>
         <td>
@@ -6545,9 +6628,11 @@ function renderBillsEntriesTable({ bodyEl, entries, totalCurrentBillingId, total
     })
     .join("");
   const curEl = document.getElementById(totalCurrentBillingId);
+  const moneyPaidEl = totalMoneyPaidId ? document.getElementById(totalMoneyPaidId) : null;
   const balEl = document.getElementById(totalBalId);
   const totEl = document.getElementById(totalBillingId);
   if (curEl) curEl.textContent = currency(sumCurrentBilling);
+  if (moneyPaidEl) moneyPaidEl.textContent = currency(sumMoneyPaid);
   if (balEl) {
     balEl.textContent = currency(sumBalance);
     balEl.classList.toggle("cess-acc-balance-negative", sumBalance < 0);
@@ -6574,9 +6659,11 @@ function renderElectricityBillsTable() {
     bodyEl: document.getElementById("electricity-bills-body"),
     entries: state.electricityBillsEntries,
     totalCurrentBillingId: "electricityBillsTotalCurrentBilling",
+    totalMoneyPaidId: "electricityBillsTotalMoneyPaid",
     totalBalId: "electricityBillsTotalBalance",
     totalBillingId: "electricityBillsTotalBilling",
     rowKind: "electricity-bills",
+    showMoneyPaid: true,
   });
 }
 
@@ -6623,10 +6710,12 @@ function resetElectricityBillsForm() {
   const unitsEl = document.getElementById("electricityBillsUnitsUsed");
   const billingEl = document.getElementById("electricityBillsCurrentBilling");
   const balanceEl = document.getElementById("electricityBillsBalance");
+  const moneyPaidEl = document.getElementById("electricityBillsMoneyPaid");
   const totalEl = document.getElementById("electricityBillsTotalBilling");
   if (unitsEl) unitsEl.value = "";
   if (billingEl) billingEl.value = "";
   if (balanceEl instanceof HTMLInputElement) balanceEl.value = "";
+  if (moneyPaidEl instanceof HTMLInputElement) moneyPaidEl.value = "";
   if (totalEl) totalEl.value = "";
   const saveBtn = document.getElementById("electricityBillsSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
@@ -6649,6 +6738,13 @@ function fillMeterBillsFormFromRow(prefix, row) {
   if (balanceEl instanceof HTMLInputElement && state.user?.role === "owner") {
     const bal = Number(row.balance) || 0;
     balanceEl.value = bal > 0 ? String(bal) : "";
+  }
+  if (prefix === "electricityBills") {
+    const moneyPaidEl = document.getElementById("electricityBillsMoneyPaid");
+    if (moneyPaidEl instanceof HTMLInputElement && state.user?.role === "owner") {
+      const paid = Number(row.money_paid) || 0;
+      moneyPaidEl.value = paid > 0 ? String(paid) : "";
+    }
   }
   updateMeterBillsFormCalc(prefix);
 }
@@ -6688,6 +6784,9 @@ function meterBillsPayloadFromForm(prefix) {
   };
   if (state.user?.role === "owner") {
     body.balance = meterBillsBalanceFromForm(prefix);
+    if (prefix === "electricityBills") {
+      body.money_paid = electricityBillsMoneyPaidFromForm();
+    }
   }
   return withActiveMeterBillRecipientId(body);
 }
@@ -7637,6 +7736,7 @@ function showPage(page) {
     const baseTitle = PAGE_HEADINGS[page] || pageHeading.textContent || page;
     pageHeading.textContent = `${baseTitle} — ${activeMeterBillRecipientName()}`;
   }
+  updateElectricityBillsMeterInfoUi();
   const lotScopedPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales", "balance"]);
   if (lotScopedPages.has(page) && inventoryLotsTenantEnabled() && activeLotName()) {
     const baseTitle = pageHeading.textContent || PAGE_HEADINGS[page] || page;
@@ -7871,6 +7971,7 @@ function updateMeterBillRecipientBarUi() {
   if (hintEl && activeMeterBillRecipientName()) {
     hintEl.textContent = `Showing billings for ${activeMeterBillRecipientName()}. Switch person to view or add entries for someone else.`;
   }
+  updateElectricityBillsMeterInfoUi();
 }
 
 async function onActiveMeterBillRecipientChange(recipientId) {
