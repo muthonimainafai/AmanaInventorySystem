@@ -1397,8 +1397,55 @@ function updateGasProfitDisplay() {
   });
 }
 
+function aggregateOwnerFeedersDrinkersRows(rows) {
+  const byItem = new Map();
+  for (const row of rows || []) {
+    const name = String(row.item_name || "");
+    if (!name) continue;
+    const existing = byItem.get(name);
+    if (!existing) {
+      byItem.set(name, {
+        ...row,
+        quantity_in_stock: Number(row.quantity_in_stock || 0),
+        accumulated_stock: Number(row.accumulated_stock ?? row.quantity_in_stock ?? 0),
+        accumulated_profit: Number(row.accumulated_profit || 0),
+      });
+      continue;
+    }
+    existing.quantity_in_stock += Number(row.quantity_in_stock || 0);
+    existing.accumulated_profit += Number(row.accumulated_profit || 0);
+    existing.accumulated_stock = Math.max(
+      Number(existing.accumulated_stock || 0),
+      Number(row.accumulated_stock ?? row.quantity_in_stock ?? 0)
+    );
+    if (Number(row.id) > Number(existing.id)) {
+      existing.id = row.id;
+      existing.date = row.date;
+      existing.buying_price = row.buying_price;
+      existing.selling_price = row.selling_price;
+      existing.profit_margin = row.profit_margin;
+      existing.reorder_level = row.reorder_level;
+      existing.created_by = row.created_by;
+    }
+  }
+  return [...byItem.values()].sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+}
+
+function feedersDrinkersInventoryForCalculations() {
+  return aggregateOwnerFeedersDrinkersRows(state.feedersDrinkersInventory || []);
+}
+
 function feedersDrinkersAccumulatedProfitTotal() {
-  return (state.feedersDrinkersInventory || []).reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
+  const ym = currentExpenditureMonthKey();
+  if (ym) {
+    return computeItemSalesProfitForMonth(
+      state.feedersDrinkersSales,
+      feedersDrinkersInventoryForCalculations(),
+      ym,
+      "item_name"
+    );
+  }
+  return feedersDrinkersInventoryForCalculations().reduce((s, r) => s + (Number(r.accumulated_profit) || 0), 0);
 }
 
 function medicamentsAccumulatedProfitTotal() {
@@ -6092,7 +6139,9 @@ function refreshEmployeeNewPageSellingPrices() {
 function renderFeedersDrinkersTable() {
   if (!fdBody) return;
   const isOwner = state.user.role === "owner";
-  const rows = isOwner ? state.feedersDrinkersInventory : state.feedersDrinkersSales;
+  const rows = isOwner
+    ? aggregateOwnerFeedersDrinkersRows(state.feedersDrinkersInventory)
+    : state.feedersDrinkersSales;
   const colSpan = isOwner ? 14 : 8;
   if (!rows.length) {
     fdBody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">No records.</td></tr>`;
@@ -6117,7 +6166,18 @@ function renderFeedersDrinkersTable() {
       </tr>`);
     return;
   }
-  fdBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => `
+  const ym = currentExpenditureMonthKey();
+  fdBody.innerHTML = joinRowsWithDateSeparators(rows, colSpan, (row) => {
+    const rowProfit =
+      ym && isOwner
+        ? computeItemSalesProfitForMonth(
+            (state.feedersDrinkersSales || []).filter((s) => String(s.item_name) === String(row.item_name)),
+            feedersDrinkersInventoryForCalculations(),
+            ym,
+            "item_name"
+          )
+        : Number(row.accumulated_profit ?? 0);
+    return `
       <tr>
         <td>${formatDateDMY(row.date)}</td>
         <td>${row.item_name}</td>
@@ -6128,7 +6188,7 @@ function renderFeedersDrinkersTable() {
         <td>${row.quantity_in_stock}</td>
         <td>${row.accumulated_stock != null ? row.accumulated_stock : row.quantity_in_stock}</td>
         <td>${currency(row.profit_margin ?? 0)}</td>
-        <td>${currency(row.accumulated_profit ?? 0)}</td>
+        <td>${currency(rowProfit)}</td>
         <td>${row.reorder_level}</td>
         <td>${statusLabel(row)}</td>
         <td>${row.created_by}</td>
@@ -6138,7 +6198,8 @@ function renderFeedersDrinkersTable() {
             <button type="button" class="danger" data-kind="fd" data-action="delete" data-id="${row.id}">Delete</button>
           </div>
         </td>
-      </tr>`);
+      </tr>`;
+  });
 }
 
 function renderMedicamentsTable() {
@@ -7794,7 +7855,10 @@ function showPage(page) {
     updateRetailCumulativeProfitDisplay();
     syncRetailFeedMarginFromPrices();
   }
-  if (page === "feeders-drinkers") renderFeedersDrinkersTable();
+  if (page === "feeders-drinkers") {
+    renderFeedersDrinkersTable();
+    updateFeedersDrinkersProfitDisplay();
+  }
   if (page === "medicaments") renderMedicamentsTable();
   if (page === "gas") renderGasTable();
   if (page === "rose-inventory") renderRoseTable();

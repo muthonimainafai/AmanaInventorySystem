@@ -933,6 +933,7 @@ async function initDb() {
   ).catch(() => {});
   await run("ALTER TABLE medicaments_sales ADD COLUMN through_party TEXT").catch(() => {});
   await run("ALTER TABLE medicaments_sales ADD COLUMN pass_through_status TEXT").catch(() => {});
+
   await run(`
     CREATE TABLE IF NOT EXISTS feeders_drinkers_sales (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -948,6 +949,7 @@ async function initDb() {
       updated_at TEXT NOT NULL
     )
   `);
+  await migrateFeedersDrinkersInventorySyncIfNeeded();
   await run(`
     CREATE TABLE IF NOT EXISTS medicaments_sales (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3343,6 +3345,74 @@ async function getFeedersDrinkersCurrentLine(itemName) {
   return rows.length ? rows[0] : null;
 }
 
+async function rebuildFeedersDrinkersAccumulatedProfitForMonth(monthKey) {
+  if (!monthKey) return;
+  const items = await all("SELECT DISTINCT item_name FROM feeders_drinkers_inventory");
+  for (const { item_name } of items) {
+    const line = await getFeedersDrinkersCurrentLine(item_name);
+    if (!line) continue;
+    const margin = Number(line.profit_margin) || 0;
+    const sales = await all("SELECT date, quantity_sold, through_party FROM feeders_drinkers_sales WHERE item_name = ?", [
+      item_name,
+    ]);
+    let profit = 0;
+    for (const sale of sales) {
+      if (normalizeThroughParty(sale.through_party) != null) continue;
+      const saleMonth = monthKeyFromDMY(normalizeInventoryDate(sale.date) || sale.date);
+      if (saleMonth !== monthKey) continue;
+      profit += (Number(sale.quantity_sold) || 0) * margin;
+    }
+    await run("UPDATE feeders_drinkers_inventory SET accumulated_profit = ?, updated_at = ? WHERE id = ?", [
+      roundMoney(profit),
+      new Date().toISOString(),
+      line.id,
+    ]);
+  }
+}
+
+async function migrateFeedersDrinkersInventorySyncIfNeeded() {
+  const key = "feeders_drinkers_inventory_sync_v1";
+  const done = await get("SELECT value FROM app_meta WHERE key = ?", [key]);
+  if (done?.value === "1") return;
+
+  const items = await all("SELECT DISTINCT item_name FROM feeders_drinkers_inventory");
+  const nowIso = new Date().toISOString();
+  for (const { item_name } of items) {
+    const rows = await getFeedersDrinkersRowsForItem(item_name);
+    if (!rows.length) continue;
+
+    const soldAgg = await get(
+      "SELECT COALESCE(SUM(quantity_sold), 0) AS t FROM feeders_drinkers_sales WHERE item_name = ?",
+      [item_name]
+    );
+    const totalSold = Number(soldAgg?.t || 0);
+    const keep = rows[rows.length - 1];
+
+    let totalReceived = 0;
+    for (const row of rows) {
+      totalReceived = Math.max(totalReceived, Number(row.accumulated_stock || 0));
+    }
+    const currentSum = rows.reduce((s, row) => s + Number(row.quantity_in_stock || 0), 0);
+    if (totalReceived <= 0) {
+      totalReceived = currentSum + totalSold;
+    }
+
+    const expectedQty = Math.max(0, totalReceived - totalSold);
+    await run(
+      "UPDATE feeders_drinkers_inventory SET quantity_in_stock = ?, accumulated_stock = ?, updated_at = ? WHERE id = ?",
+      [expectedQty, totalReceived, nowIso, keep.id]
+    );
+    for (const row of rows) {
+      if (Number(row.id) !== Number(keep.id)) {
+        await run("DELETE FROM feeders_drinkers_inventory WHERE id = ?", [row.id]);
+      }
+    }
+  }
+
+  await rebuildFeedersDrinkersAccumulatedProfitForMonth(monthKeyFromDMY(todayDMY()));
+  await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, [key, "1"]);
+}
+
 async function adjustFeedersDrinkersStock(itemName, deltaQty, recordProfit = true) {
   const rows = await getFeedersDrinkersRowsForItem(itemName);
   if (!rows.length) throw new Error("No stock record found for this item.");
@@ -4420,6 +4490,7 @@ async function ensureCurrentBusinessMonth() {
       );
     }
     await performBusinessMonthReset();
+    await rebuildFeedersDrinkersAccumulatedProfitForMonth(currentKey);
     await run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)`, [
       "business_month_key",
       currentKey,
