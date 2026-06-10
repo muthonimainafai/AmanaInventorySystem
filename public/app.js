@@ -2998,11 +2998,12 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   const currReading = Number(row.current_meter_reading || 0);
   const unitsUsed = Number(row.units_used || 0);
   const currentBilling = Number(row.current_billing || 0);
-  const totalDue = Number(row.total_billing || 0);
+  const totalBilling = Number(row.total_billing || 0);
   const pricePerM3 = Number(row.price_per_m3 || 0);
   const moneyPaid = Number(row.money_paid || 0);
   const overpaymentBalance = electricityBillsOverpaymentBalance(row);
   const isElectricity = isElectricityBillsKind(serviceItem);
+  const amountDue = isElectricity ? electricityBillsAmountDue(row) : totalBilling;
   const pdfBody = [
     ["", "", "", "Previous balance", formatKshPlainNumber(balanceBf)],
     [
@@ -3017,7 +3018,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
     pdfBody.push(["", "", "", "Money paid", formatKshPlainNumber(moneyPaid)]);
     pdfBody.push(["", "", "", "Overpayment balance", formatKshPlainNumber(overpaymentBalance)]);
   }
-  pdfBody.push(["", "", "", "Total amount due", formatKshPlainNumber(totalDue)]);
+  pdfBody.push(["", "", "", "Total amount due", formatKshPlainNumber(amountDue)]);
 
   runPdfAutoTable(doc, jsPdfNs, {
     startY: y,
@@ -3039,7 +3040,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   doc.line(margin, y, rightX, y);
   y += 18;
 
-  drawMeterBillsPaymentDetails(doc, { margin, pageW, startY: y, serviceItem, totalDue });
+  drawMeterBillsPaymentDetails(doc, { margin, pageW, startY: y, serviceItem, totalDue: amountDue });
 
   if (pageCount > 1) {
     doc.setFontSize(8);
@@ -3064,7 +3065,7 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "wat
     "Current billing (Ksh)",
   ];
   if (isElectricity) {
-    headers.push("Money paid", "Previous balance", "Overpayment balance", "Total billing");
+    headers.push("Money paid", "Previous balance", "Overpayment balance", "Amount due");
   } else {
     headers.push("Previous balance", "Total billing");
   }
@@ -3085,7 +3086,7 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "wat
         currency(Number(row.money_paid || 0)),
         currency(Number(row.balance || 0)),
         currency(electricityBillsOverpaymentBalance(row)),
-        currency(Number(row.total_billing || 0))
+        currency(electricityBillsAmountDue(row))
       );
     } else {
       base.push(currency(Number(row.balance || 0)), currency(Number(row.total_billing || 0)));
@@ -3097,7 +3098,7 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "wat
     let sumMoneyPaid = 0;
     let sumOverpayment = 0;
     let lastBalance = 0;
-    let lastTotalBilling = 0;
+    let lastAmountDue = 0;
     const chronological = [...rows].sort((a, b) => {
       const ak = billingMonthKey(parseBillingMonthValue(a?.date_to || a?.date_from || a?.date));
       const bk = billingMonthKey(parseBillingMonthValue(b?.date_to || b?.date_from || b?.date));
@@ -3109,7 +3110,7 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "wat
       sumMoneyPaid += Number(row.money_paid || 0);
       sumOverpayment += electricityBillsOverpaymentBalance(row);
       lastBalance = Number(row.balance || 0);
-      lastTotalBilling = Number(row.total_billing || 0);
+      lastAmountDue = isElectricity ? electricityBillsAmountDue(row) : Number(row.total_billing || 0);
     }
     if (isElectricity) {
       body.push([
@@ -3118,14 +3119,14 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "wat
         { content: currency(sumMoneyPaid), styles: { fontStyle: "bold" } },
         { content: currency(lastBalance), styles: { fontStyle: "bold" } },
         { content: currency(sumOverpayment), styles: { fontStyle: "bold" } },
-        { content: currency(lastTotalBilling), styles: { fontStyle: "bold" } },
+        { content: currency(lastAmountDue), styles: { fontStyle: "bold" } },
       ]);
     } else {
       body.push([
         { content: "Total", colSpan: 8, styles: { fontStyle: "bold", halign: "right" } },
         { content: currency(sumCurrentBilling), styles: { fontStyle: "bold" } },
         { content: currency(lastBalance), styles: { fontStyle: "bold" } },
-        { content: currency(lastTotalBilling), styles: { fontStyle: "bold" } },
+        { content: currency(lastAmountDue), styles: { fontStyle: "bold" } },
       ]);
     }
   }
@@ -6617,6 +6618,12 @@ function electricityBillsOverpaymentBalance(row) {
   return roundMoney(moneyPaid - currentBilling - previousBalance);
 }
 
+function electricityBillsAmountDue(row) {
+  const overpayment = electricityBillsOverpaymentBalance(row);
+  if (overpayment > 0) return 0;
+  return roundMoney(Math.max(0, Number(row?.total_billing ?? 0) - Number(row?.money_paid ?? 0)));
+}
+
 function updateMeterBillsFormCalc(prefix) {
   const currentEl = document.getElementById(`${prefix}CurrentMeter`);
   const previousEl = document.getElementById(`${prefix}PreviousMeter`);
@@ -6634,7 +6641,19 @@ function updateMeterBillsFormCalc(prefix) {
   if (Number.isFinite(unitsUsed)) {
     unitsEl.value = String(unitsUsed);
     billingEl.value = currency(currentBilling);
-    if (totalEl) totalEl.value = currency(roundMoney(currentBilling + balance));
+    if (totalEl) {
+      if (prefix === "electricityBills") {
+        const amountDue = electricityBillsAmountDue({
+          current_billing: currentBilling,
+          balance,
+          money_paid: electricityBillsMoneyPaidFromForm(),
+          total_billing: roundMoney(currentBilling + balance),
+        });
+        totalEl.value = currency(amountDue);
+      } else {
+        totalEl.value = currency(roundMoney(currentBilling + balance));
+      }
+    }
   } else {
     unitsEl.value = "";
     billingEl.value = "";
@@ -6644,6 +6663,7 @@ function updateMeterBillsFormCalc(prefix) {
 
 function wireMeterBillsFormCalc(prefix) {
   const ids = [`${prefix}CurrentMeter`, `${prefix}PreviousMeter`, `${prefix}PricePerM3`, `${prefix}Balance`];
+  if (prefix === "electricityBills") ids.push("electricityBillsMoneyPaid");
   for (const id of ids) {
     const el = document.getElementById(id);
     if (!el || el.dataset.meterCalcWired === "1") continue;
@@ -6724,20 +6744,24 @@ function renderBillsEntriesTable({
   let sumMoneyPaid = 0;
   let sumOverpayment = 0;
   let sumBalance = 0;
-  let sumTotalBilling = 0;
+  let sumAmountDue = 0;
   for (const row of rows) {
     sumCurrentBilling += Number(row.current_billing || 0);
     sumMoneyPaid += Number(row.money_paid || 0);
     if (showOverpaymentBalance) sumOverpayment += electricityBillsOverpaymentBalance(row);
     sumBalance += Number(row.balance || 0);
-    sumTotalBilling += Number(row.total_billing || 0);
+    sumAmountDue += showOverpaymentBalance
+      ? electricityBillsAmountDue(row)
+      : Number(row.total_billing || 0);
   }
   bodyEl.innerHTML = rows
     .map((row, idx) => {
       const balance = Number(row.balance || 0);
       const moneyPaid = Number(row.money_paid || 0);
       const overpayment = electricityBillsOverpaymentBalance(row);
-      const totalBilling = Number(row.total_billing || 0);
+      const amountDue = showOverpaymentBalance
+        ? electricityBillsAmountDue(row)
+        : Number(row.total_billing || 0);
       const moneyPaidCell = showMoneyPaid ? `<td>${currency(moneyPaid)}</td>` : "";
       const overpaymentCell = showOverpaymentBalance
         ? `<td>${formatCessAccountBalanceCell(overpayment)}</td>`
@@ -6756,7 +6780,7 @@ function renderBillsEntriesTable({
         ${moneyPaidCell}
         <td>${formatCessAccountBalanceCell(balance)}</td>
         ${overpaymentCell}
-        <td>${formatCessAccountBalanceCell(totalBilling)}</td>
+        <td>${formatCessAccountBalanceCell(amountDue)}</td>
         <td>
           <div class="row-actions">
             <button type="button" data-kind="${rowKind}" data-action="edit" data-id="${row.id}">Edit</button>
@@ -6782,8 +6806,8 @@ function renderBillsEntriesTable({
     balEl.classList.toggle("cess-acc-balance-negative", sumBalance < 0);
   }
   if (totEl) {
-    totEl.textContent = currency(sumTotalBilling);
-    totEl.classList.toggle("cess-acc-balance-negative", sumTotalBilling < 0);
+    totEl.textContent = currency(sumAmountDue);
+    totEl.classList.toggle("cess-acc-balance-negative", sumAmountDue < 0);
   }
 }
 
