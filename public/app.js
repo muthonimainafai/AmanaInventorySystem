@@ -6614,8 +6614,9 @@ function electricityBillsMoneyPaidFromForm() {
 function electricityBillsOverpaymentBalance(row) {
   const moneyPaid = Number(row?.money_paid ?? 0);
   const currentBilling = Number(row?.current_billing ?? 0);
+  if (moneyPaid < currentBilling) return 0;
   const previousBalance = Number(row?.balance ?? 0);
-  return roundMoney(moneyPaid - currentBilling - previousBalance);
+  return roundMoney(Math.max(0, moneyPaid - currentBilling - previousBalance));
 }
 
 function electricityBillsAmountDue(row) {
