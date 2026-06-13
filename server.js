@@ -429,6 +429,7 @@ const FEEDERS_DRINKERS_CATALOG = [
   { name: "Feeder round big (Plastic)", item_type: "feeder", capacity_liters: null },
   { name: "Feeding trough (Plastic)", item_type: "feeder", capacity_liters: null },
   { name: "Jiko Big", item_type: "feeder", capacity_liters: null },
+  { name: "Egg trays", item_type: "feeder", capacity_liters: null },
 ];
 
 const MEDICAMENTS_CATALOG = [
