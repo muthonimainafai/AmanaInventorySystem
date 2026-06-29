@@ -9182,15 +9182,13 @@ function showAddCatalogItemUi(category) {
   const wrap = document.getElementById(wrapId);
   if (!wrap) return;
   wrap.classList.remove("hidden");
-  wrap.style.display = "flex";
   const input = document.getElementById(inputId);
   if (input instanceof HTMLInputElement) { input.value = ""; input.focus(); }
 }
 
 function hideAddCatalogItemUi(category) {
   const wrapId = category === "feeders-drinkers" ? "fdAddItemWrap" : "medAddItemWrap";
-  const wrap = document.getElementById(wrapId);
-  if (wrap) { wrap.classList.add("hidden"); wrap.style.display = ""; }
+  document.getElementById(wrapId)?.classList.add("hidden");
 }
 
 async function saveNewCatalogItem(category) {

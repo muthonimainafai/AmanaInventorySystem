@@ -1060,10 +1060,10 @@
                     <option value="">Select item</option>
                   </select>
                 </label>
-                <div id="fdAddItemWrap" class="hidden owner-only-highlight" style="display:flex;flex-direction:column;gap:4px;">
-                  <label style="font-weight:600;font-size:0.85rem;">New item name</label>
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    <input type="text" id="fdAddItemName" placeholder="e.g. Feeder trough (Bamboo)" style="flex:1;" />
+                <div id="fdAddItemWrap" class="hidden add-catalog-item-wrap">
+                  <label class="add-catalog-item-label">New item name</label>
+                  <div class="add-catalog-item-row">
+                    <input type="text" id="fdAddItemName" placeholder="e.g. Feeder trough (Bamboo)" />
                     <button type="button" class="secondary" data-action="save" onclick="saveNewCatalogItem('feeders-drinkers')">Save</button>
                     <button type="button" class="secondary" onclick="hideAddCatalogItemUi('feeders-drinkers')">Cancel</button>
                   </div>
@@ -1189,10 +1189,10 @@
                     <option value="">Select item</option>
                   </select>
                 </label>
-                <div id="medAddItemWrap" class="hidden owner-only-highlight" style="display:flex;flex-direction:column;gap:4px;">
-                  <label style="font-weight:600;font-size:0.85rem;">New item name</label>
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    <input type="text" id="medAddItemName" placeholder="e.g. Tetracycline 100g" style="flex:1;" />
+                <div id="medAddItemWrap" class="hidden add-catalog-item-wrap">
+                  <label class="add-catalog-item-label">New item name</label>
+                  <div class="add-catalog-item-row">
+                    <input type="text" id="medAddItemName" placeholder="e.g. Tetracycline 100g" />
                     <button type="button" class="secondary" data-action="save" onclick="saveNewCatalogItem('medicaments')">Save</button>
                     <button type="button" class="secondary" onclick="hideAddCatalogItemUi('medicaments')">Cancel</button>
                   </div>

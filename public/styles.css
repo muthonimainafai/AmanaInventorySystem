@@ -924,3 +924,39 @@ tr.table-date-separator td {
 .inventory-lot-new-wrap.hidden {
   display: none;
 }
+
+/* Add-item panel shown when owner selects "+ Add new item…" in a catalog dropdown */
+.add-catalog-item-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  margin-top: 2px;
+  /* span across the full grid row so it's visually separate */
+  grid-column: 1 / -1;
+}
+
+.add-catalog-item-wrap.hidden {
+  display: none;
+}
+
+.add-catalog-item-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 2px;
+}
+
+.add-catalog-item-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.add-catalog-item-row input[type="text"] {
+  flex: 1;
+  min-width: 180px;
+}
