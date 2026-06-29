@@ -242,6 +242,31 @@ function tenantLoginEnv(tenant) {
           : "AMANA_* (fallback)",
     };
   }
+  if (t === "home-chickens") {
+    const homeChickensOwnerUsername = String(process.env.HOME_CHICKENS_OWNER_USERNAME || "").trim();
+    const homeChickensOwnerPassword = String(process.env.HOME_CHICKENS_OWNER_PASSWORD || "");
+    const homeChickensOwnerFullName = String(process.env.HOME_CHICKENS_OWNER_FULL_NAME || "").trim();
+    const homeChickensEmployeeUsername = String(process.env.HOME_CHICKENS_EMPLOYEE_USERNAME || "").trim();
+    const homeChickensEmployeePassword = String(process.env.HOME_CHICKENS_EMPLOYEE_PASSWORD || "");
+    const homeChickensEmployeeFullName = String(process.env.HOME_CHICKENS_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "home-chickens",
+      owner: {
+        username: homeChickensOwnerUsername || AMANA_OWNER_USERNAME,
+        password: homeChickensOwnerPassword || AMANA_OWNER_PASSWORD,
+        fullName: homeChickensOwnerFullName || AMANA_OWNER_FULL_NAME,
+      },
+      employee: {
+        username: homeChickensEmployeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: homeChickensEmployeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: homeChickensEmployeeFullName || AMANA_EMPLOYEE_FULL_NAME,
+      },
+      sourceLabel:
+        homeChickensOwnerUsername || homeChickensEmployeeUsername || homeChickensOwnerPassword || homeChickensEmployeePassword
+          ? "HOME_CHICKENS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
   if (t === "water-bills") {
     const ownerUsername = String(process.env.WATER_BILLS_OWNER_USERNAME || "").trim();
     const ownerPassword = String(process.env.WATER_BILLS_OWNER_PASSWORD || "");
@@ -340,6 +365,7 @@ function normalizeAppTenant(value) {
   const t = String(value || "amana").trim().toLowerCase();
   if (t === "ufaray") return "ufaray";
   if (t === "rose") return "rose";
+  if (t === "home-chickens") return "home-chickens";
   if (t === "terry") return "terry";
   if (t === "cess") return "cess";
   if (t === "terry-and-cess") return "terry-and-cess";
@@ -364,6 +390,7 @@ function dbFileNameForTenant(tenant) {
   if (t === "shop") return "inventory-shop.db";
   if (t === "nahah") return "inventory-nahah.db";
   if (t === "rose") return "inventory-rose.db";
+  if (t === "home-chickens") return "inventory-home-chickens.db";
   if (t === "water-bills") return "inventory-water-bills.db";
   if (t === "electricity-bills") return "inventory-electricity-bills.db";
   return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
@@ -575,6 +602,7 @@ function inventoryLotsTenantEnabled() {
   const t = activeTenant();
   return (
     t === "rose" ||
+    t === "home-chickens" ||
     t === "nahah" ||
     t === "terry" ||
     t === "cess" ||

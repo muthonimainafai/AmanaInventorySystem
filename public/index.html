@@ -34,6 +34,10 @@
             <span class="portal-option-title">Rose Inventory</span>
             <span class="portal-option-sub">Rose inventory workspace with separate data and login</span>
           </button>
+          <button type="button" id="openHomeChickensBtn" class="portal-option">
+            <span class="portal-option-title">Home Chickens</span>
+            <span class="portal-option-sub">Home chickens inventory with separate data and login</span>
+          </button>
           <button type="button" id="openUfarayBtn" class="portal-option">
             <span class="portal-option-title">Ufaray Feeds</span>
             <span class="portal-option-sub">Fresh copy with same features and empty data</span>
@@ -1812,7 +1816,9 @@
                 <tbody id="faith-sales-body"><tr><td colspan="8" class="empty">No records.</td></tr></tbody>
                 <tfoot>
                   <tr>
-                    <th colspan="4">Total</th>
+                    <th colspan="1">Total</th>
+                    <th id="faithSalesNumChickensSum">0</th>
+                    <th colspan="2"></th>
                     <th id="faithSalesTotalAmountSum">0</th>
                     <th id="faithSalesAmountPaidSum">0</th>
                     <th id="faithSalesAmountBalanceSum">0</th>
@@ -2844,6 +2850,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-05-27-electricity-overpayment-logic"></script>
+    <script src="app.js?v=2026-06-29-home-chickens"></script>
   </body>
 </html>

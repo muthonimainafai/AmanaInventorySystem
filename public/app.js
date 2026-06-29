@@ -5,6 +5,7 @@ const state = {
       "amana",
       "ufaray",
       "rose",
+      "home-chickens",
       "nahah",
       "terry",
       "cess",
@@ -144,7 +145,7 @@ function updateCalculatorModeUi() {
 }
 
 function isRecordsTenant() {
-  return state.appInstance === "rose";
+  return state.appInstance === "rose" || state.appInstance === "home-chickens";
 }
 
 function isWaterBillsTenant() {
@@ -309,6 +310,7 @@ function defaultPageForLoggedInUser() {
     return "rose-inventory";
   }
   if (state.appInstance === "shop") return "inventory";
+  if (state.appInstance === "home-chickens") return "rose-inventory";
   if (isRecordsTenant()) return "rose-inventory";
   return state.user?.role === "owner" ? "inventory" : "sales-bags";
 }
@@ -710,6 +712,7 @@ function persistAppInstance() {
     "amana",
     "ufaray",
     "rose",
+    "home-chickens",
     "nahah",
     "terry",
     "cess",
@@ -729,6 +732,7 @@ function applyAppTheme() {
     "amana",
     "ufaray",
     "rose",
+    "home-chickens",
     "nahah",
     "terry",
     "cess",
@@ -741,7 +745,7 @@ function applyAppTheme() {
     ? state.appInstance
     : "amana";
   const isUfaray = tenant === "ufaray";
-  const isRose = tenant === "rose";
+  const isRose = tenant === "rose" || tenant === "home-chickens";
   const isWaterBills = tenant === "water-bills";
   const isElectricityBills = tenant === "electricity-bills";
   const isMainaFaithCess = tenant === "maina-faith-cess";
@@ -768,6 +772,8 @@ function applyAppTheme() {
       ? "Terry and Cess - Desktop Inventory"
       : isUfaray
       ? "Ufaray Feeds - Desktop Inventory"
+      : tenant === "home-chickens"
+        ? "Home Chickens - Desktop Inventory"
       : isRose
         ? "Rose Inventory - Desktop Inventory"
         : isNahah
@@ -785,7 +791,9 @@ function applyAppTheme() {
             ? "ELECTRICITY BILLS"
         : isUfaray
         ? "UFARAY FEEDS"
-        : isRose
+        : tenant === "home-chickens"
+          ? "HOME CHICKENS"
+        : tenant === "rose"
           ? "ROSE INVENTORY"
           : isNahah
             ? "FAITH INVENTORY"
@@ -816,32 +824,36 @@ function applyAppTheme() {
   const roseTab = document.getElementById("roseInventoryTabLabel");
   if (roseTab) {
     roseTab.textContent =
-      state.appInstance === "rose"
-        ? "Rose Inventory"
-        : state.appInstance === "terry"
-          ? "Terry Records"
+      state.appInstance === "home-chickens"
+        ? "Home Chickens"
+        : state.appInstance === "rose"
+          ? "Rose Inventory"
+          : state.appInstance === "terry"
+            ? "Terry Records"
             : state.appInstance === "cess"
               ? "Records"
-            : state.appInstance === "terry-and-cess"
-              ? "Records"
-            : state.appInstance === "maina-faith-cess"
-              ? "Records"
-            : "Rose Inventory";
+              : state.appInstance === "terry-and-cess"
+                ? "Records"
+                : state.appInstance === "maina-faith-cess"
+                  ? "Records"
+                  : "Rose Inventory";
   }
   const rosePageTitle = document.getElementById("roseInventoryPageTitle");
   if (rosePageTitle) {
     rosePageTitle.textContent =
-      state.appInstance === "rose"
-        ? "Rose Inventory"
-        : state.appInstance === "terry"
-          ? "Terry Records"
+      state.appInstance === "home-chickens"
+        ? "Home Chickens"
+        : state.appInstance === "rose"
+          ? "Rose Inventory"
+          : state.appInstance === "terry"
+            ? "Terry Records"
             : state.appInstance === "cess"
               ? "Records"
-            : state.appInstance === "terry-and-cess"
-              ? "Terry and Cess"
-            : state.appInstance === "maina-faith-cess"
-              ? "Maina+Faith+Cess"
-            : "Rose Inventory";
+              : state.appInstance === "terry-and-cess"
+                ? "Terry and Cess"
+                : state.appInstance === "maina-faith-cess"
+                  ? "Maina+Faith+Cess"
+                  : "Rose Inventory";
   }
   const passThroughTitles = document.querySelectorAll(".js-via-pass-through-title");
   for (const el of passThroughTitles) {
@@ -871,6 +883,7 @@ async function api(path, options = {}) {
       "amana",
       "ufaray",
       "rose",
+      "home-chickens",
       "nahah",
       "terry",
       "cess",
@@ -4628,13 +4641,15 @@ function showLoggedIn() {
   });
   if (roseInventoryTabLabel) {
     roseInventoryTabLabel.textContent =
-      state.appInstance === "rose"
-        ? "Rose Inventory"
-        : state.appInstance === "terry"
-          ? "Terry Records"
-          : state.appInstance === "cess" || state.appInstance === "maina-faith-cess" || state.appInstance === "terry-and-cess"
-            ? "Records"
-            : "Rose Inventory";
+      state.appInstance === "home-chickens"
+        ? "Home Chickens"
+        : state.appInstance === "rose"
+          ? "Rose Inventory"
+          : state.appInstance === "terry"
+            ? "Terry Records"
+            : state.appInstance === "cess" || state.appInstance === "maina-faith-cess" || state.appInstance === "terry-and-cess"
+              ? "Records"
+              : "Rose Inventory";
   }
   document.querySelectorAll(".nav-tab").forEach((btn) => {
     const page = btn.dataset.page;
@@ -7195,14 +7210,17 @@ function renderFaithSalesTable() {
   const rows = sortRowsLatestFirst(state.faithSalesEntries || []);
   if (!rows.length) {
     faithSalesBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
+    const chicksEl = document.getElementById("faithSalesNumChickensSum");
     const totEl = document.getElementById("faithSalesTotalAmountSum");
     const paidEl = document.getElementById("faithSalesAmountPaidSum");
     const balEl = document.getElementById("faithSalesAmountBalanceSum");
+    if (chicksEl) chicksEl.textContent = "0";
     if (totEl) totEl.textContent = currency(0);
     if (paidEl) paidEl.textContent = currency(0);
     if (balEl) balEl.textContent = currency(0);
     return;
   }
+  let sumChickens = 0;
   let sumTotal = 0;
   let sumPaid = 0;
   let sumBalance = 0;
@@ -7211,6 +7229,7 @@ function renderFaithSalesTable() {
       const total = Number(row.total_amount || 0);
       const paid = Number(row.amount_paid || 0);
       const balance = Number(row.amount_balance || 0);
+      sumChickens += Number(row.num_chickens || 0);
       sumTotal += total;
       sumPaid += paid;
       sumBalance += balance;
@@ -7232,9 +7251,11 @@ function renderFaithSalesTable() {
       </tr>`;
     })
     .join("");
+  const chicksEl = document.getElementById("faithSalesNumChickensSum");
   const totEl = document.getElementById("faithSalesTotalAmountSum");
   const paidEl = document.getElementById("faithSalesAmountPaidSum");
   const balEl = document.getElementById("faithSalesAmountBalanceSum");
+  if (chicksEl) chicksEl.textContent = String(sumChickens);
   if (totEl) totEl.textContent = currency(sumTotal);
   if (paidEl) paidEl.textContent = currency(sumPaid);
   if (balEl) balEl.textContent = currency(sumBalance);
@@ -8544,6 +8565,12 @@ document.getElementById("openElectricityBillsBtn")?.addEventListener("click", ()
 
 document.getElementById("openRoseBtn")?.addEventListener("click", () => {
   state.appInstance = "rose";
+  persistAppInstance();
+  showLoginCard();
+});
+
+document.getElementById("openHomeChickensBtn")?.addEventListener("click", () => {
+  state.appInstance = "home-chickens";
   persistAppInstance();
   showLoginCard();
 });
