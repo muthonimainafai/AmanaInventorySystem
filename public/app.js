@@ -7895,19 +7895,22 @@ function showPage(page) {
   pageHeading.textContent = PAGE_HEADINGS[page] || "Amana Kuku Feeds";
   if (
     page === "rose-inventory" &&
-    (state.appInstance === "terry" ||
+    (state.appInstance === "home-chickens" ||
+      state.appInstance === "terry" ||
       state.appInstance === "cess" ||
       state.appInstance === "terry-and-cess" ||
       state.appInstance === "maina-faith-cess")
   ) {
     pageHeading.textContent =
-      state.appInstance === "terry"
-        ? "Terry Records"
-        : state.appInstance === "maina-faith-cess"
-          ? "Maina+Faith+Cess"
-          : state.appInstance === "terry-and-cess"
-            ? "Terry and Cess"
-            : "Records";
+      state.appInstance === "home-chickens"
+        ? "Home Chickens"
+        : state.appInstance === "terry"
+          ? "Terry Records"
+          : state.appInstance === "maina-faith-cess"
+            ? "Maina+Faith+Cess"
+            : state.appInstance === "terry-and-cess"
+              ? "Terry and Cess"
+              : "Records";
   }
   if (page === "chicken-inventory" && state.user?.role === "employee") {
     pageHeading.textContent = "Chicken Sales";
