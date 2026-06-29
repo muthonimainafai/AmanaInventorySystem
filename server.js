@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const sqlite3 = require("sqlite3").verbose();
@@ -48,7 +48,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "amana-inventory-secret-change-me";
 
-/** First-time login accounts (only created when the users table is empty). Override via .env — see env.example */
+/** First-time login accounts (only created when the users table is empty). Override via .env â€” see env.example */
 const AMANA_OWNER_USERNAME = String(process.env.AMANA_OWNER_USERNAME || "owner").trim() || "owner";
 const AMANA_OWNER_PASSWORD = String(process.env.AMANA_OWNER_PASSWORD || "Owner@123");
 const AMANA_OWNER_FULL_NAME = String(process.env.AMANA_OWNER_FULL_NAME || "Shop Owner").trim() || "Shop Owner";
@@ -441,7 +441,7 @@ async function ensureTenantInitialized(tenant) {
   }
 }
 
-/** Brand / feed types / bag sizes — single source (original Amana Kuku Feeds specification). */
+/** Brand / feed types / bag sizes â€” single source (original Amana Kuku Feeds specification). */
 const feedCatalog = require("./feedCatalog.json");
 
 const FEEDERS_DRINKERS_CATALOG = [
@@ -477,17 +477,37 @@ function normalizeInventoryItemName(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function resolveFeederDrinkerItem(name) {
-  const n = normalizeInventoryItemName(name);
-  return FEEDERS_DRINKERS_CATALOG.find((i) => normalizeInventoryItemName(i.name) === n) || null;
+async function getEffectiveFeedersDrinkersCatalog() {
+  const custom = await all(
+    "SELECT name, item_type FROM custom_catalog_items WHERE category = 'feeders-drinkers' ORDER BY id ASC"
+  );
+  return [
+    ...FEEDERS_DRINKERS_CATALOG,
+    ...custom.map((r) => ({ name: r.name, item_type: r.item_type || "feeder", capacity_liters: null })),
+  ];
 }
 
-function resolveMedicamentItem(name) {
-  const n = normalizeInventoryItemName(name);
-  return MEDICAMENTS_CATALOG.find((i) => normalizeInventoryItemName(i) === n) || null;
+async function getEffectiveMedicamentsCatalog() {
+  const custom = await all(
+    "SELECT name FROM custom_catalog_items WHERE category = 'medicaments' ORDER BY id ASC"
+  );
+  return [...MEDICAMENTS_CATALOG, ...custom.map((r) => r.name)];
 }
 
-/** Day-old chick brands — buying/selling per chick and margins are tracked in `chicken_breeds`. Override via `public/chickenBreeds.json` (array of strings). */
+async function resolveFeederDrinkerItem(name) {
+  const n = normalizeInventoryItemName(name);
+  const catalog = await getEffectiveFeedersDrinkersCatalog();
+  return catalog.find((i) => normalizeInventoryItemName(i.name) === n) || null;
+}
+
+async function resolveMedicamentItem(name) {
+  const n = normalizeInventoryItemName(name);
+  const catalog = await getEffectiveMedicamentsCatalog();
+  const match = catalog.find((i) => normalizeInventoryItemName(i) === n);
+  return match || null;
+}
+
+/** Day-old chick brands â€” buying/selling per chick and margins are tracked in `chicken_breeds`. Override via `public/chickenBreeds.json` (array of strings). */
 function loadChickenBreedsList() {
   const defaultBreeds = ["Irvines", "Supreme", "Isinya", "Silverland", "Kenchick", "Jumbo", "Suguna"];
   try {
@@ -680,7 +700,7 @@ async function resolveMeterBillRecipientIdForRequest(req) {
   return recipientId;
 }
 
-/** One-time: accumulated_profit = total profit from bags recorded as sold (historical sales × current margin). */
+/** One-time: accumulated_profit = total profit from bags recorded as sold (historical sales Ã— current margin). */
 async function migrateAccumulatedProfitFromSalesIfNeeded() {
   const row = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_profit_v2"]);
   if (row?.value === "1") return;
@@ -1101,6 +1121,17 @@ async function initDb() {
   await run("ALTER TABLE cess_accounts_entries ADD COLUMN sale_via TEXT NOT NULL DEFAULT 'Shop'").catch(() => {});
 
   await run(`
+    CREATE TABLE IF NOT EXISTS custom_catalog_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      name TEXT NOT NULL,
+      item_type TEXT NOT NULL DEFAULT 'feeder',
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS faith_expenses_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
@@ -1474,8 +1505,8 @@ async function initDb() {
     // eslint-disable-next-line no-console
     console.log(
       ownerOnly
-        ? `[${login.tenant}] Created default owner user: “${login.owner.username}”. This tenant is owner-only. Set ${login.sourceLabel} in .env for your own credentials.`
-        : `[${login.tenant}] Created default users: owner “${login.owner.username}”, staff “${login.employee.username}”. Set ${login.sourceLabel} in .env for your own credentials.`
+        ? `[${login.tenant}] Created default owner user: â€œ${login.owner.username}â€. This tenant is owner-only. Set ${login.sourceLabel} in .env for your own credentials.`
+        : `[${login.tenant}] Created default users: owner â€œ${login.owner.username}â€, staff â€œ${login.employee.username}â€. Set ${login.sourceLabel} in .env for your own credentials.`
     );
   } else {
     await syncLoginUsersFromEnv(login);
@@ -1774,7 +1805,7 @@ function isThroughPartyBagSaleRow(row) {
   return normalizeThroughParty(row?.through_party) != null;
 }
 
-/** Bag size (kg) for a feed line from the catalog — used for kg sales and “bags sold from kg”. */
+/** Bag size (kg) for a feed line from the catalog â€” used for kg sales and â€œbags sold from kgâ€. */
 function catalogBagSizeForFeed(brandKey, feedType) {
   const items = feedCatalog[resolveBrandKey(brandKey)];
   if (!items) return 50;
@@ -1782,14 +1813,14 @@ function catalogBagSizeForFeed(brandKey, feedType) {
   return Number(found?.bagSize) || 50;
 }
 
-/** Whole bags represented by a running total of kg sold (e.g. 50 kg → 1 when bag size is 50). */
+/** Whole bags represented by a running total of kg sold (e.g. 50 kg â†’ 1 when bag size is 50). */
 function bagsFromTotalKg(totalKg, bagSize) {
   const bs = Number(bagSize) || 50;
   if (bs <= 0) return 0;
   return Math.floor(Number(totalKg) / bs);
 }
 
-/** Map key: resolved brand + normalized feed type → optional owner kg per opened bag (retail_feed_pricing.weight_kg). */
+/** Map key: resolved brand + normalized feed type â†’ optional owner kg per opened bag (retail_feed_pricing.weight_kg). */
 async function getRetailWeightKgByKeyMap() {
   const rfRows = await all("SELECT brand, feed_type, weight_kg FROM retail_feed_pricing");
   const m = new Map();
@@ -1981,7 +2012,7 @@ function totalBagsOpenedFromKgSalesChronological(productRows, weightMap) {
 }
 
 /**
- * Full bags completed (50 kg or owner weight per bag) — matches Sales Per Kg “Bags sold”
+ * Full bags completed (50 kg or owner weight per bag) â€” matches Sales Per Kg â€œBags soldâ€
  * and is what Feed Inventory should deduct.
  */
 function totalBagsCompletedFromKgSalesChronological(productRows, weightMap) {
@@ -2241,7 +2272,7 @@ function employeeSaleDateAllowed(req, res, dateStr) {
 
 /**
  * Per inventory line (brand + feed + bag size): cumulative profit from shop Sales Per Bags only
- * (SUM(bags_sold) × current margin) for the current calendar month. Rows with through_party set are excluded.
+ * (SUM(bags_sold) Ã— current margin) for the current calendar month. Rows with through_party set are excluded.
  */
 async function cumulativeBagSalesProfitByInventoryLines(monthKey = null) {
   const mk = monthKey || monthKeyFromDMY(todayDMY());
@@ -2304,7 +2335,7 @@ async function computeCumulativeRetailKgProfit() {
   return { totalProfit, today, timeZone: AMANA_TZ };
 }
 
-/** All inventory rows for this product (same brand, feed, bag size), oldest first — used to aggregate stock and sell FIFO. */
+/** All inventory rows for this product (same brand, feed, bag size), oldest first â€” used to aggregate stock and sell FIFO. */
 async function getInventoryRowsForProduct(brand, feedType, bagSize) {
   const rows = await all(
     `SELECT * FROM inventory
@@ -2406,7 +2437,7 @@ async function adjustRetailAccumulatedProfit(brandKey, feedType, deltaProfit) {
   );
 }
 
-/** Employees must use the owner’s selling price from inventory (bags: per bag; kg: retail price if set, else per kg from Feed Inventory). */
+/** Employees must use the ownerâ€™s selling price from inventory (bags: per bag; kg: retail price if set, else per kg from Feed Inventory). */
 async function assertEmployeeFeedSalePrices(req, res, mode, p) {
   if (req.user.role !== "employee") return true;
   if (normalizeThroughParty(p.through_party) != null) return true;
@@ -2452,7 +2483,7 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
       if (!salePriceMatchesInventory(Number(rf.price_per_kg), p.price_per_kg)) {
         res.status(400).json({
           error:
-            "Price per kg must match the owner’s retail price set under Retail Feed Inventory for this product.",
+            "Price per kg must match the ownerâ€™s retail price set under Retail Feed Inventory for this product.",
         });
         return false;
       }
@@ -2462,7 +2493,7 @@ async function assertEmployeeFeedSalePrices(req, res, mode, p) {
     if (!salePriceMatchesInventory(expectedPerKg, p.price_per_kg)) {
       res.status(400).json({
         error:
-          "Price per kg must match the owner’s selling price divided by bag size (kg) for this product in Feed Inventory.",
+          "Price per kg must match the ownerâ€™s selling price divided by bag size (kg) for this product in Feed Inventory.",
       });
       return false;
     }
@@ -2487,7 +2518,7 @@ function chickenStaffSalePaymentIsCleared(row) {
 
 /**
  * Staff chick sales: bundled feed line from Feed Inventory (brand + feed type + bag qty).
- * Recomputes `feed_line_total` from current inventory selling price × bags (never trust client total).
+ * Recomputes `feed_line_total` from current inventory selling price Ã— bags (never trust client total).
  * @returns {Promise<{feed_brand: string|null, feed_type: string|null, feed_bag_qty: number|null, feed_line_total: number|null}|null>} null if validation failed (response already sent).
  */
 async function resolveEmployeeChickenFeedBundle(req, res, p, existingRow = null) {
@@ -2674,7 +2705,7 @@ function normalizeChickenCustomerPayment(p, totalAmount, role) {
 
 /**
  * Owner sends buying_price, selling_price, profit_margin_per chick; margin_snap uses profit_margin_per_chick
- * (must match selling − buying within tolerance). Otherwise margin comes from chicken_breeds.
+ * (must match selling âˆ’ buying within tolerance). Otherwise margin comes from chicken_breeds.
  */
 async function resolveChickenSaleMarginSnap(req, res, breed, unitPrice, body) {
   const p = body || {};
@@ -2791,7 +2822,7 @@ function isChickenFeedInventoryStockError(err) {
 
 /**
  * Staff margin totals: only rows with Payment status = Delivered (pending counts as 0).
- * @param {string|null} employeeUsernameOnly — if set, restrict to that staff member’s sales.
+ * @param {string|null} employeeUsernameOnly â€” if set, restrict to that staff memberâ€™s sales.
  */
 async function computeChickenProfitSummary(employeeUsernameOnly, monthKey = null) {
   const today = todayDMY();
@@ -3000,7 +3031,7 @@ app.delete("/api/vehicle/kax/:id", vehicleAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/** Public product list (brands / feed types / bag sizes) — no auth so the UI can always populate dropdowns. */
+/** Public product list (brands / feed types / bag sizes) â€” no auth so the UI can always populate dropdowns. */
 app.get("/api/catalog", (_req, res) => {
   res.json(catalogForActiveTenant());
 });
@@ -3038,7 +3069,7 @@ app.get("/api/inventory", auth, allowRoles("owner"), async (_req, res) => {
   res.json(filtered);
 });
 
-/** Selling prices per inventory line (for employees to record sales at the owner’s prices). Ordered by id DESC to match stock lookup. */
+/** Selling prices per inventory line (for employees to record sales at the ownerâ€™s prices). Ordered by id DESC to match stock lookup. */
 app.get("/api/inventory/selling-prices", auth, allowRoles("owner", "employee"), async (_req, res) => {
   const rows = await all(
     "SELECT id, brand, feed_type, bag_size, buying_price, selling_price FROM inventory ORDER BY id DESC"
@@ -3188,7 +3219,7 @@ app.post("/api/inventory", auth, allowRoles("owner"), async (req, res) => {
       return res.json({ ok: true, merged: true });
     }
 
-    /** New calendar day (or first save): roll prior stock into this line — qty = stock on hand + new bags; accumulated = prior running max + new bags. Employee sales only reduce quantity, never accumulated. */
+    /** New calendar day (or first save): roll prior stock into this line â€” qty = stock on hand + new bags; accumulated = prior running max + new bags. Employee sales only reduce quantity, never accumulated. */
     const allProduct = await getInventoryRowsForProduct(brandCanon, feedCanon, bagSize);
     const carryQty = allProduct.reduce((s, r) => s + Number(r.quantity_in_stock || 0), 0);
     const carryAcc =
@@ -3356,8 +3387,24 @@ app.delete("/api/inventory/:id", auth, allowRoles("owner"), async (req, res) => 
   res.json({ ok: true });
 });
 
-app.get("/api/feeders-drinkers/catalog", auth, allowRoles("owner", "employee"), (_req, res) => {
-  res.json(FEEDERS_DRINKERS_CATALOG);
+app.get("/api/feeders-drinkers/catalog", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  res.json(await getEffectiveFeedersDrinkersCatalog());
+});
+
+app.post("/api/feeders-drinkers/catalog", auth, allowRoles("owner"), async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Item name is required." });
+  const itemType = String(req.body?.item_type || "feeder").trim();
+  const catalog = await getEffectiveFeedersDrinkersCatalog();
+  if (catalog.some((i) => normalizeInventoryItemName(i.name) === normalizeInventoryItemName(name))) {
+    return res.status(400).json({ error: "An item with that name already exists." });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    "INSERT INTO custom_catalog_items (category, name, item_type, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    ["feeders-drinkers", name, itemType, req.user.username, nowIso]
+  );
+  res.json({ ok: true, name });
 });
 
 app.get("/api/feeders-drinkers", auth, allowRoles("owner", "employee"), async (_req, res) => {
@@ -3511,7 +3558,7 @@ app.post("/api/feeders-drinkers/sales", auth, allowRoles("employee"), async (req
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
-  const item = resolveFeederDrinkerItem(p.item_name);
+  const item = await resolveFeederDrinkerItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
   const qty = Number(p.quantity_sold);
   if (!Number.isFinite(qty) || qty < 1) {
@@ -3561,7 +3608,7 @@ app.put("/api/feeders-drinkers/sales/:id", auth, allowRoles("owner", "employee")
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   // Allow editing historical records without blocking by current shop day.
-  const item = resolveFeederDrinkerItem(p.item_name);
+  const item = await resolveFeederDrinkerItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
   const qty = Math.floor(Number(p.quantity_sold));
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
@@ -3628,7 +3675,7 @@ app.post("/api/feeders-drinkers", auth, allowRoles("owner"), async (req, res) =>
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  const item = resolveFeederDrinkerItem(p.item_name);
+  const item = await resolveFeederDrinkerItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
   const quantity = Number(p.quantity_in_stock);
   const buying = Number(p.buying_price);
@@ -3698,7 +3745,7 @@ app.put("/api/feeders-drinkers/:id", auth, allowRoles("owner"), async (req, res)
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  const item = resolveFeederDrinkerItem(p.item_name);
+  const item = await resolveFeederDrinkerItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid feeder/drinker item." });
   const quantity = Number(p.quantity_in_stock);
   const buying = Number(p.buying_price);
@@ -3755,8 +3802,23 @@ app.delete("/api/feeders-drinkers/:id", auth, allowRoles("owner"), async (req, r
   res.json({ ok: true });
 });
 
-app.get("/api/medicaments/catalog", auth, allowRoles("owner", "employee"), (_req, res) => {
-  res.json(MEDICAMENTS_CATALOG);
+app.get("/api/medicaments/catalog", auth, allowRoles("owner", "employee"), async (_req, res) => {
+  res.json(await getEffectiveMedicamentsCatalog());
+});
+
+app.post("/api/medicaments/catalog", auth, allowRoles("owner"), async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Item name is required." });
+  const catalog = await getEffectiveMedicamentsCatalog();
+  if (catalog.some((i) => normalizeInventoryItemName(i) === normalizeInventoryItemName(name))) {
+    return res.status(400).json({ error: "An item with that name already exists." });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    "INSERT INTO custom_catalog_items (category, name, item_type, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    ["medicaments", name, "medicament", req.user.username, nowIso]
+  );
+  res.json({ ok: true, name });
 });
 
 app.get("/api/medicaments", auth, allowRoles("owner", "employee"), async (_req, res) => {
@@ -3842,7 +3904,7 @@ app.post("/api/medicaments/sales", auth, allowRoles("employee"), async (req, res
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   if (!employeeSaleDateAllowed(req, res, p.date)) return;
-  const item = resolveMedicamentItem(p.item_name);
+  const item = await resolveMedicamentItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid medicament item." });
   const qty = Math.floor(Number(p.quantity_sold));
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
@@ -3886,7 +3948,7 @@ app.put("/api/medicaments/sales/:id", auth, allowRoles("owner", "employee"), asy
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   // Allow editing historical records without blocking by current shop day.
-  const item = resolveMedicamentItem(p.item_name);
+  const item = await resolveMedicamentItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid medicament item." });
   const qty = Math.floor(Number(p.quantity_sold));
   if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity sold must be at least 1." });
@@ -3953,7 +4015,7 @@ app.post("/api/medicaments", auth, allowRoles("owner"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  const item = resolveMedicamentItem(p.item_name);
+  const item = await resolveMedicamentItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid medicament item." });
   const quantity = Number(p.quantity_in_stock);
   const buying = Number(p.buying_price);
@@ -4019,7 +4081,7 @@ app.put("/api/medicaments/:id", auth, allowRoles("owner"), async (req, res) => {
   const p = req.body;
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
-  const item = resolveMedicamentItem(p.item_name);
+  const item = await resolveMedicamentItem(p.item_name);
   if (!item) return res.status(400).json({ error: "Invalid medicament item." });
   const quantity = Number(p.quantity_in_stock);
   const buying = Number(p.buying_price);
@@ -5216,10 +5278,10 @@ function meterBillsEntryUnitLabels() {
     };
   }
   return {
-    current: "Current meter reading (m³)",
-    previous: "Previous meter reading (m³)",
-    price: "Price per m³",
-    unit: "m³",
+    current: "Current meter reading (mÂ³)",
+    previous: "Previous meter reading (mÂ³)",
+    price: "Price per mÂ³",
+    unit: "mÂ³",
   };
 }
 
@@ -5466,7 +5528,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
 mountBillsEntriesApi("water-bills", "water_bills_entries");
 mountBillsEntriesApi("electricity-bills", "electricity_bills_entries", { trackMoneyPaid: true });
 
-/* ── Credit Accounts (Amana & Ufaray – owner and employee) ──────────── */
+/* â”€â”€ Credit Accounts (Amana & Ufaray â€“ owner and employee) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 app.get("/api/credit-accounts", auth, allowRoles("owner", "employee"), async (req, res) => {
   const rows = await all("SELECT * FROM credit_accounts ORDER BY id ASC");
@@ -5554,7 +5616,7 @@ app.delete("/api/credit-entries/:id", auth, allowRoles("owner", "employee"), asy
   res.json({ ok: true });
 });
 
-/* ── Monthly Records (Amana & Ufaray – owner only) ─────────────────── */
+/* â”€â”€ Monthly Records (Amana & Ufaray â€“ owner only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 app.get("/api/monthly-records", auth, allowRoles("owner"), async (_req, res) => {
   try {
@@ -5638,7 +5700,7 @@ app.post("/api/monthly-records/close", auth, allowRoles("owner"), async (req, re
   }
 });
 
-/* ── Loan Repayments (Amana & Ufaray – owner only) ─────────────────── */
+/* â”€â”€ Loan Repayments (Amana & Ufaray â€“ owner only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function parseLoanRepaymentMonthKey(val) {
   const s = String(val || "").trim();
@@ -6066,7 +6128,7 @@ app.get("/api/sales/kg", auth, async (_req, res) => {
   res.json(enrichSalesKgRowsWithCumulative(rows, weightMap));
 });
 
-/** Owner: retail view — aggregates from employee “Sales Per Kg” (kg sold, bags opened, bags completed from kg). */
+/** Owner: retail view â€” aggregates from employee â€œSales Per Kgâ€ (kg sold, bags opened, bags completed from kg). */
 app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res) => {
   try {
     const keyForDayProduct = (dateVal, brandVal, feedVal) => {
@@ -6091,7 +6153,7 @@ app.get("/api/retail-feed-summary", auth, allowRoles("owner"), async (_req, res)
        ORDER BY sk.id DESC`
     );
     const detailEnriched = enrichSalesKgRowsWithCumulative(detailRows, weightMap);
-    /** Per calendar day × product: sum of each employee row's daily kg_sold line totals. */
+    /** Per calendar day Ã— product: sum of each employee row's daily kg_sold line totals. */
     const employeeAccumSumByDayProduct = new Map();
     const bagsSoldFromKgByDayProduct = new Map();
     for (const dRow of detailEnriched) {
@@ -6293,7 +6355,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     allSkBrand = await all("SELECT * FROM sales_kg WHERE brand = ?", [brandKey]);
   }
 
-  /** Employees: kg_sold in the request is only this sale’s kg; merge into the same day’s row for this product. */
+  /** Employees: kg_sold in the request is only this saleâ€™s kg; merge into the same dayâ€™s row for this product. */
   if (req.user.role === "employee") {
     const existing = await getEmployeeConsolidatedSalesKgRow(dateCanon, brandKey, p.feed_type, req.user.username);
     if (existing) {
@@ -6820,7 +6882,7 @@ app.get("/api/chicken-sales", auth, async (req, res) => {
       }))
     );
   }
-  /** Owner: full list — your inventory lines plus staff chick sales (so Profit (sale) can show staff margin). */
+  /** Owner: full list â€” your inventory lines plus staff chick sales (so Profit (sale) can show staff margin). */
   const rows = await all(
     `SELECT cs.*, u.role AS creator_role
      FROM chicken_sales cs
@@ -7282,7 +7344,7 @@ function argvHasFlag(flag) {
   return process.argv.includes(flag);
 }
 
-/** Parses `--brand` / `--feed` and fixes `npm ... --brand "Sigma"--feed Growers` (missing space → merged token). */
+/** Parses `--brand` / `--feed` and fixes `npm ... --brand "Sigma"--feed Growers` (missing space â†’ merged token). */
 function argvBrandAndFeedForDeleteCli() {
   let brand = argvFlagValue("--brand");
   let feedType = argvFlagValue("--feed");
@@ -7343,7 +7405,7 @@ async function formatBagSaleDeleteNoMatchHint(dateStr, brand, feedType, bagsSold
   return `\n${lines.join("\n")}`;
 }
 
-/** Same calendar day + brand + bags count (ignores feed type) — use only when unique. */
+/** Same calendar day + brand + bags count (ignores feed type) â€” use only when unique. */
 async function findFeedBagSalesByDateBrandBags(dateStr, brand, bagsSold) {
   const day = normalizeInventoryDate(dateStr);
   if (!day) return [];

@@ -6106,6 +6106,12 @@ function populateFeedersDrinkersItems() {
     opt.textContent = name;
     fdItem.appendChild(opt);
   }
+  if (state.user?.role === "owner") {
+    const addOpt = document.createElement("option");
+    addOpt.value = "__add_item__";
+    addOpt.textContent = "＋ Add new item…";
+    fdItem.appendChild(addOpt);
+  }
   if (current && [...fdItem.options].some((o) => o.value === current)) fdItem.value = current;
 }
 
@@ -6124,6 +6130,12 @@ function populateMedicamentsItems() {
     opt.value = name;
     opt.textContent = name;
     medItem.appendChild(opt);
+  }
+  if (state.user?.role === "owner") {
+    const addOpt = document.createElement("option");
+    addOpt.value = "__add_item__";
+    addOpt.textContent = "＋ Add new item…";
+    medItem.appendChild(addOpt);
   }
   if (current && [...medItem.options].some((o) => o.value === current)) medItem.value = current;
 }
@@ -9146,9 +9158,70 @@ document.getElementById("monthlyRecordsCloseBtn")?.addEventListener("click", asy
     alert(err.message);
   }
 });
-fdItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
-medItem?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
+fdItem?.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLSelectElement && event.target.value === "__add_item__") {
+    event.target.value = "";
+    showAddCatalogItemUi("feeders-drinkers");
+    return;
+  }
+  refreshEmployeeNewPageSellingPrices();
+});
+medItem?.addEventListener("change", (event) => {
+  if (event.target instanceof HTMLSelectElement && event.target.value === "__add_item__") {
+    event.target.value = "";
+    showAddCatalogItemUi("medicaments");
+    return;
+  }
+  refreshEmployeeNewPageSellingPrices();
+});
 gasSize?.addEventListener("change", refreshEmployeeNewPageSellingPrices);
+
+function showAddCatalogItemUi(category) {
+  const wrapId = category === "feeders-drinkers" ? "fdAddItemWrap" : "medAddItemWrap";
+  const inputId = category === "feeders-drinkers" ? "fdAddItemName" : "medAddItemName";
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.classList.remove("hidden");
+  wrap.style.display = "flex";
+  const input = document.getElementById(inputId);
+  if (input instanceof HTMLInputElement) { input.value = ""; input.focus(); }
+}
+
+function hideAddCatalogItemUi(category) {
+  const wrapId = category === "feeders-drinkers" ? "fdAddItemWrap" : "medAddItemWrap";
+  const wrap = document.getElementById(wrapId);
+  if (wrap) { wrap.classList.add("hidden"); wrap.style.display = ""; }
+}
+
+async function saveNewCatalogItem(category) {
+  const inputId = category === "feeders-drinkers" ? "fdAddItemName" : "medAddItemName";
+  const input = document.getElementById(inputId);
+  const name = input instanceof HTMLInputElement ? input.value.trim() : "";
+  if (!name) { alert("Please enter an item name."); return; }
+  const endpoint = category === "feeders-drinkers" ? "/api/feeders-drinkers/catalog" : "/api/medicaments/catalog";
+  const wrapId = category === "feeders-drinkers" ? "fdAddItemWrap" : "medAddItemWrap";
+  const wrap = document.getElementById(wrapId);
+  const saveBtn = wrap?.querySelector("button[data-action='save']");
+  if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+  try {
+    await api(endpoint, { method: "POST", body: JSON.stringify({ name }) });
+    hideAddCatalogItemUi(category);
+    const catalogs = await Promise.allSettled([
+      api("/api/feeders-drinkers/catalog"),
+      api("/api/medicaments/catalog"),
+    ]);
+    if (catalogs[0].status === "fulfilled") state.feedersDrinkersCatalog = catalogs[0].value;
+    if (catalogs[1].status === "fulfilled") state.medicamentsCatalog = catalogs[1].value;
+    populateFeedersDrinkersItems();
+    populateMedicamentsItems();
+    if (category === "feeders-drinkers" && fdItem) fdItem.value = name;
+    if (category === "medicaments" && medItem) medItem.value = name;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+  }
+}
 
 calcBody?.addEventListener("input", (event) => {
   const target = event.target;
