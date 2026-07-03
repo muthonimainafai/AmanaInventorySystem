@@ -3027,18 +3027,25 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   const overpaymentBalance = electricityBillsOverpaymentBalance(row);
   const isElectricity = isElectricityBillsKind(serviceItem);
   const amountDue = isElectricity ? electricityBillsAmountDue(row) : totalBilling;
+  const totalUnitsUsed = roundMoney(unitsUsed + (isElectricity ? 0 : directWaterPumping));
   const pdfBody = [
     ["", "", "", "Previous balance", formatKshPlainNumber(balanceBf)],
     [
       String(prevReading),
       String(currReading),
-      String(unitsUsed),
+      String(isElectricity ? unitsUsed : totalUnitsUsed),
       `${serviceItem} @ ${formatKshPlainNumber(pricePerM3)}${units.pdfRateSuffix}`,
       formatKshPlainNumber(currentBilling),
     ],
   ];
   if (!isElectricity && directWaterPumping > 0) {
-    pdfBody.splice(1, 0, ["", "", String(directWaterPumping), "Direct water pumping", formatKshPlainNumber(directWaterPumping * pricePerM3)]);
+    pdfBody.splice(1, 0, [
+      "",
+      "",
+      `${unitsUsed} (meter) + ${directWaterPumping} (pumping)`,
+      "Direct water pumping breakdown",
+      "",
+    ]);
   }
   if (isElectricity) {
     pdfBody.push(["", "", "", "Money paid", formatKshPlainNumber(moneyPaid)]);
@@ -6686,7 +6693,10 @@ function updateMeterBillsFormCalc(prefix) {
   );
   const balance = meterBillsBalanceFromForm(prefix);
   if (Number.isFinite(unitsUsed)) {
-    unitsEl.value = String(unitsUsed);
+    const displayedUnits = prefix === "waterBills"
+      ? roundMoney(unitsUsed + Math.max(0, directWaterPumping))
+      : unitsUsed;
+    unitsEl.value = String(displayedUnits);
     billingEl.value = currency(currentBilling);
     if (totalEl) {
       if (prefix === "electricityBills") {
@@ -6816,9 +6826,13 @@ function renderBillsEntriesTable({
       const overpaymentCell = showOverpaymentBalance
         ? `<td>${formatCessAccountBalanceCell(overpayment)}</td>`
         : "";
+      const directWaterPumpingVal = Number(row.direct_water_pumping || 0);
       const directWaterPumpingCell = showDirectWaterPumping
-        ? `<td>${Number(row.direct_water_pumping || 0)}</td>`
+        ? `<td>${directWaterPumpingVal}</td>`
         : "";
+      const displayedUnitsUsed = showDirectWaterPumping
+        ? roundMoney(Number(row.units_used || 0) + directWaterPumpingVal)
+        : Number(row.units_used || 0);
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -6827,7 +6841,7 @@ function renderBillsEntriesTable({
         <td>${escapeHtmlCell(row.bill_to || "")}</td>
         <td>${Number(row.current_meter_reading || 0)}</td>
         <td>${Number(row.previous_meter_reading || 0)}</td>
-        <td>${Number(row.units_used || 0)}</td>
+        <td>${displayedUnitsUsed}</td>
         ${directWaterPumpingCell}
         <td>${Number(row.price_per_m3 || 0)}</td>
         <td>${currency(Number(row.current_billing || 0))}</td>
