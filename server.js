@@ -5939,14 +5939,12 @@ app.post("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req,
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
-  let qty, amount, ufaray, ufarayKsh, amana, amanaKsh;
+  let qty, amount, ufarayKsh, amanaKsh;
   try {
-    qty = parseRoseNonNegativeField(p.qty, "Qty");
-    amount = parseRoseNonNegativeField(p.amount, "Amount");
-    ufaray = parseRoseNonNegativeField(p.ufaray, "Ufaray");
-    ufarayKsh = parseRoseNonNegativeField(p.ufaray_ksh, "Ufaray Ksh");
-    amana = parseRoseNonNegativeField(p.amana, "Amana");
-    amanaKsh = parseRoseNonNegativeField(p.amana_ksh, "Amana Ksh");
+    qty = parseRoseNonNegativeField(p.qty ?? 0, "Qty");
+    amount = parseRoseNonNegativeField(p.amount ?? 0, "Amount");
+    ufarayKsh = parseRoseNonNegativeField(p.ufaray_ksh ?? 0, "Ufaray Ksh");
+    amanaKsh = parseRoseNonNegativeField(p.amana_ksh ?? 0, "Amana Ksh");
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -5954,7 +5952,7 @@ app.post("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req,
   await run(
     `INSERT INTO weigh_bridge_entries (date, description, qty, amount, ufaray, ufaray_ksh, amana, amana_ksh, created_by, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, qty, amount, ufaray, ufarayKsh, amana, amanaKsh, req.user.username, nowIso, nowIso]
+    [dateCanon, description, qty, amount, 0, ufarayKsh, 0, amanaKsh, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -5970,20 +5968,18 @@ app.put("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async (r
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
-  let qty, amount, ufaray, ufarayKsh, amana, amanaKsh;
+  let qty, amount, ufarayKsh, amanaKsh;
   try {
-    qty = parseRoseNonNegativeField(p.qty, "Qty");
-    amount = parseRoseNonNegativeField(p.amount, "Amount");
-    ufaray = parseRoseNonNegativeField(p.ufaray, "Ufaray");
-    ufarayKsh = parseRoseNonNegativeField(p.ufaray_ksh, "Ufaray Ksh");
-    amana = parseRoseNonNegativeField(p.amana, "Amana");
-    amanaKsh = parseRoseNonNegativeField(p.amana_ksh, "Amana Ksh");
+    qty = parseRoseNonNegativeField(p.qty ?? 0, "Qty");
+    amount = parseRoseNonNegativeField(p.amount ?? 0, "Amount");
+    ufarayKsh = parseRoseNonNegativeField(p.ufaray_ksh ?? 0, "Ufaray Ksh");
+    amanaKsh = parseRoseNonNegativeField(p.amana_ksh ?? 0, "Amana Ksh");
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
   await run(
     `UPDATE weigh_bridge_entries SET date = ?, description = ?, qty = ?, amount = ?, ufaray = ?, ufaray_ksh = ?, amana = ?, amana_ksh = ?, updated_at = ? WHERE id = ?`,
-    [dateCanon, description, qty, amount, ufaray, ufarayKsh, amana, amanaKsh, new Date().toISOString(), id]
+    [dateCanon, description, qty, amount, 0, ufarayKsh, 0, amanaKsh, new Date().toISOString(), id]
   );
   res.json({ ok: true });
 });
