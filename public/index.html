@@ -153,6 +153,7 @@
           <button type="button" class="nav-tab hidden" data-page="electricity-bills" id="electricityBillsTab">Electricity Bills</button>
           <button type="button" class="nav-tab" data-page="credit" id="creditTab">Credit</button>
           <button type="button" class="nav-tab" data-page="pigs">Pigs Page</button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="weigh-bridge">Weigh Bridge</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="monthly-report">Monthly Report</button>
@@ -2353,6 +2354,89 @@
           </div>
         </div>
 
+        <div id="page-weigh-bridge" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Ufaray/Amana Weigh Bridge</h3>
+            <p class="field-hint">Record weigh bridge entries split between Ufaray and Amana.</p>
+            <form id="weigh-bridge-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input type="text" id="weighBridgeDateDisplay" placeholder="DD/MM/YYYY" pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}" required />
+                    <button type="button" id="weighBridgeOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="weighBridgeDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Description
+                  <input type="text" id="weighBridgeDescription" />
+                </label>
+                <label>
+                  Qty
+                  <input type="number" id="weighBridgeQty" min="0" step="any" value="0" />
+                </label>
+                <label>
+                  Amount
+                  <input type="text" id="weighBridgeAmount" inputmode="decimal" autocomplete="off" value="0" />
+                </label>
+                <label>
+                  Ufaray
+                  <input type="number" id="weighBridgeUfaray" min="0" step="any" value="0" />
+                </label>
+                <label>
+                  Ufaray Ksh
+                  <input type="text" id="weighBridgeUfarayKsh" inputmode="decimal" autocomplete="off" value="0" />
+                </label>
+                <label>
+                  Amana
+                  <input type="number" id="weighBridgeAmana" min="0" step="any" value="0" />
+                </label>
+                <label>
+                  Amana Ksh
+                  <input type="text" id="weighBridgeAmanaKsh" inputmode="decimal" autocomplete="off" value="0" />
+                </label>
+              </div>
+              <div class="actions">
+                <button type="submit" id="weighBridgeSaveBtn">Save entry</button>
+                <button type="button" class="secondary" id="weighBridgeClearBtn">Clear</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Amount</th>
+                    <th>Ufaray</th>
+                    <th>Ufaray Ksh</th>
+                    <th>Amana</th>
+                    <th>Amana Ksh</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="weigh-bridge-body"><tr><td colspan="10" class="empty">No records.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="4">Grand Total</th>
+                    <th id="wbTotalAmount">0</th>
+                    <th id="wbTotalUfaray">0</th>
+                    <th id="wbTotalUfarayKsh">0</th>
+                    <th id="wbTotalAmana">0</th>
+                    <th id="wbTotalAmanaKsh">0</th>
+                    <th>—</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <div id="page-expenditure" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Expenditure</h3>
@@ -2866,6 +2950,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-06-29-custom-catalog-items"></script>
+    <script src="app.js?v=2026-07-03-weigh-bridge"></script>
   </body>
 </html>

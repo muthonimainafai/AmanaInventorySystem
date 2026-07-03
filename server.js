@@ -1319,6 +1319,23 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS weigh_bridge_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      qty REAL NOT NULL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      ufaray REAL NOT NULL DEFAULT 0,
+      ufaray_ksh REAL NOT NULL DEFAULT 0,
+      amana REAL NOT NULL DEFAULT 0,
+      amana_ksh REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS monthly_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       month_key TEXT NOT NULL UNIQUE,
@@ -5883,6 +5900,77 @@ app.delete("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, r
     req.user.role === "owner"
       ? await run("DELETE FROM pigs_entries WHERE id = ?", [Number(req.params.id)])
       : await run("DELETE FROM pigs_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
+app.get("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM weigh_bridge_entries ORDER BY id DESC")
+      : await all("SELECT * FROM weigh_bridge_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  let qty, amount, ufaray, ufarayKsh, amana, amanaKsh;
+  try {
+    qty = parseRoseNonNegativeField(p.qty, "Qty");
+    amount = parseRoseNonNegativeField(p.amount, "Amount");
+    ufaray = parseRoseNonNegativeField(p.ufaray, "Ufaray");
+    ufarayKsh = parseRoseNonNegativeField(p.ufaray_ksh, "Ufaray Ksh");
+    amana = parseRoseNonNegativeField(p.amana, "Amana");
+    amanaKsh = parseRoseNonNegativeField(p.amana_ksh, "Amana Ksh");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO weigh_bridge_entries (date, description, qty, amount, ufaray, ufaray_ksh, amana, amana_ksh, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, qty, amount, ufaray, ufarayKsh, amana, amanaKsh, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM weigh_bridge_entries WHERE id = ?", [id])
+      : await get("SELECT * FROM weigh_bridge_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  let qty, amount, ufaray, ufarayKsh, amana, amanaKsh;
+  try {
+    qty = parseRoseNonNegativeField(p.qty, "Qty");
+    amount = parseRoseNonNegativeField(p.amount, "Amount");
+    ufaray = parseRoseNonNegativeField(p.ufaray, "Ufaray");
+    ufarayKsh = parseRoseNonNegativeField(p.ufaray_ksh, "Ufaray Ksh");
+    amana = parseRoseNonNegativeField(p.amana, "Amana");
+    amanaKsh = parseRoseNonNegativeField(p.amana_ksh, "Amana Ksh");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  await run(
+    `UPDATE weigh_bridge_entries SET date = ?, description = ?, qty = ?, amount = ?, ufaray = ?, ufaray_ksh = ?, amana = ?, amana_ksh = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, qty, amount, ufaray, ufarayKsh, amana, amanaKsh, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM weigh_bridge_entries WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM weigh_bridge_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });

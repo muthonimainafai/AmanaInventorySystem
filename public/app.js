@@ -102,6 +102,8 @@ const state = {
   activeLotId: null,
   pigsEntries: [],
   editPigsId: null,
+  weighBridgeEntries: [],
+  editWeighBridgeId: null,
   waterBillsEntries: [],
   editWaterBillsId: null,
   electricityBillsEntries: [],
@@ -130,6 +132,7 @@ const PAGE_HEADINGS = {
   credit: "Credit",
   calculator: "Calculator",
   pigs: "Pigs Page",
+  "weigh-bridge": "Ufaray/Amana Weigh Bridge",
   expenditure: "Expenditure",
   "monthly-report": "Monthly Report",
   "monthly-records": "Monthly Records",
@@ -471,6 +474,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "cess-accounts",
   "credit",
   "pigs",
+  "weigh-bridge",
   "calculator",
   "expenditure",
   "monthly-report",
@@ -690,6 +694,11 @@ const pigsBody = document.getElementById("pigs-body");
 const pigsDateDisplay = document.getElementById("pigsDateDisplay");
 const pigsDate = document.getElementById("pigsDate");
 const pigsOpenCalendarBtn = document.getElementById("pigsOpenCalendarBtn");
+const weighBridgeForm = document.getElementById("weigh-bridge-form");
+const weighBridgeBody = document.getElementById("weigh-bridge-body");
+const weighBridgeDateDisplay = document.getElementById("weighBridgeDateDisplay");
+const weighBridgeDate = document.getElementById("weighBridgeDate");
+const weighBridgeOpenCalendarBtn = document.getElementById("weighBridgeOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
 const calcDueDate = document.getElementById("calcDueDate");
@@ -7427,6 +7436,68 @@ function renderPigsTable() {
   if (outEl) outEl.textContent = currency(sumOut);
 }
 
+function resetWeighBridgeForm() {
+  if (!weighBridgeForm) return;
+  weighBridgeForm.reset();
+  state.editWeighBridgeId = null;
+  if (weighBridgeDate) weighBridgeDate.value = "";
+  if (weighBridgeDateDisplay) weighBridgeDateDisplay.value = "";
+  const saveBtn = document.getElementById("weighBridgeSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+}
+
+function renderWeighBridgeTable() {
+  if (!weighBridgeBody) return;
+  const rows = sortRowsLatestFirst(state.weighBridgeEntries || []);
+  const totalAmountEl = document.getElementById("wbTotalAmount");
+  const totalUfarayEl = document.getElementById("wbTotalUfaray");
+  const totalUfarayKshEl = document.getElementById("wbTotalUfarayKsh");
+  const totalAmanaEl = document.getElementById("wbTotalAmana");
+  const totalAmanaKshEl = document.getElementById("wbTotalAmanaKsh");
+  if (!rows.length) {
+    weighBridgeBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
+    if (totalAmountEl) totalAmountEl.textContent = currency(0);
+    if (totalUfarayEl) totalUfarayEl.textContent = "0";
+    if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(0);
+    if (totalAmanaEl) totalAmanaEl.textContent = "0";
+    if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(0);
+    return;
+  }
+  let sumAmount = 0, sumUfaray = 0, sumUfarayKsh = 0, sumAmana = 0, sumAmanaKsh = 0;
+  weighBridgeBody.innerHTML = rows
+    .map((row, idx) => {
+      sumAmount += Number(row.amount || 0);
+      sumUfaray += Number(row.ufaray || 0);
+      sumUfarayKsh += Number(row.ufaray_ksh || 0);
+      sumAmana += Number(row.amana || 0);
+      sumAmanaKsh += Number(row.amana_ksh || 0);
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description || "")}</td>
+        <td>${Number(row.qty || 0)}</td>
+        <td>${currency(row.amount)}</td>
+        <td>${Number(row.ufaray || 0)}</td>
+        <td>${currency(row.ufaray_ksh)}</td>
+        <td>${Number(row.amana || 0)}</td>
+        <td>${currency(row.amana_ksh)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="weigh-bridge" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="weigh-bridge" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  if (totalAmountEl) totalAmountEl.textContent = currency(sumAmount);
+  if (totalUfarayEl) totalUfarayEl.textContent = String(sumUfaray);
+  if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(sumUfarayKsh);
+  if (totalAmanaEl) totalAmanaEl.textContent = String(sumAmana);
+  if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(sumAmanaKsh);
+}
+
 function chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow) {
   if (isOwnerInventoryRow) {
     return "<td>—</td><td>—</td><td>—</td><td>—</td>";
@@ -7832,6 +7903,9 @@ function showPage(page) {
   if (page === "pigs" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
+  if (page === "weigh-bridge" && state.appInstance !== "amana") {
+    return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
+  }
   if (page === "nahashon-records" && state.appInstance !== "terry") {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
@@ -8013,6 +8087,7 @@ function showPage(page) {
     renderCreditDashboard();
   }
   if (page === "pigs") renderPigsTable();
+  if (page === "weigh-bridge") renderWeighBridgeTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
     initCalcChickenFormDefaults();
@@ -8453,6 +8528,7 @@ async function loadAllData() {
     api("/api/pigs"),
     api("/api/credit-accounts"),
     api("/api/credit-entries"),
+    api("/api/weigh-bridge"),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -8475,6 +8551,7 @@ async function loadAllData() {
   state.pigsEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
   state.creditAccounts = extras[18].status === "fulfilled" ? extras[18].value : [];
   state.creditEntries = extras[19].status === "fulfilled" ? extras[19].value : [];
+  state.weighBridgeEntries = extras[20].status === "fulfilled" ? extras[20].value : [];
 
   await loadMonthlyRecordsData();
   await loadLoanRepaymentsData();
@@ -9090,6 +9167,13 @@ if (pigsDateDisplay && pigsDate && pigsOpenCalendarBtn) {
   wireDatePicker(pigsDateDisplay, pigsDate, pigsOpenCalendarBtn);
 }
 document.getElementById("pigsClearBtn")?.addEventListener("click", resetPigsForm);
+if (weighBridgeDateDisplay && weighBridgeDate && weighBridgeOpenCalendarBtn) {
+  wireDatePicker(weighBridgeDateDisplay, weighBridgeDate, weighBridgeOpenCalendarBtn);
+}
+document.getElementById("weighBridgeClearBtn")?.addEventListener("click", resetWeighBridgeForm);
+wireMoneyInputBlur(document.getElementById("weighBridgeAmount"));
+wireMoneyInputBlur(document.getElementById("weighBridgeUfarayKsh"));
+wireMoneyInputBlur(document.getElementById("weighBridgeAmanaKsh"));
 wireMoneyInputBlur(document.getElementById("pigsMoneyIn"));
 wireMoneyInputBlur(document.getElementById("pigsMoneyOut"));
 
@@ -10554,6 +10638,33 @@ pigsForm?.addEventListener("submit", async (event) => {
   }
 });
 
+weighBridgeForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = weighBridgeDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("weighBridgeDescription")?.value || "").trim(),
+    qty: parseMoneyFromInput(document.getElementById("weighBridgeQty")?.value) || 0,
+    amount: parseMoneyFromInput(document.getElementById("weighBridgeAmount")?.value) || 0,
+    ufaray: parseMoneyFromInput(document.getElementById("weighBridgeUfaray")?.value) || 0,
+    ufaray_ksh: parseMoneyFromInput(document.getElementById("weighBridgeUfarayKsh")?.value) || 0,
+    amana: parseMoneyFromInput(document.getElementById("weighBridgeAmana")?.value) || 0,
+    amana_ksh: parseMoneyFromInput(document.getElementById("weighBridgeAmanaKsh")?.value) || 0,
+  };
+  try {
+    if (state.editWeighBridgeId) {
+      await api(`/api/weigh-bridge/${state.editWeighBridgeId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/weigh-bridge", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetWeighBridgeForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
 salesBagsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = sbDateDisplay.value.trim();
@@ -11967,6 +12078,49 @@ pigsBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/pigs/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+weighBridgeBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "weigh-bridge") return;
+  const row = state.weighBridgeEntries.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editWeighBridgeId = row.id;
+    if (weighBridgeDate) weighBridgeDate.value = toIsoDate(row.date);
+    if (weighBridgeDateDisplay) weighBridgeDateDisplay.value = formatDateDMY(row.date);
+    const descEl = document.getElementById("weighBridgeDescription");
+    const qtyEl = document.getElementById("weighBridgeQty");
+    const amountEl = document.getElementById("weighBridgeAmount");
+    const ufarayEl = document.getElementById("weighBridgeUfaray");
+    const ufarayKshEl = document.getElementById("weighBridgeUfarayKsh");
+    const amanaEl = document.getElementById("weighBridgeAmana");
+    const amanaKshEl = document.getElementById("weighBridgeAmanaKsh");
+    if (descEl) descEl.value = row.description || "";
+    if (qtyEl) qtyEl.value = formatMoneyForInput(row.qty ?? 0);
+    if (amountEl) amountEl.value = formatMoneyForInput(row.amount ?? 0);
+    if (ufarayEl) ufarayEl.value = formatMoneyForInput(row.ufaray ?? 0);
+    if (ufarayKshEl) ufarayKshEl.value = formatMoneyForInput(row.ufaray_ksh ?? 0);
+    if (amanaEl) amanaEl.value = formatMoneyForInput(row.amana ?? 0);
+    if (amanaKshEl) amanaKshEl.value = formatMoneyForInput(row.amana_ksh ?? 0);
+    const saveBtn = document.getElementById("weighBridgeSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    document.getElementById("page-weigh-bridge")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/weigh-bridge/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
