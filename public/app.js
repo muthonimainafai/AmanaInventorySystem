@@ -7479,19 +7479,25 @@ function renderWeighBridgeTable() {
   const totalAmountEl = document.getElementById("wbTotalAmount");
   const totalUfarayKshEl = document.getElementById("wbTotalUfarayKsh");
   const totalAmanaKshEl = document.getElementById("wbTotalAmanaKsh");
+  const totalBalanceEl = document.getElementById("wbTotalBalance");
   if (!rows.length) {
-    weighBridgeBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
+    weighBridgeBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
     if (totalAmountEl) totalAmountEl.textContent = currency(0);
     if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(0);
     if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(0);
+    if (totalBalanceEl) { totalBalanceEl.textContent = currency(0); totalBalanceEl.style.color = ""; }
     return;
   }
   let sumAmount = 0, sumUfarayKsh = 0, sumAmanaKsh = 0;
   weighBridgeBody.innerHTML = rows
     .map((row, idx) => {
+      const ufarayKsh = Number(row.ufaray_ksh || 0);
+      const amanaKsh = Number(row.amana_ksh || 0);
+      const balance = roundMoney(ufarayKsh - amanaKsh);
       sumAmount += Number(row.amount || 0);
-      sumUfarayKsh += Number(row.ufaray_ksh || 0);
-      sumAmanaKsh += Number(row.amana_ksh || 0);
+      sumUfarayKsh += ufarayKsh;
+      sumAmanaKsh += amanaKsh;
+      const balStyle = balance < 0 ? ' style="color:red;font-weight:600"' : '';
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -7499,8 +7505,9 @@ function renderWeighBridgeTable() {
         <td>${escapeHtmlCell(row.description || "")}</td>
         <td>${Number(row.qty || 0)}</td>
         <td>${currency(row.amount)}</td>
-        <td>${currency(row.ufaray_ksh)}</td>
-        <td>${currency(row.amana_ksh)}</td>
+        <td>${currency(ufarayKsh)}</td>
+        <td>${currency(amanaKsh)}</td>
+        <td${balStyle}>${currency(balance)}</td>
         <td>
           <div class="row-actions">
             <button type="button" data-kind="weigh-bridge" data-action="edit" data-id="${row.id}">Edit</button>
@@ -7513,6 +7520,12 @@ function renderWeighBridgeTable() {
   if (totalAmountEl) totalAmountEl.textContent = currency(sumAmount);
   if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(sumUfarayKsh);
   if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(sumAmanaKsh);
+  const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh);
+  if (totalBalanceEl) {
+    totalBalanceEl.textContent = currency(totalBalance);
+    totalBalanceEl.style.color = totalBalance < 0 ? "red" : "";
+    totalBalanceEl.style.fontWeight = totalBalance < 0 ? "600" : "";
+  }
 }
 
 function chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow) {
