@@ -8694,6 +8694,7 @@ async function loadAllData() {
   renderFaithExpensesTable();
   renderFaithSalesTable();
   renderPigsTable();
+  renderWeighBridgeTable();
   if (state.currentPage === "monthly-report") renderMonthlyReport();
   if (state.currentPage === "monthly-records") renderMonthlyRecords();
   if (state.currentPage === "loan-repayment") renderLoanRepaymentPage();
