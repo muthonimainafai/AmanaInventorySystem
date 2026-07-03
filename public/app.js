@@ -7477,26 +7477,20 @@ function renderWeighBridgeTable() {
   if (!weighBridgeBody) return;
   const rows = sortRowsLatestFirst(state.weighBridgeEntries || []);
   const totalAmountEl = document.getElementById("wbTotalAmount");
-  const totalUfarayEl = document.getElementById("wbTotalUfaray");
   const totalUfarayKshEl = document.getElementById("wbTotalUfarayKsh");
-  const totalAmanaEl = document.getElementById("wbTotalAmana");
   const totalAmanaKshEl = document.getElementById("wbTotalAmanaKsh");
   if (!rows.length) {
-    weighBridgeBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
+    weighBridgeBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
     if (totalAmountEl) totalAmountEl.textContent = currency(0);
-    if (totalUfarayEl) totalUfarayEl.textContent = "0";
     if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(0);
-    if (totalAmanaEl) totalAmanaEl.textContent = "0";
     if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(0);
     return;
   }
-  let sumAmount = 0, sumUfaray = 0, sumUfarayKsh = 0, sumAmana = 0, sumAmanaKsh = 0;
+  let sumAmount = 0, sumUfarayKsh = 0, sumAmanaKsh = 0;
   weighBridgeBody.innerHTML = rows
     .map((row, idx) => {
       sumAmount += Number(row.amount || 0);
-      sumUfaray += Number(row.ufaray || 0);
       sumUfarayKsh += Number(row.ufaray_ksh || 0);
-      sumAmana += Number(row.amana || 0);
       sumAmanaKsh += Number(row.amana_ksh || 0);
       return `
       <tr>
@@ -7505,9 +7499,7 @@ function renderWeighBridgeTable() {
         <td>${escapeHtmlCell(row.description || "")}</td>
         <td>${Number(row.qty || 0)}</td>
         <td>${currency(row.amount)}</td>
-        <td>${Number(row.ufaray || 0)}</td>
         <td>${currency(row.ufaray_ksh)}</td>
-        <td>${Number(row.amana || 0)}</td>
         <td>${currency(row.amana_ksh)}</td>
         <td>
           <div class="row-actions">
@@ -7519,9 +7511,7 @@ function renderWeighBridgeTable() {
     })
     .join("");
   if (totalAmountEl) totalAmountEl.textContent = currency(sumAmount);
-  if (totalUfarayEl) totalUfarayEl.textContent = String(sumUfaray);
   if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(sumUfarayKsh);
-  if (totalAmanaEl) totalAmanaEl.textContent = String(sumAmana);
   if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(sumAmanaKsh);
 }
 
@@ -10674,9 +10664,7 @@ weighBridgeForm?.addEventListener("submit", async (event) => {
     description: String(document.getElementById("weighBridgeDescription")?.value || "").trim(),
     qty: parseMoneyFromInput(document.getElementById("weighBridgeQty")?.value) || 0,
     amount: parseMoneyFromInput(document.getElementById("weighBridgeAmount")?.value) || 0,
-    ufaray: parseMoneyFromInput(document.getElementById("weighBridgeUfaray")?.value) || 0,
     ufaray_ksh: parseMoneyFromInput(document.getElementById("weighBridgeUfarayKsh")?.value) || 0,
-    amana: parseMoneyFromInput(document.getElementById("weighBridgeAmana")?.value) || 0,
     amana_ksh: parseMoneyFromInput(document.getElementById("weighBridgeAmanaKsh")?.value) || 0,
   };
   try {
@@ -12128,16 +12116,12 @@ weighBridgeBody?.addEventListener("click", async (event) => {
     const descEl = document.getElementById("weighBridgeDescription");
     const qtyEl = document.getElementById("weighBridgeQty");
     const amountEl = document.getElementById("weighBridgeAmount");
-    const ufarayEl = document.getElementById("weighBridgeUfaray");
     const ufarayKshEl = document.getElementById("weighBridgeUfarayKsh");
-    const amanaEl = document.getElementById("weighBridgeAmana");
     const amanaKshEl = document.getElementById("weighBridgeAmanaKsh");
     if (descEl) descEl.value = row.description || "";
     if (qtyEl) qtyEl.value = formatMoneyForInput(row.qty ?? 0);
     if (amountEl) amountEl.value = formatMoneyForInput(row.amount ?? 0);
-    if (ufarayEl) ufarayEl.value = formatMoneyForInput(row.ufaray ?? 0);
     if (ufarayKshEl) ufarayKshEl.value = formatMoneyForInput(row.ufaray_ksh ?? 0);
-    if (amanaEl) amanaEl.value = formatMoneyForInput(row.amana ?? 0);
     if (amanaKshEl) amanaKshEl.value = formatMoneyForInput(row.amana_ksh ?? 0);
     const saveBtn = document.getElementById("weighBridgeSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
