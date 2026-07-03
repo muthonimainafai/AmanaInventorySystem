@@ -961,6 +961,18 @@ tr.table-date-separator td {
   min-width: 180px;
 }
 
+/* PDF period picker modal grid overrides */
+.modal-card .meter-bills-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.modal-card .billing-month-input {
+  min-width: 160px;
+  width: 100%;
+}
+.modal-card .billing-month-field {
+  grid-column: span 1;
+}
+
 /* PDF period picker modal */
 .modal-overlay {
   position: fixed;
