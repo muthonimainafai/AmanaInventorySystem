@@ -960,3 +960,36 @@ tr.table-date-separator td {
   flex: 1;
   min-width: 180px;
 }
+
+/* PDF period picker modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+}
+.modal-overlay.hidden {
+  display: none;
+}
+.modal-card {
+  background: var(--card-bg, #fff);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+  padding: 28px 32px 24px;
+  min-width: 340px;
+  max-width: 520px;
+  width: 100%;
+}
+.modal-card h3 {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  color: var(--text, #111);
+}
+.modal-card > p {
+  margin: 0 0 18px;
+  font-size: 0.9rem;
+  color: var(--text-muted, #666);
+}

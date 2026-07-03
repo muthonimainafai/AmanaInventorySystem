@@ -2943,8 +2943,36 @@
       </section>
     </main>
 
+    <!-- PDF billing period picker modal -->
+    <div id="meterBillsPdfModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="meterBillsPdfModalTitle">
+      <div class="modal-card">
+        <h3 id="meterBillsPdfModalTitle">Download PDF</h3>
+        <p>Select a billing period to filter the download, or leave blank to include all records.</p>
+        <div class="grid meter-bills-form-grid">
+          <label class="billing-month-field">
+            <span class="date-field-label">Billing period from (optional)</span>
+            <div class="month-picker-wrap">
+              <input type="month" id="pdfFilterMonthFrom" class="billing-month-input" />
+              <button type="button" id="pdfFilterMonthFromOpenBtn" class="calendar-btn" aria-label="Choose from month">📅</button>
+            </div>
+          </label>
+          <label class="billing-month-field">
+            <span class="date-field-label">Billing period to (optional)</span>
+            <div class="month-picker-wrap">
+              <input type="month" id="pdfFilterMonthTo" class="billing-month-input" />
+              <button type="button" id="pdfFilterMonthToOpenBtn" class="calendar-btn" aria-label="Choose to month">📅</button>
+            </div>
+          </label>
+        </div>
+        <div class="actions" style="margin-top:18px">
+          <button type="button" id="pdfFilterDownloadBtn">Download PDF</button>
+          <button type="button" class="secondary" id="pdfFilterCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-07-03-direct-pumping-units"></script>
+    <script src="app.js?v=2026-07-03-pdf-period-picker"></script>
   </body>
 </html>

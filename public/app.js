@@ -3166,15 +3166,15 @@ function meterBillsPdfSectionsFromEntries(entries, sectionTitle, billKind = "wat
   return [{ title: sectionTitle, headers, body }];
 }
 
-function downloadMeterBillsPagePdf() {
+function downloadMeterBillsPagePdf(filteredEntries) {
   const ctx = ensureJsPdfReady();
   if (!ctx) return;
   const page = state.currentPage;
   const recipientSuffix = activeMeterBillRecipientName() ? ` — ${activeMeterBillRecipientName()}` : "";
   const pageTitle = (PAGE_HEADINGS[page] || "Bills") + recipientSuffix;
   const serviceItem = page === "electricity-bills" ? "Electricity" : "Water";
-  const entries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
-  const rows = sortRowsLatestFirst(entries || []);
+  const allEntries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
+  const rows = sortRowsLatestFirst(filteredEntries ?? allEntries ?? []);
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   const filename = `${pdfSafeSlug(pdfBusinessTitle())}-${pdfSafeSlug(pageTitle)}-${today || "export"}.pdf`;
   const exportSubtitle = activeMeterBillRecipientName()
@@ -3209,6 +3209,58 @@ function downloadMeterBillsPagePdf() {
   });
   doc.save(filename);
 }
+
+function showMeterBillsPdfModal() {
+  const modal = document.getElementById("meterBillsPdfModal");
+  if (!modal) { downloadMeterBillsPagePdf(); return; }
+  const fromEl = document.getElementById("pdfFilterMonthFrom");
+  const toEl = document.getElementById("pdfFilterMonthTo");
+  if (fromEl) fromEl.value = "";
+  if (toEl) toEl.value = "";
+  modal.classList.remove("hidden");
+}
+
+function hideMeterBillsPdfModal() {
+  document.getElementById("meterBillsPdfModal")?.classList.add("hidden");
+}
+
+function executeMeterBillsPdfDownload() {
+  const page = state.currentPage;
+  const allEntries = page === "water-bills" ? state.waterBillsEntries : state.electricityBillsEntries;
+  const fromIso = String(document.getElementById("pdfFilterMonthFrom")?.value || "").trim();
+  const toIso = String(document.getElementById("pdfFilterMonthTo")?.value || "").trim();
+  const fromParts = fromIso ? parseBillingMonthValue(fromIso) : null;
+  const toParts = toIso ? parseBillingMonthValue(toIso) : null;
+  const fromKey = fromParts ? billingMonthKey(fromParts) : 0;
+  const toKey = toParts ? billingMonthKey(toParts) : Infinity;
+  if (fromParts && toParts && fromKey > toKey) {
+    alert("Billing period from must be on or before billing period to.");
+    return;
+  }
+  const filtered = (allEntries || []).filter((row) => {
+    const rowDateStr = row.date_to || row.date_from || row.date || "";
+    const rowParts = parseBillingMonthValue(rowDateStr);
+    if (!rowParts) return !fromParts && !toParts;
+    const rowKey = billingMonthKey(rowParts);
+    return rowKey >= fromKey && rowKey <= toKey;
+  });
+  hideMeterBillsPdfModal();
+  downloadMeterBillsPagePdf(filtered);
+}
+
+document.getElementById("pdfFilterDownloadBtn")?.addEventListener("click", executeMeterBillsPdfDownload);
+document.getElementById("pdfFilterCancelBtn")?.addEventListener("click", hideMeterBillsPdfModal);
+document.getElementById("meterBillsPdfModal")?.addEventListener("click", (e) => {
+  if (e.target === document.getElementById("meterBillsPdfModal")) hideMeterBillsPdfModal();
+});
+wireBillingMonthPicker(
+  document.getElementById("pdfFilterMonthFrom"),
+  document.getElementById("pdfFilterMonthFromOpenBtn")
+);
+wireBillingMonthPicker(
+  document.getElementById("pdfFilterMonthTo"),
+  document.getElementById("pdfFilterMonthToOpenBtn")
+);
 
 function downloadGenericCurrentPagePdf() {
   const page = state.currentPage;
@@ -3491,7 +3543,7 @@ function downloadCurrentPagePdf() {
     return;
   }
   if (page === "water-bills" || page === "electricity-bills") {
-    downloadMeterBillsPagePdf();
+    showMeterBillsPdfModal();
     return;
   }
   downloadGenericCurrentPagePdf();
