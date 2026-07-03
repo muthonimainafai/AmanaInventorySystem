@@ -1944,6 +1944,10 @@
                   <input type="text" id="waterBillsUnitsUsed" readonly tabindex="-1" />
                 </label>
                 <label>
+                  Direct water pumping (m³)
+                  <input type="number" id="waterBillsDirectWaterPumping" min="0" step="0.01" value="0" />
+                </label>
+                <label>
                   Price per m³
                   <input type="number" id="waterBillsPricePerM3" min="0" step="0.01" required />
                 </label>
@@ -1978,6 +1982,7 @@
                     <th>Current meter (m³)</th>
                     <th>Previous meter (m³)</th>
                     <th>Units used (m³)</th>
+                    <th>Direct water pumping (m³)</th>
                     <th>Price per m³</th>
                     <th>Current billing (Ksh)</th>
                     <th>Previous balance</th>
@@ -1985,10 +1990,10 @@
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="water-bills-body"><tr><td colspan="12" class="empty">No records.</td></tr></tbody>
+                <tbody id="water-bills-body"><tr><td colspan="13" class="empty">No records.</td></tr></tbody>
                 <tfoot>
                   <tr>
-                    <th colspan="8">Total</th>
+                    <th colspan="9">Total</th>
                     <th id="waterBillsTotalCurrentBilling">0</th>
                     <th id="waterBillsTotalBalance">0</th>
                     <th id="waterBillsTotalBilling">0</th>
@@ -2950,6 +2955,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-07-03-weigh-bridge"></script>
+    <script src="app.js?v=2026-07-03-water-direct-pumping"></script>
   </body>
 </html>

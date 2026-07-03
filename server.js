@@ -1189,6 +1189,7 @@ async function initDb() {
       current_meter_reading REAL NOT NULL DEFAULT 0,
       previous_meter_reading REAL NOT NULL DEFAULT 0,
       units_used REAL NOT NULL DEFAULT 0,
+      direct_water_pumping REAL NOT NULL DEFAULT 0,
       price_per_m3 REAL NOT NULL DEFAULT 0,
       current_billing REAL NOT NULL DEFAULT 0,
       balance REAL NOT NULL DEFAULT 0,
@@ -1232,6 +1233,7 @@ async function initDb() {
     await run(`ALTER TABLE ${table} ADD COLUMN recipient_id INTEGER NOT NULL DEFAULT 1`).catch(() => {});
   }
   await run(`ALTER TABLE electricity_bills_entries ADD COLUMN money_paid REAL NOT NULL DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE water_bills_entries ADD COLUMN direct_water_pumping REAL NOT NULL DEFAULT 0`).catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS meter_bill_recipients (
@@ -5302,7 +5304,7 @@ function meterBillsEntryUnitLabels() {
   };
 }
 
-function parseMeterBillsEntryBody(p) {
+function parseMeterBillsEntryBody(p, options = {}) {
   const unitLabels = meterBillsEntryUnitLabels();
   const dateFrom = parseMeterBillsPeriodDateOptional(p.date_from, "Billing Month From");
   const dateTo = parseMeterBillsPeriodDateOptional(p.date_to, "Billing Month To");
@@ -5336,7 +5338,17 @@ function parseMeterBillsEntryBody(p) {
     throw err;
   }
   const unitsUsed = roundMoney(currentMeter - previousMeter);
-  const currentBilling = roundMoney(unitsUsed * pricePerM3);
+  let directWaterPumping = 0;
+  if (options.trackDirectWaterPumping) {
+    try {
+      directWaterPumping = parseRoseNonNegativeField(p.direct_water_pumping ?? 0, "Direct water pumping");
+    } catch (error) {
+      const err = new Error(error.message || "Invalid direct water pumping.");
+      err.status = 400;
+      throw err;
+    }
+  }
+  const currentBilling = roundMoney((unitsUsed + directWaterPumping) * pricePerM3);
   return {
     dateCanon,
     dateFrom,
@@ -5346,6 +5358,7 @@ function parseMeterBillsEntryBody(p) {
     currentMeter,
     previousMeter,
     unitsUsed,
+    directWaterPumping,
     pricePerM3,
     currentBilling,
   };
@@ -5407,6 +5420,7 @@ app.post("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, re
 
 function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
   const trackMoneyPaid = Boolean(options.trackMoneyPaid);
+  const trackDirectWaterPumping = Boolean(options.trackDirectWaterPumping);
   const base = `/api/${routeSlug}`;
   app.get(base, auth, allowRoles("owner"), async (req, res) => {
     const recipientId = await resolveMeterBillRecipientIdForRequest(req);
@@ -5419,7 +5433,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
     if (recipientId == null) return res.status(400).json({ error: "recipient_id is required." });
     let parsed;
     try {
-      parsed = parseMeterBillsEntryBody(req.body || {});
+      parsed = parseMeterBillsEntryBody(req.body || {}, options);
     } catch (error) {
       return res.status(error.status || 400).json({ error: error.message });
     }
@@ -5473,6 +5487,10 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
       insertCols.splice(11, 0, "money_paid");
       insertVals.splice(11, 0, moneyPaid);
     }
+    if (trackDirectWaterPumping) {
+      insertCols.splice(8, 0, "direct_water_pumping");
+      insertVals.splice(8, 0, parsed.directWaterPumping);
+    }
     const placeholders = insertCols.map(() => "?").join(", ");
     await run(
       `INSERT INTO ${tableName} (${insertCols.join(", ")}) VALUES (${placeholders})`,
@@ -5486,7 +5504,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
     if (!existing) return res.status(404).json({ error: "Record not found." });
     let parsed;
     try {
-      parsed = parseMeterBillsEntryBody(req.body || {});
+      parsed = parseMeterBillsEntryBody(req.body || {}, options);
     } catch (error) {
       return res.status(error.status || 400).json({ error: error.message });
     }
@@ -5526,6 +5544,10 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
       parsed.pricePerM3,
       parsed.currentBilling,
     ];
+    if (trackDirectWaterPumping) {
+      updateSets.splice(8, 0, "direct_water_pumping = ?");
+      updateVals.splice(8, 0, parsed.directWaterPumping);
+    }
     if (trackMoneyPaid) {
       updateSets.push("money_paid = ?");
       updateVals.push(moneyPaid);
@@ -5542,7 +5564,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
   });
 }
 
-mountBillsEntriesApi("water-bills", "water_bills_entries");
+mountBillsEntriesApi("water-bills", "water_bills_entries", { trackDirectWaterPumping: true });
 mountBillsEntriesApi("electricity-bills", "electricity_bills_entries", { trackMoneyPaid: true });
 
 /* â”€â”€ Credit Accounts (Amana & Ufaray â€“ owner and employee) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */

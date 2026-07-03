@@ -2895,7 +2895,7 @@ function meterBillsPdfBillToText(entries) {
   return names.join("\n");
 }
 
-const METER_BILLS_PDF_WATER_PAYMENT_LINE = "Send Money to 0114 784 478";
+const METER_BILLS_PDF_WATER_PAYMENT_LINE = "Till No. 5757375";
 
 function drawMeterBillsPaymentDetails(doc, { margin, pageW, startY, serviceItem, totalDue }) {
   let y = startY;
@@ -3019,6 +3019,7 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   const prevReading = Number(row.previous_meter_reading || 0);
   const currReading = Number(row.current_meter_reading || 0);
   const unitsUsed = Number(row.units_used || 0);
+  const directWaterPumping = Number(row.direct_water_pumping || 0);
   const currentBilling = Number(row.current_billing || 0);
   const totalBilling = Number(row.total_billing || 0);
   const pricePerM3 = Number(row.price_per_m3 || 0);
@@ -3036,6 +3037,9 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
       formatKshPlainNumber(currentBilling),
     ],
   ];
+  if (!isElectricity && directWaterPumping > 0) {
+    pdfBody.splice(1, 0, ["", "", String(directWaterPumping), "Direct water pumping", formatKshPlainNumber(directWaterPumping * pricePerM3)]);
+  }
   if (isElectricity) {
     pdfBody.push(["", "", "", "Money paid", formatKshPlainNumber(moneyPaid)]);
     pdfBody.push(["", "", "", "Overpayment balance", formatKshPlainNumber(overpaymentBalance)]);
@@ -6616,7 +6620,7 @@ function formatCessAccountBalanceCell(value) {
   return text;
 }
 
-function computeMeterBillsDerived(currentMeter, previousMeter, pricePerM3) {
+function computeMeterBillsDerived(currentMeter, previousMeter, pricePerM3, directWaterPumping = 0) {
   const current = Number(currentMeter);
   const previous = Number(previousMeter);
   const price = Number(pricePerM3);
@@ -6625,7 +6629,8 @@ function computeMeterBillsDerived(currentMeter, previousMeter, pricePerM3) {
   }
   if (current < previous) return { unitsUsed: NaN, currentBilling: NaN };
   const unitsUsed = roundMoney(current - previous);
-  const currentBilling = roundMoney(unitsUsed * price);
+  const extra = Math.max(0, Number(directWaterPumping) || 0);
+  const currentBilling = roundMoney((unitsUsed + extra) * price);
   return { unitsUsed, currentBilling };
 }
 
@@ -6669,10 +6674,15 @@ function updateMeterBillsFormCalc(prefix) {
   const billingEl = document.getElementById(`${prefix}CurrentBilling`);
   const totalEl = document.getElementById(`${prefix}TotalBilling`);
   if (!currentEl || !previousEl || !priceEl || !unitsEl || !billingEl) return;
+  const directWaterPumping =
+    prefix === "waterBills"
+      ? Number(document.getElementById("waterBillsDirectWaterPumping")?.value || 0)
+      : 0;
   const { unitsUsed, currentBilling } = computeMeterBillsDerived(
     currentEl.value,
     previousEl.value,
-    priceEl.value
+    priceEl.value,
+    directWaterPumping
   );
   const balance = meterBillsBalanceFromForm(prefix);
   if (Number.isFinite(unitsUsed)) {
@@ -6701,6 +6711,7 @@ function updateMeterBillsFormCalc(prefix) {
 function wireMeterBillsFormCalc(prefix) {
   const ids = [`${prefix}CurrentMeter`, `${prefix}PreviousMeter`, `${prefix}PricePerM3`, `${prefix}Balance`];
   if (prefix === "electricityBills") ids.push("electricityBillsMoneyPaid");
+  if (prefix === "waterBills") ids.push("waterBillsDirectWaterPumping");
   for (const id of ids) {
     const el = document.getElementById(id);
     if (!el || el.dataset.meterCalcWired === "1") continue;
@@ -6750,9 +6761,11 @@ function renderBillsEntriesTable({
   totalMoneyPaidId = "",
   showOverpaymentBalance = false,
   totalOverpaymentId = "",
+  showDirectWaterPumping = false,
 }) {
   if (!bodyEl) return;
-  const colCount = showOverpaymentBalance ? 14 : showMoneyPaid ? 13 : 12;
+  const extraCols = (showDirectWaterPumping ? 1 : 0);
+  const colCount = (showOverpaymentBalance ? 14 : showMoneyPaid ? 13 : 12) + extraCols;
   const rows = sortRowsLatestFirst(entries || []);
   if (!rows.length) {
     bodyEl.innerHTML = `<tr><td colspan="${colCount}" class="empty">No records.</td></tr>`;
@@ -6803,6 +6816,9 @@ function renderBillsEntriesTable({
       const overpaymentCell = showOverpaymentBalance
         ? `<td>${formatCessAccountBalanceCell(overpayment)}</td>`
         : "";
+      const directWaterPumpingCell = showDirectWaterPumping
+        ? `<td>${Number(row.direct_water_pumping || 0)}</td>`
+        : "";
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -6812,6 +6828,7 @@ function renderBillsEntriesTable({
         <td>${Number(row.current_meter_reading || 0)}</td>
         <td>${Number(row.previous_meter_reading || 0)}</td>
         <td>${Number(row.units_used || 0)}</td>
+        ${directWaterPumpingCell}
         <td>${Number(row.price_per_m3 || 0)}</td>
         <td>${currency(Number(row.current_billing || 0))}</td>
         ${moneyPaidCell}
@@ -6856,6 +6873,7 @@ function renderWaterBillsTable() {
     totalBalId: "waterBillsTotalBalance",
     totalBillingId: "waterBillsTotalBilling",
     rowKind: "water-bills",
+    showDirectWaterPumping: true,
   });
 }
 
@@ -6953,6 +6971,12 @@ function fillMeterBillsFormFromRow(prefix, row) {
       moneyPaidEl.value = paid > 0 ? String(paid) : "";
     }
   }
+  if (prefix === "waterBills") {
+    const dwpEl = document.getElementById("waterBillsDirectWaterPumping");
+    if (dwpEl instanceof HTMLInputElement) {
+      dwpEl.value = row.direct_water_pumping ?? 0;
+    }
+  }
   updateMeterBillsFormCalc(prefix);
 }
 
@@ -6989,6 +7013,9 @@ function meterBillsPayloadFromForm(prefix) {
     previous_meter_reading: previous,
     price_per_m3: price,
   };
+  if (prefix === "waterBills") {
+    body.direct_water_pumping = Math.max(0, Number(document.getElementById("waterBillsDirectWaterPumping")?.value || 0));
+  }
   if (state.user?.role === "owner") {
     body.balance = meterBillsBalanceFromForm(prefix);
     if (prefix === "electricityBills") {
