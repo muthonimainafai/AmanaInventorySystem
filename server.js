@@ -1233,6 +1233,7 @@ async function initDb() {
     await run(`ALTER TABLE ${table} ADD COLUMN recipient_id INTEGER NOT NULL DEFAULT 1`).catch(() => {});
   }
   await run(`ALTER TABLE electricity_bills_entries ADD COLUMN money_paid REAL NOT NULL DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE electricity_bills_entries ADD COLUMN overpayment_cf REAL NOT NULL DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE water_bills_entries ADD COLUMN direct_water_pumping REAL NOT NULL DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE water_bills_entries ADD COLUMN money_paid REAL NOT NULL DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE water_bills_entries ADD COLUMN overpayment_cf REAL NOT NULL DEFAULT 0`).catch(() => {});
@@ -5404,11 +5405,8 @@ function waterBillsOverpaymentFromEntry(currentBilling, balance, overpaymentCf, 
   return roundMoney(Math.max(0, (Number(moneyPaid) || 0) - dueBeforePay));
 }
 
-async function previousWaterOverpaymentCf(recipientId, excludeId = null) {
-  const rows = await all(
-    `SELECT * FROM water_bills_entries WHERE recipient_id = ? ORDER BY id ASC`,
-    [recipientId]
-  );
+async function previousBillsOverpaymentCf(tableName, recipientId, excludeId = null) {
+  const rows = await all(`SELECT * FROM ${tableName} WHERE recipient_id = ? ORDER BY id ASC`, [recipientId]);
   const filtered = excludeId == null ? rows : rows.filter((r) => Number(r.id) !== Number(excludeId));
   if (!filtered.length) return 0;
   const prev = filtered[filtered.length - 1];
@@ -5479,7 +5477,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
           return res.status(400).json({ error: error.message });
         }
       } else {
-        overpaymentCf = await previousWaterOverpaymentCf(recipientId);
+        overpaymentCf = await previousBillsOverpaymentCf(tableName, recipientId);
       }
     }
     const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance, overpaymentCf);
@@ -5570,7 +5568,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
             return res.status(400).json({ error: error.message });
           }
         } else {
-          overpaymentCf = await previousWaterOverpaymentCf(existing.recipient_id, id);
+          overpaymentCf = await previousBillsOverpaymentCf(tableName, existing.recipient_id, id);
         }
       }
     }
@@ -5628,7 +5626,10 @@ mountBillsEntriesApi("water-bills", "water_bills_entries", {
   trackMoneyPaid: true,
   trackOverpaymentCf: true,
 });
-mountBillsEntriesApi("electricity-bills", "electricity_bills_entries", { trackMoneyPaid: true });
+mountBillsEntriesApi("electricity-bills", "electricity_bills_entries", {
+  trackMoneyPaid: true,
+  trackOverpaymentCf: true,
+});
 
 /* â”€â”€ Credit Accounts (Amana & Ufaray â€“ owner and employee) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
