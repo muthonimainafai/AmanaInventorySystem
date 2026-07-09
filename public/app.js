@@ -2912,7 +2912,7 @@ function drawMeterBillsPaymentDetails(doc, { margin, pageW, startY, serviceItem,
   if (isElectricityBillsKind(serviceItem)) {
     const paymentLines = [
       `For Payment, kindly buy token directly using Paybill 888880 Account Number 37195247590. Amount Due: Ksh ${amountDue}.`,
-      "Then share the KPLC token message to WhatsApp number: 0114 784 478.",
+      "Then share the KPLC token message to WhatsApp number: 0740259645.",
     ];
     for (const line of paymentLines) {
       const wrapped = doc.splitTextToSize(line, maxW);
