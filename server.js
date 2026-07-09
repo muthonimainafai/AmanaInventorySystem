@@ -1234,6 +1234,8 @@ async function initDb() {
   }
   await run(`ALTER TABLE electricity_bills_entries ADD COLUMN money_paid REAL NOT NULL DEFAULT 0`).catch(() => {});
   await run(`ALTER TABLE water_bills_entries ADD COLUMN direct_water_pumping REAL NOT NULL DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE water_bills_entries ADD COLUMN money_paid REAL NOT NULL DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE water_bills_entries ADD COLUMN overpayment_cf REAL NOT NULL DEFAULT 0`).catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS meter_bill_recipients (
@@ -5390,10 +5392,32 @@ function parseMeterBillsMoneyPaidFromBody(p, isOwner) {
   }
 }
 
-function meterBillsTotalsFromEntry(currentBilling, balance) {
+function meterBillsTotalsFromEntry(currentBilling, balance, overpaymentCf = 0) {
   const bal = roundMoney(Number(balance) || 0);
-  const totalBilling = roundMoney((Number(currentBilling) || 0) + bal);
-  return { balance: bal, totalBilling };
+  const cf = roundMoney(Math.max(0, Number(overpaymentCf) || 0));
+  const totalBilling = roundMoney(Math.max(0, (Number(currentBilling) || 0) + bal - cf));
+  return { balance: bal, overpaymentCf: cf, totalBilling };
+}
+
+function waterBillsOverpaymentFromEntry(currentBilling, balance, overpaymentCf, moneyPaid) {
+  const dueBeforePay = (Number(currentBilling) || 0) + (Number(balance) || 0) - (Number(overpaymentCf) || 0);
+  return roundMoney(Math.max(0, (Number(moneyPaid) || 0) - dueBeforePay));
+}
+
+async function previousWaterOverpaymentCf(recipientId, excludeId = null) {
+  const rows = await all(
+    `SELECT * FROM water_bills_entries WHERE recipient_id = ? ORDER BY id ASC`,
+    [recipientId]
+  );
+  const filtered = excludeId == null ? rows : rows.filter((r) => Number(r.id) !== Number(excludeId));
+  if (!filtered.length) return 0;
+  const prev = filtered[filtered.length - 1];
+  return waterBillsOverpaymentFromEntry(
+    prev.current_billing,
+    prev.balance,
+    prev.overpayment_cf,
+    prev.money_paid
+  );
 }
 
 app.get("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, res) => {
@@ -5421,6 +5445,7 @@ app.post("/api/meter-bill-recipients", auth, allowRoles("owner"), async (req, re
 function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
   const trackMoneyPaid = Boolean(options.trackMoneyPaid);
   const trackDirectWaterPumping = Boolean(options.trackDirectWaterPumping);
+  const trackOverpaymentCf = Boolean(options.trackOverpaymentCf);
   const base = `/api/${routeSlug}`;
   app.get(base, auth, allowRoles("owner"), async (req, res) => {
     const recipientId = await resolveMeterBillRecipientIdForRequest(req);
@@ -5445,7 +5470,19 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
     const isOwner = req.user.role === "owner";
     const balance = isOwner ? parseMeterBillsBalanceFromBody(req.body, true) : 0;
     const moneyPaid = trackMoneyPaid && isOwner ? parseMeterBillsMoneyPaidFromBody(req.body, true) : 0;
-    const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance);
+    let overpaymentCf = 0;
+    if (trackOverpaymentCf) {
+      if (req.body?.overpayment_cf !== undefined && req.body?.overpayment_cf !== null && String(req.body.overpayment_cf).trim() !== "") {
+        try {
+          overpaymentCf = parseRoseNonNegativeField(req.body.overpayment_cf, "Overpayment balance C/F");
+        } catch (error) {
+          return res.status(400).json({ error: error.message });
+        }
+      } else {
+        overpaymentCf = await previousWaterOverpaymentCf(recipientId);
+      }
+    }
+    const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance, overpaymentCf);
     const nowIso = new Date().toISOString();
     const insertCols = [
       "date",
@@ -5487,6 +5524,12 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
       insertCols.splice(11, 0, "money_paid");
       insertVals.splice(11, 0, moneyPaid);
     }
+    if (trackOverpaymentCf) {
+      // Insert after balance (before total_billing). Indices shift if money_paid was inserted.
+      const balIdx = insertCols.indexOf("balance");
+      insertCols.splice(balIdx + 1, 0, "overpayment_cf");
+      insertVals.splice(balIdx + 1, 0, totals.overpaymentCf);
+    }
     if (trackDirectWaterPumping) {
       insertCols.splice(8, 0, "direct_water_pumping");
       insertVals.splice(8, 0, parsed.directWaterPumping);
@@ -5511,6 +5554,7 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
     const isOwner = req.user.role === "owner";
     let balance = Number(existing.balance) || 0;
     let moneyPaid = Number(existing.money_paid) || 0;
+    let overpaymentCf = Number(existing.overpayment_cf) || 0;
     if (isOwner) {
       const parsedBalance = parseMeterBillsBalanceFromBody(req.body, true);
       balance = parsedBalance == null ? balance : parsedBalance;
@@ -5518,8 +5562,19 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
         const parsedMoneyPaid = parseMeterBillsMoneyPaidFromBody(req.body, true);
         moneyPaid = parsedMoneyPaid == null ? moneyPaid : parsedMoneyPaid;
       }
+      if (trackOverpaymentCf) {
+        if (req.body?.overpayment_cf !== undefined && req.body?.overpayment_cf !== null && String(req.body.overpayment_cf).trim() !== "") {
+          try {
+            overpaymentCf = parseRoseNonNegativeField(req.body.overpayment_cf, "Overpayment balance C/F");
+          } catch (error) {
+            return res.status(400).json({ error: error.message });
+          }
+        } else {
+          overpaymentCf = await previousWaterOverpaymentCf(existing.recipient_id, id);
+        }
+      }
     }
-    const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance);
+    const totals = meterBillsTotalsFromEntry(parsed.currentBilling, balance, overpaymentCf);
     const updateSets = [
       "date = ?",
       "date_from = ?",
@@ -5552,6 +5607,10 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
       updateSets.push("money_paid = ?");
       updateVals.push(moneyPaid);
     }
+    if (trackOverpaymentCf) {
+      updateSets.push("overpayment_cf = ?");
+      updateVals.push(totals.overpaymentCf);
+    }
     updateSets.push("balance = ?", "total_billing = ?", "updated_at = ?");
     updateVals.push(totals.balance, totals.totalBilling, new Date().toISOString(), id);
     await run(`UPDATE ${tableName} SET ${updateSets.join(", ")} WHERE id = ?`, updateVals);
@@ -5564,7 +5623,11 @@ function mountBillsEntriesApi(routeSlug, tableName, options = {}) {
   });
 }
 
-mountBillsEntriesApi("water-bills", "water_bills_entries", { trackDirectWaterPumping: true });
+mountBillsEntriesApi("water-bills", "water_bills_entries", {
+  trackDirectWaterPumping: true,
+  trackMoneyPaid: true,
+  trackOverpaymentCf: true,
+});
 mountBillsEntriesApi("electricity-bills", "electricity_bills_entries", { trackMoneyPaid: true });
 
 /* â”€â”€ Credit Accounts (Amana & Ufaray â€“ owner and employee) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */

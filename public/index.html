@@ -1909,7 +1909,7 @@
         <div id="page-water-bills" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Water Bills</h3>
-            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. The owner enters any balance amount on the last row; total billing = current billing + balance.</p>
+            <p class="field-hint">Enter meter readings and price per m³. Units used and current billing are calculated automatically. Overpayment balance C/F is fetched from the previous billing period and reduces the amount due. Amount due = current billing + previous balance − overpayment C/F − money paid.</p>
             <form id="water-bills-form">
               <div class="grid meter-bills-form-grid">
                 <label class="billing-month-field">
@@ -1955,13 +1955,22 @@
                   Current billing (Ksh)
                   <input type="text" id="waterBillsCurrentBilling" readonly tabindex="-1" />
                 </label>
-                <label>
-                  Total billing (Ksh)
-                  <input type="text" id="waterBillsTotalBilling" readonly tabindex="-1" />
+                <label class="owner-only-electricity-paid-field" id="waterBillsMoneyPaidField">
+                  Money paid during the billing period (Ksh)
+                  <input type="number" id="waterBillsMoneyPaid" min="0" step="0.01" placeholder="Enter amount paid, if any" />
                 </label>
                 <label class="owner-only-meter-balance-field" id="waterBillsBalanceField">
-                  Balance (Ksh)
+                  Previous balance (Ksh)
                   <input type="number" id="waterBillsBalance" min="0" step="0.01" placeholder="Enter amount, if any" />
+                </label>
+                <label>
+                  Overpayment balance C/F (Ksh)
+                  <input type="text" id="waterBillsOverpaymentCf" readonly tabindex="-1" />
+                  <span class="field-hint">Auto-filled from the previous billing period’s overpayment.</span>
+                </label>
+                <label>
+                  Amount due (Ksh)
+                  <input type="text" id="waterBillsTotalBilling" readonly tabindex="-1" />
                 </label>
               </div>
               <div class="actions">
@@ -1985,17 +1994,21 @@
                     <th>Direct water pumping (m³)</th>
                     <th>Price per m³</th>
                     <th>Current billing (Ksh)</th>
+                    <th>Money paid</th>
                     <th>Previous balance</th>
-                    <th>Total billing</th>
+                    <th>Overpayment balance C/F</th>
+                    <th>Amount due</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="water-bills-body"><tr><td colspan="13" class="empty">No records.</td></tr></tbody>
+                <tbody id="water-bills-body"><tr><td colspan="15" class="empty">No records.</td></tr></tbody>
                 <tfoot>
                   <tr>
                     <th colspan="9">Total</th>
                     <th id="waterBillsTotalCurrentBilling">0</th>
+                    <th id="waterBillsTotalMoneyPaid">0</th>
                     <th id="waterBillsTotalBalance">0</th>
+                    <th id="waterBillsTotalOverpaymentCf">0</th>
                     <th id="waterBillsTotalBilling">0</th>
                     <th>—</th>
                   </tr>
@@ -2973,6 +2986,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-07-09-water-till-amana"></script>
+    <script src="app.js?v=2026-07-09-water-overpayment-cf"></script>
   </body>
 </html>
