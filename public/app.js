@@ -2980,18 +2980,24 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   const margin = 36;
   const pageW = doc.internal.pageSize.getWidth();
   const rightX = pageW - margin;
+  const isElectricity = isElectricityBillsKind(serviceItem);
   let y = 28;
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
   doc.setTextColor(...PDF_PAGE_THEME.dark);
-  doc.text(pageTitle, margin, y);
-  y += 16;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(80, 80, 80);
-  doc.text(units.pdfStatementSub, margin, y);
-  y += 22;
+  if (isElectricity) {
+    doc.text("Electricity Bill", pageW / 2, y, { align: "center" });
+    y += 28;
+  } else {
+    doc.text(pageTitle, margin, y);
+    y += 16;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(80, 80, 80);
+    doc.text(units.pdfStatementSub, margin, y);
+    y += 22;
+  }
 
   const billTo = String(row.bill_to || "").trim() || "—";
   const billDate = formatBillDateShort(state.shopToday || clientShopTodayDMY());
@@ -3027,7 +3033,6 @@ function drawMeterBillsInvoicePage(doc, jsPdfNs, row, { pageTitle, serviceItem, 
   const moneyPaid = Number(row.money_paid || 0);
   const overpaymentBalance = electricityBillsOverpaymentBalance(row);
   const overpaymentCf = Number(row.overpayment_cf || 0);
-  const isElectricity = isElectricityBillsKind(serviceItem);
   const amountDue = isElectricity ? electricityBillsAmountDue(row) : waterBillsAmountDue(row);
   const totalUnitsUsed = roundMoney(unitsUsed + (isElectricity ? 0 : directWaterPumping));
   const pdfBody = [
