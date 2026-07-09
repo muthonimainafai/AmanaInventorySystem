@@ -2895,7 +2895,7 @@ function meterBillsPdfBillToText(entries) {
   return names.join("\n");
 }
 
-const METER_BILLS_PDF_WATER_PAYMENT_LINE = "Till No. 5757375";
+const METER_BILLS_PDF_WATER_PAYMENT_LINES = ["Till No. 5757375", "Amana Kuku Feeds"];
 
 function drawMeterBillsPaymentDetails(doc, { margin, pageW, startY, serviceItem, totalDue }) {
   let y = startY;
@@ -2927,8 +2927,10 @@ function drawMeterBillsPaymentDetails(doc, { margin, pageW, startY, serviceItem,
     doc.text(noteWrapped, margin, y);
     y += noteWrapped.length * 12;
   } else {
-    doc.text(METER_BILLS_PDF_WATER_PAYMENT_LINE, margin, y);
-    y += 14;
+    for (const line of METER_BILLS_PDF_WATER_PAYMENT_LINES) {
+      doc.text(line, margin, y);
+      y += 14;
+    }
   }
   return y;
 }
