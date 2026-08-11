@@ -7769,7 +7769,12 @@ function renderWeighBridgeTable() {
     if (totalAmountEl) totalAmountEl.textContent = currency(0);
     if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(0);
     if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(0);
-    if (totalBalanceEl) { totalBalanceEl.textContent = currency(0); totalBalanceEl.style.color = ""; }
+    const emptyBalance = 2000;
+    if (totalBalanceEl) {
+      totalBalanceEl.textContent = currency(emptyBalance);
+      totalBalanceEl.style.color = "";
+      totalBalanceEl.style.fontWeight = "";
+    }
     return;
   }
   let sumAmount = 0, sumUfarayKsh = 0, sumAmanaKsh = 0;
@@ -7804,7 +7809,9 @@ function renderWeighBridgeTable() {
   if (totalAmountEl) totalAmountEl.textContent = currency(sumAmount);
   if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(sumUfarayKsh);
   if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(sumAmanaKsh);
-  const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh);
+  // Grand Total Balance only: Ufaray − Amana + fixed Amana credit of 2,000.
+  const WEIGH_BRIDGE_AMANA_CREDIT_KES = 2000;
+  const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh + WEIGH_BRIDGE_AMANA_CREDIT_KES);
   if (totalBalanceEl) {
     totalBalanceEl.textContent = currency(totalBalance);
     totalBalanceEl.style.color = totalBalance < 0 ? "red" : "";
