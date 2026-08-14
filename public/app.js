@@ -7757,6 +7757,52 @@ function resetWeighBridgeForm() {
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
 
+function weighBridgeDayKeyFromRow(row) {
+  const parts = parseDMYParts(row?.date);
+  if (!parts) return "";
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}-${String(parts.d).padStart(2, "0")}`;
+}
+
+function weighBridgeTodayKey() {
+  // Use Nairobi calendar day so +2,000 applies right after local midnight.
+  const parts = parseDMYParts(clientShopTodayDMY() || state.shopToday || "");
+  if (!parts) return "";
+  return `${parts.y}-${String(parts.m).padStart(2, "0")}-${String(parts.d).padStart(2, "0")}`;
+}
+
+/** +2,000 Amana credit once per completed day that had weigh-bridge use (after midnight). */
+function weighBridgeCompletedDayCreditKes(entries) {
+  const WEIGH_BRIDGE_AMANA_CREDIT_KES = 2000;
+  const todayKey = weighBridgeTodayKey();
+  const completedDays = new Set();
+  for (const row of entries || []) {
+    const dayKey = weighBridgeDayKeyFromRow(row);
+    if (!dayKey) continue;
+    // Only completed days (before today). Today's open transactions get no credit yet.
+    if (todayKey && dayKey >= todayKey) continue;
+    completedDays.add(dayKey);
+  }
+  return WEIGH_BRIDGE_AMANA_CREDIT_KES * completedDays.size;
+}
+
+let weighBridgeMidnightTimer = null;
+
+/** Re-render at local midnight so today's +2,000 credit applies when the day completes. */
+function scheduleWeighBridgeMidnightRefresh() {
+  if (weighBridgeMidnightTimer) {
+    clearTimeout(weighBridgeMidnightTimer);
+    weighBridgeMidnightTimer = null;
+  }
+  const now = new Date();
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0);
+  const delay = Math.max(1000, nextMidnight.getTime() - now.getTime());
+  weighBridgeMidnightTimer = setTimeout(() => {
+    weighBridgeMidnightTimer = null;
+    if (state.currentPage === "weigh-bridge") renderWeighBridgeTable();
+    scheduleWeighBridgeMidnightRefresh();
+  }, delay);
+}
+
 function renderWeighBridgeTable() {
   if (!weighBridgeBody) return;
   const rows = sortRowsLatestFirst(state.weighBridgeEntries || []);
@@ -7769,9 +7815,8 @@ function renderWeighBridgeTable() {
     if (totalAmountEl) totalAmountEl.textContent = currency(0);
     if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(0);
     if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(0);
-    const emptyBalance = 2000;
     if (totalBalanceEl) {
-      totalBalanceEl.textContent = currency(emptyBalance);
+      totalBalanceEl.textContent = currency(0);
       totalBalanceEl.style.color = "";
       totalBalanceEl.style.fontWeight = "";
     }
@@ -7809,9 +7854,9 @@ function renderWeighBridgeTable() {
   if (totalAmountEl) totalAmountEl.textContent = currency(sumAmount);
   if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(sumUfarayKsh);
   if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(sumAmanaKsh);
-  // Grand Total Balance only: Ufaray − Amana + fixed Amana credit of 2,000.
-  const WEIGH_BRIDGE_AMANA_CREDIT_KES = 2000;
-  const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh + WEIGH_BRIDGE_AMANA_CREDIT_KES);
+  // Grand Total Balance: Ufaray − Amana + 2,000 per completed day with weigh-bridge activity.
+  const dayCredit = weighBridgeCompletedDayCreditKes(state.weighBridgeEntries);
+  const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh + dayCredit);
   if (totalBalanceEl) {
     totalBalanceEl.textContent = currency(totalBalance);
     totalBalanceEl.style.color = totalBalance < 0 ? "red" : "";
@@ -8410,7 +8455,10 @@ function showPage(page) {
     renderCreditDashboard();
   }
   if (page === "pigs") renderPigsTable();
-  if (page === "weigh-bridge") renderWeighBridgeTable();
+  if (page === "weigh-bridge") {
+    renderWeighBridgeTable();
+    scheduleWeighBridgeMidnightRefresh();
+  }
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
     initCalcChickenFormDefaults();
