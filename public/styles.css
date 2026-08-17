@@ -381,6 +381,20 @@ body.electricity-bills-theme .nav-tab.active {
   color: #fff;
 }
 
+body.car-imports-theme {
+  background: #f2f5f8;
+  color: #1c2833;
+}
+
+body.car-imports-theme .page-title {
+  color: #1b4f72;
+}
+
+body.car-imports-theme .nav-tab.active {
+  background: #1b4f72;
+  color: #fff;
+}
+
 body.ufaray-theme {
   background: #f6f2ff;
   color: #25123f;

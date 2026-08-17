@@ -6,6 +6,7 @@ const state = {
       "ufaray",
       "rose",
       "home-chickens",
+      "car-imports",
       "nahah",
       "terry",
       "cess",
@@ -129,6 +130,9 @@ const PAGE_HEADINGS = {
   "cess-accounts": "Cess Accounts",
   "water-bills": "Water Bills",
   "electricity-bills": "Electricity Bills",
+  "customer-deposits": "Customer Deposits",
+  "japan-deposits": "Japan Deposits",
+  "clearance-costs": "Clearance Costs",
   credit: "Credit",
   calculator: "Calculator",
   pigs: "Pigs Page",
@@ -149,6 +153,10 @@ function updateCalculatorModeUi() {
 
 function isRecordsTenant() {
   return state.appInstance === "rose" || state.appInstance === "home-chickens";
+}
+
+function isCarImportsTenant() {
+  return state.appInstance === "car-imports";
 }
 
 function isWaterBillsTenant() {
@@ -304,6 +312,7 @@ function updateElectricityBillsMeterInfoUi() {
 function defaultPageForLoggedInUser() {
   if (isWaterBillsTenant()) return "water-bills";
   if (isElectricityBillsTenant()) return "electricity-bills";
+  if (isCarImportsTenant()) return "customer-deposits";
   if (state.appInstance === "terry") return "rose-inventory";
   if (
     state.appInstance === "cess" ||
@@ -475,6 +484,9 @@ const OWNER_ALLOWED_PAGES = new Set([
   "credit",
   "pigs",
   "weigh-bridge",
+  "customer-deposits",
+  "japan-deposits",
+  "clearance-costs",
   "calculator",
   "expenditure",
   "monthly-report",
@@ -722,6 +734,7 @@ function persistAppInstance() {
     "ufaray",
     "rose",
     "home-chickens",
+    "car-imports",
     "nahah",
     "terry",
     "cess",
@@ -742,6 +755,7 @@ function applyAppTheme() {
     "ufaray",
     "rose",
     "home-chickens",
+    "car-imports",
     "nahah",
     "terry",
     "cess",
@@ -755,6 +769,7 @@ function applyAppTheme() {
     : "amana";
   const isUfaray = tenant === "ufaray";
   const isRose = tenant === "rose" || tenant === "home-chickens";
+  const isCarImports = tenant === "car-imports";
   const isWaterBills = tenant === "water-bills";
   const isElectricityBills = tenant === "electricity-bills";
   const isMainaFaithCess = tenant === "maina-faith-cess";
@@ -768,6 +783,7 @@ function applyAppTheme() {
     isTerryAndCess;
   document.body.classList.toggle("ufaray-theme", isUfaray);
   document.body.classList.toggle("rose-theme", isRose);
+  document.body.classList.toggle("car-imports-theme", isCarImports);
   document.body.classList.toggle("nahah-theme", isNahah);
   document.body.classList.toggle("water-bills-theme", isWaterBills);
   document.body.classList.toggle("electricity-bills-theme", isElectricityBills);
@@ -775,6 +791,8 @@ function applyAppTheme() {
     ? "Water Bills - Desktop Inventory"
     : isElectricityBills
       ? "Electricity Bills - Desktop Inventory"
+      : isCarImports
+        ? "Car Imports Inventory - Desktop Inventory"
       : isMainaFaithCess
     ? "Maina+Faith+Cess - Desktop Inventory"
     : isTerryAndCess
@@ -798,6 +816,8 @@ function applyAppTheme() {
           ? "WATER BILLS"
           : isElectricityBills
             ? "ELECTRICITY BILLS"
+        : isCarImports
+          ? "CAR IMPORTS INVENTORY"
         : isUfaray
         ? "UFARAY FEEDS"
         : tenant === "home-chickens"
@@ -814,6 +834,8 @@ function applyAppTheme() {
       ? "Water Bills Login"
       : isElectricityBills
         ? "Electricity Bills Login"
+        : isCarImports
+          ? "Car Imports Inventory Login"
         : tenant === "terry"
       ? "Terry Inventory Login"
         : tenant === "cess"
@@ -826,6 +848,8 @@ function applyAppTheme() {
           ? "Shop Inventory Login"
         : isUfaray
       ? "Ufaray Feeds Login"
+      : tenant === "home-chickens"
+        ? "Home Chickens Login"
       : isRose
         ? "Rose Inventory Login"
         : "Amana Kuku Feeds Login";
@@ -893,6 +917,7 @@ async function api(path, options = {}) {
       "ufaray",
       "rose",
       "home-chickens",
+      "car-imports",
       "nahah",
       "terry",
       "cess",
@@ -2742,7 +2767,9 @@ function runPdfAutoTable(doc, jsPdfNs, options) {
 function pdfBusinessTitle() {
   if (state.appInstance === "water-bills") return "Water Bills";
   if (state.appInstance === "electricity-bills") return "Electricity Bills";
+  if (state.appInstance === "car-imports") return "Car Imports Inventory";
   if (state.appInstance === "ufaray") return "Ufaray Feeds";
+  if (state.appInstance === "home-chickens") return "Home Chickens";
   if (state.appInstance === "maina-faith-cess") return "Faith Inventory";
   if (state.appInstance === "terry") return "Terry Records";
   if (state.appInstance === "cess" || state.appInstance === "terry-and-cess") return "Rose Inventory";
@@ -4759,9 +4786,12 @@ function showLoggedIn() {
       isOwner &&
       (page === "sales-bags" || page === "sales-kg");
     const recordsTenant = isRecordsTenant();
+    const carImportsTenant = isCarImportsTenant();
     const terryCessShopTenant = isTerryCessOrShopTenant();
     let shouldShow = isOwnerSalesPageHiddenForTenant
       ? false
+      : carImportsTenant
+      ? page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs"
       : state.appInstance === "terry"
       ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : state.appInstance === "cess" ||
@@ -4822,6 +4852,13 @@ function showLoggedIn() {
         isOwner &&
         ((isWaterBillsTenant() && page === "water-bills") ||
           (isElectricityBillsTenant() && page === "electricity-bills"));
+    }
+    if (page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs") {
+      shouldShow = isCarImportsTenant();
+    }
+    if (isCarImportsTenant()) {
+      shouldShow =
+        page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs";
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -8238,7 +8275,17 @@ function showPage(page) {
   if (isElectricityBillsTenant() && page !== "electricity-bills") {
     return showPage("electricity-bills");
   }
+  if (isCarImportsTenant()) {
+    const carImportsPages = new Set(["customer-deposits", "japan-deposits", "clearance-costs"]);
+    if (!carImportsPages.has(page)) return showPage("customer-deposits");
+  }
   if ((page === "water-bills" || page === "electricity-bills") && state.user?.role !== "owner") {
+    return showPage(defaultPageForLoggedInUser());
+  }
+  if (
+    (page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs") &&
+    !isCarImportsTenant()
+  ) {
     return showPage(defaultPageForLoggedInUser());
   }
   if (
@@ -9035,6 +9082,12 @@ document.getElementById("openRoseBtn")?.addEventListener("click", () => {
 
 document.getElementById("openHomeChickensBtn")?.addEventListener("click", () => {
   state.appInstance = "home-chickens";
+  persistAppInstance();
+  showLoginCard();
+});
+
+document.getElementById("openCarImportsBtn")?.addEventListener("click", () => {
+  state.appInstance = "car-imports";
   persistAppInstance();
   showLoginCard();
 });

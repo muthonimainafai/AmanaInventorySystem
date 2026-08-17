@@ -36,6 +36,8 @@ function loadEnvFile() {
       key.startsWith("UFARAY_") ||
       key.startsWith("WATER_BILLS_") ||
       key.startsWith("ELECTRICITY_BILLS_") ||
+      key.startsWith("HOME_CHICKENS_") ||
+      key.startsWith("CAR_IMPORTS_") ||
       key.startsWith("SHOP_") ||
       key.startsWith("VEHICLE_") ||
       key === "JWT_SECRET";
@@ -267,6 +269,31 @@ function tenantLoginEnv(tenant) {
           : "AMANA_* (fallback)",
     };
   }
+  if (t === "car-imports") {
+    const ownerUsername = String(process.env.CAR_IMPORTS_OWNER_USERNAME || "").trim();
+    const ownerPassword = String(process.env.CAR_IMPORTS_OWNER_PASSWORD || "");
+    const ownerFullName = String(process.env.CAR_IMPORTS_OWNER_FULL_NAME || "").trim();
+    const employeeUsername = String(process.env.CAR_IMPORTS_EMPLOYEE_USERNAME || "").trim();
+    const employeePassword = String(process.env.CAR_IMPORTS_EMPLOYEE_PASSWORD || "");
+    const employeeFullName = String(process.env.CAR_IMPORTS_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "car-imports",
+      owner: {
+        username: ownerUsername || AMANA_OWNER_USERNAME,
+        password: ownerPassword || AMANA_OWNER_PASSWORD,
+        fullName: ownerFullName || "Car Imports Owner",
+      },
+      employee: {
+        username: employeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: employeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: employeeFullName || "Car Imports Employee",
+      },
+      sourceLabel:
+        ownerUsername || employeeUsername || ownerPassword || employeePassword
+          ? "CAR_IMPORTS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
   if (t === "water-bills") {
     const ownerUsername = String(process.env.WATER_BILLS_OWNER_USERNAME || "").trim();
     const ownerPassword = String(process.env.WATER_BILLS_OWNER_PASSWORD || "");
@@ -366,6 +393,7 @@ function normalizeAppTenant(value) {
   if (t === "ufaray") return "ufaray";
   if (t === "rose") return "rose";
   if (t === "home-chickens") return "home-chickens";
+  if (t === "car-imports") return "car-imports";
   if (t === "terry") return "terry";
   if (t === "cess") return "cess";
   if (t === "terry-and-cess") return "terry-and-cess";
@@ -391,6 +419,7 @@ function dbFileNameForTenant(tenant) {
   if (t === "nahah") return "inventory-nahah.db";
   if (t === "rose") return "inventory-rose.db";
   if (t === "home-chickens") return "inventory-home-chickens.db";
+  if (t === "car-imports") return "inventory-car-imports.db";
   if (t === "water-bills") return "inventory-water-bills.db";
   if (t === "electricity-bills") return "inventory-electricity-bills.db";
   return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
@@ -7762,6 +7791,8 @@ async function startServer(port = PORT) {
   await ensureTenantInitialized("shop");
   await ensureTenantInitialized("nahah");
   await ensureTenantInitialized("rose");
+  await ensureTenantInitialized("home-chickens");
+  await ensureTenantInitialized("car-imports");
   await ensureTenantInitialized("ufaray");
   await ensureTenantInitialized("water-bills");
   await ensureTenantInitialized("electricity-bills");

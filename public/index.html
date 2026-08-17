@@ -38,6 +38,10 @@
             <span class="portal-option-title">Home Chickens</span>
             <span class="portal-option-sub">Home chickens inventory with separate data and login</span>
           </button>
+          <button type="button" id="openCarImportsBtn" class="portal-option">
+            <span class="portal-option-title">Car Imports Inventory</span>
+            <span class="portal-option-sub">Customer deposits, Japan deposits, and clearance costs</span>
+          </button>
           <button type="button" id="openUfarayBtn" class="portal-option">
             <span class="portal-option-title">Ufaray Feeds</span>
             <span class="portal-option-sub">Fresh copy with same features and empty data</span>
@@ -82,7 +86,7 @@
         </form>
         <p class="hint">
           Use the <strong>owner</strong> and <strong>staff</strong> accounts defined in your server
-          <code>.env</code> file (<code>AMANA_*</code>, <code>NAHAH_*</code>, <code>ROSE_*</code>, <code>UFARAY_*</code>, <code>WATER_BILLS_*</code>, <code>ELECTRICITY_BILLS_*</code>). See
+          <code>.env</code> file (<code>AMANA_*</code>, <code>NAHAH_*</code>, <code>ROSE_*</code>, <code>UFARAY_*</code>, <code>WATER_BILLS_*</code>, <code>ELECTRICITY_BILLS_*</code>, <code>CAR_IMPORTS_*</code>). See
           <code>env.example</code> in the project folder.
         </p>
       </section>
@@ -151,6 +155,9 @@
           <button type="button" class="nav-tab" data-page="cess-accounts" id="cessAccountsTab">Cess Accounts</button>
           <button type="button" class="nav-tab hidden" data-page="water-bills" id="waterBillsTab">Water Bills</button>
           <button type="button" class="nav-tab hidden" data-page="electricity-bills" id="electricityBillsTab">Electricity Bills</button>
+          <button type="button" class="nav-tab hidden" data-page="customer-deposits" id="customerDepositsTab">Customer Deposits</button>
+          <button type="button" class="nav-tab hidden" data-page="japan-deposits" id="japanDepositsTab">Japan Deposits</button>
+          <button type="button" class="nav-tab hidden" data-page="clearance-costs" id="clearanceCostsTab">Clearance Costs</button>
           <button type="button" class="nav-tab" data-page="credit" id="creditTab">Credit</button>
           <button type="button" class="nav-tab" data-page="pigs">Pigs Page</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="weigh-bridge">Weigh Bridge</button>
@@ -2452,6 +2459,27 @@
           </div>
         </div>
 
+        <div id="page-customer-deposits" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Customer Deposits</h3>
+            <p class="field-hint">Record customer deposits for car imports. Entry forms and tables will be added here.</p>
+          </div>
+        </div>
+
+        <div id="page-japan-deposits" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Japan Deposits</h3>
+            <p class="field-hint">Record Japan-side deposits for car imports. Entry forms and tables will be added here.</p>
+          </div>
+        </div>
+
+        <div id="page-clearance-costs" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Clearance Costs</h3>
+            <p class="field-hint">Record clearance costs for car imports. Entry forms and tables will be added here.</p>
+          </div>
+        </div>
+
         <div id="page-expenditure" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Expenditure</h3>
@@ -2993,6 +3021,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-14-weigh-bridge-daily-credit"></script>
+    <script src="app.js?v=2026-08-17-car-imports"></script>
   </body>
 </html>
