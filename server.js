@@ -1370,6 +1370,44 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS car_customer_deposits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      total_amount REAL NOT NULL DEFAULT 0,
+      amount_paid REAL NOT NULL DEFAULT 0,
+      unpaid_balance REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS car_japan_deposits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      total_amount REAL NOT NULL DEFAULT 0,
+      amount_paid REAL NOT NULL DEFAULT 0,
+      unpaid_balance REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS car_clearance_costs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      amount REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS monthly_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       month_key TEXT NOT NULL UNIQUE,
@@ -6082,6 +6120,161 @@ app.delete("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async
     req.user.role === "owner"
       ? await run("DELETE FROM weigh_bridge_entries WHERE id = ?", [Number(req.params.id)])
       : await run("DELETE FROM weigh_bridge_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
+function requireCarImportsTenant(res) {
+  if (activeTenant() !== "car-imports") {
+    res.status(403).json({ error: "This feature is only available in Car Imports Inventory." });
+    return false;
+  }
+  return true;
+}
+
+function mountCarDepositApi(routeSlug, tableName) {
+  const base = `/api/${routeSlug}`;
+  app.get(base, auth, allowRoles("owner", "employee"), async (req, res) => {
+    if (!requireCarImportsTenant(res)) return;
+    const rows =
+      req.user.role === "owner"
+        ? await all(`SELECT * FROM ${tableName} ORDER BY id DESC`)
+        : await all(`SELECT * FROM ${tableName} WHERE created_by = ? ORDER BY id DESC`, [req.user.username]);
+    res.json(rows);
+  });
+  app.post(base, auth, allowRoles("owner", "employee"), async (req, res) => {
+    if (!requireCarImportsTenant(res)) return;
+    const p = req.body || {};
+    const dateCanon = normalizeInventoryDate(p.date);
+    if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+    let totalAmount, amountPaid;
+    try {
+      totalAmount = parseRoseNonNegativeField(p.total_amount ?? 0, "Total amount");
+      amountPaid = parseRoseNonNegativeField(p.amount_paid ?? 0, "Amount paid");
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (amountPaid > totalAmount) {
+      return res.status(400).json({ error: "Amount paid cannot be more than total amount." });
+    }
+    const unpaidBalance = roundMoney(Math.max(0, totalAmount - amountPaid));
+    const nowIso = new Date().toISOString();
+    await run(
+      `INSERT INTO ${tableName} (date, total_amount, amount_paid, unpaid_balance, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [dateCanon, totalAmount, amountPaid, unpaidBalance, req.user.username, nowIso, nowIso]
+    );
+    res.json({ ok: true });
+  });
+  app.put(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
+    if (!requireCarImportsTenant(res)) return;
+    const id = Number(req.params.id);
+    const existing =
+      req.user.role === "owner"
+        ? await get(`SELECT * FROM ${tableName} WHERE id = ?`, [id])
+        : await get(`SELECT * FROM ${tableName} WHERE id = ? AND created_by = ?`, [id, req.user.username]);
+    if (!existing) return res.status(404).json({ error: "Record not found." });
+    const p = req.body || {};
+    const dateCanon = normalizeInventoryDate(p.date);
+    if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+    let totalAmount, amountPaid;
+    try {
+      totalAmount = parseRoseNonNegativeField(p.total_amount ?? 0, "Total amount");
+      amountPaid = parseRoseNonNegativeField(p.amount_paid ?? 0, "Amount paid");
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (amountPaid > totalAmount) {
+      return res.status(400).json({ error: "Amount paid cannot be more than total amount." });
+    }
+    const unpaidBalance = roundMoney(Math.max(0, totalAmount - amountPaid));
+    await run(
+      `UPDATE ${tableName} SET date = ?, total_amount = ?, amount_paid = ?, unpaid_balance = ?, updated_at = ? WHERE id = ?`,
+      [dateCanon, totalAmount, amountPaid, unpaidBalance, new Date().toISOString(), id]
+    );
+    res.json({ ok: true });
+  });
+  app.delete(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
+    if (!requireCarImportsTenant(res)) return;
+    const result =
+      req.user.role === "owner"
+        ? await run(`DELETE FROM ${tableName} WHERE id = ?`, [Number(req.params.id)])
+        : await run(`DELETE FROM ${tableName} WHERE id = ? AND created_by = ?`, [
+            Number(req.params.id),
+            req.user.username,
+          ]);
+    if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+    res.json({ ok: true });
+  });
+}
+
+mountCarDepositApi("car-customer-deposits", "car_customer_deposits");
+mountCarDepositApi("car-japan-deposits", "car_japan_deposits");
+
+app.get("/api/car-clearance-costs", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  const rows =
+    req.user.role === "owner"
+      ? await all("SELECT * FROM car_clearance_costs ORDER BY id DESC")
+      : await all("SELECT * FROM car_clearance_costs WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+  res.json(rows);
+});
+
+app.post("/api/car-clearance-costs", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  let amount;
+  try {
+    amount = parseRoseNonNegativeField(p.amount ?? 0, "Amount");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO car_clearance_costs (date, description, amount, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, amount, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/car-clearance-costs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  const id = Number(req.params.id);
+  const existing =
+    req.user.role === "owner"
+      ? await get("SELECT * FROM car_clearance_costs WHERE id = ?", [id])
+      : await get("SELECT * FROM car_clearance_costs WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  let amount;
+  try {
+    amount = parseRoseNonNegativeField(p.amount ?? 0, "Amount");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  await run(
+    `UPDATE car_clearance_costs SET date = ?, description = ?, amount = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, amount, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/car-clearance-costs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  const result =
+    req.user.role === "owner"
+      ? await run("DELETE FROM car_clearance_costs WHERE id = ?", [Number(req.params.id)])
+      : await run("DELETE FROM car_clearance_costs WHERE id = ? AND created_by = ?", [
+          Number(req.params.id),
+          req.user.username,
+        ]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });

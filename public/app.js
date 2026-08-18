@@ -105,6 +105,12 @@ const state = {
   editPigsId: null,
   weighBridgeEntries: [],
   editWeighBridgeId: null,
+  carCustomerDeposits: [],
+  editCarCustomerDepositId: null,
+  carJapanDeposits: [],
+  editCarJapanDepositId: null,
+  carClearanceCosts: [],
+  editCarClearanceCostId: null,
   waterBillsEntries: [],
   editWaterBillsId: null,
   electricityBillsEntries: [],
@@ -711,6 +717,21 @@ const weighBridgeBody = document.getElementById("weigh-bridge-body");
 const weighBridgeDateDisplay = document.getElementById("weighBridgeDateDisplay");
 const weighBridgeDate = document.getElementById("weighBridgeDate");
 const weighBridgeOpenCalendarBtn = document.getElementById("weighBridgeOpenCalendarBtn");
+const customerDepositsForm = document.getElementById("customer-deposits-form");
+const customerDepositsBody = document.getElementById("customer-deposits-body");
+const cdDateDisplay = document.getElementById("cdDateDisplay");
+const cdDate = document.getElementById("cdDate");
+const cdOpenCalendarBtn = document.getElementById("cdOpenCalendarBtn");
+const japanDepositsForm = document.getElementById("japan-deposits-form");
+const japanDepositsBody = document.getElementById("japan-deposits-body");
+const jdDateDisplay = document.getElementById("jdDateDisplay");
+const jdDate = document.getElementById("jdDate");
+const jdOpenCalendarBtn = document.getElementById("jdOpenCalendarBtn");
+const clearanceCostsForm = document.getElementById("clearance-costs-form");
+const clearanceCostsBody = document.getElementById("clearance-costs-body");
+const ccDateDisplay = document.getElementById("ccDateDisplay");
+const ccDate = document.getElementById("ccDate");
+const ccOpenCalendarBtn = document.getElementById("ccOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
 const calcDueDate = document.getElementById("calcDueDate");
@@ -7901,6 +7922,172 @@ function renderWeighBridgeTable() {
   }
 }
 
+function syncCarDepositUnpaidBalance(totalEl, paidEl, unpaidEl) {
+  const total = Number.isFinite(parseMoneyFromInput(totalEl?.value))
+    ? parseMoneyFromInput(totalEl.value)
+    : 0;
+  const paid = Number.isFinite(parseMoneyFromInput(paidEl?.value))
+    ? parseMoneyFromInput(paidEl.value)
+    : 0;
+  if (unpaidEl) unpaidEl.value = formatMoneyForInput(Math.max(0, roundMoney(total - paid)));
+}
+
+function syncCustomerDepositUnpaidBalance() {
+  syncCarDepositUnpaidBalance(
+    document.getElementById("cdTotalAmount"),
+    document.getElementById("cdAmountPaid"),
+    document.getElementById("cdUnpaidBalance")
+  );
+}
+
+function syncJapanDepositUnpaidBalance() {
+  syncCarDepositUnpaidBalance(
+    document.getElementById("jdTotalAmount"),
+    document.getElementById("jdAmountPaid"),
+    document.getElementById("jdUnpaidBalance")
+  );
+}
+
+function resetCustomerDepositsForm() {
+  if (!customerDepositsForm) return;
+  customerDepositsForm.reset();
+  state.editCarCustomerDepositId = null;
+  if (cdDate) cdDate.value = "";
+  if (cdDateDisplay) cdDateDisplay.value = "";
+  const totalEl = document.getElementById("cdTotalAmount");
+  const paidEl = document.getElementById("cdAmountPaid");
+  const unpaidEl = document.getElementById("cdUnpaidBalance");
+  if (totalEl) totalEl.value = "0";
+  if (paidEl) paidEl.value = "0";
+  if (unpaidEl) unpaidEl.value = "0";
+  const saveBtn = document.getElementById("cdSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+}
+
+function resetJapanDepositsForm() {
+  if (!japanDepositsForm) return;
+  japanDepositsForm.reset();
+  state.editCarJapanDepositId = null;
+  if (jdDate) jdDate.value = "";
+  if (jdDateDisplay) jdDateDisplay.value = "";
+  const totalEl = document.getElementById("jdTotalAmount");
+  const paidEl = document.getElementById("jdAmountPaid");
+  const unpaidEl = document.getElementById("jdUnpaidBalance");
+  if (totalEl) totalEl.value = "0";
+  if (paidEl) paidEl.value = "0";
+  if (unpaidEl) unpaidEl.value = "0";
+  const saveBtn = document.getElementById("jdSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+}
+
+function resetClearanceCostsForm() {
+  if (!clearanceCostsForm) return;
+  clearanceCostsForm.reset();
+  state.editCarClearanceCostId = null;
+  if (ccDate) ccDate.value = "";
+  if (ccDateDisplay) ccDateDisplay.value = "";
+  const amountEl = document.getElementById("ccAmount");
+  if (amountEl) amountEl.value = "0";
+  const saveBtn = document.getElementById("ccSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+}
+
+function renderCarDepositTable(bodyEl, rows, kind, sumIds) {
+  if (!bodyEl) return;
+  const sorted = sortRowsLatestFirst(rows || []);
+  const totalAmountEl = document.getElementById(sumIds.total);
+  const amountPaidEl = document.getElementById(sumIds.paid);
+  const unpaidEl = document.getElementById(sumIds.unpaid);
+  if (!sorted.length) {
+    bodyEl.innerHTML = '<tr><td colspan="6" class="empty">No records.</td></tr>';
+    if (totalAmountEl) totalAmountEl.textContent = currency(0);
+    if (amountPaidEl) amountPaidEl.textContent = currency(0);
+    if (unpaidEl) unpaidEl.textContent = currency(0);
+    return;
+  }
+  let sumTotal = 0;
+  let sumPaid = 0;
+  let sumUnpaid = 0;
+  bodyEl.innerHTML = sorted
+    .map((row, idx) => {
+      const totalAmount = Number(row.total_amount || 0);
+      const amountPaid = Number(row.amount_paid || 0);
+      const unpaid =
+        row.unpaid_balance != null
+          ? Number(row.unpaid_balance)
+          : roundMoney(Math.max(0, totalAmount - amountPaid));
+      sumTotal += totalAmount;
+      sumPaid += amountPaid;
+      sumUnpaid += unpaid;
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${currency(totalAmount)}</td>
+        <td>${currency(amountPaid)}</td>
+        <td>${currency(unpaid)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="${kind}" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="${kind}" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  if (totalAmountEl) totalAmountEl.textContent = currency(sumTotal);
+  if (amountPaidEl) amountPaidEl.textContent = currency(sumPaid);
+  if (unpaidEl) unpaidEl.textContent = currency(sumUnpaid);
+}
+
+function renderCustomerDepositsTable() {
+  renderCarDepositTable(customerDepositsBody, state.carCustomerDeposits, "customer-deposits", {
+    total: "cdTotalAmountSum",
+    paid: "cdAmountPaidSum",
+    unpaid: "cdUnpaidBalanceSum",
+  });
+}
+
+function renderJapanDepositsTable() {
+  renderCarDepositTable(japanDepositsBody, state.carJapanDeposits, "japan-deposits", {
+    total: "jdTotalAmountSum",
+    paid: "jdAmountPaidSum",
+    unpaid: "jdUnpaidBalanceSum",
+  });
+}
+
+function renderClearanceCostsTable() {
+  if (!clearanceCostsBody) return;
+  const rows = sortRowsLatestFirst(state.carClearanceCosts || []);
+  const amountSumEl = document.getElementById("ccAmountSum");
+  if (!rows.length) {
+    clearanceCostsBody.innerHTML = '<tr><td colspan="5" class="empty">No records.</td></tr>';
+    if (amountSumEl) amountSumEl.textContent = currency(0);
+    return;
+  }
+  let sumAmount = 0;
+  clearanceCostsBody.innerHTML = rows
+    .map((row, idx) => {
+      const amount = Number(row.amount || 0);
+      sumAmount += amount;
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description || "")}</td>
+        <td>${currency(amount)}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="clearance-costs" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="clearance-costs" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  if (amountSumEl) amountSumEl.textContent = currency(sumAmount);
+}
+
 function chickenSaleBundledFeedCellsHtml(row, isOwnerInventoryRow) {
   if (isOwnerInventoryRow) {
     return "<td>—</td><td>—</td><td>—</td><td>—</td>";
@@ -8506,6 +8693,9 @@ function showPage(page) {
     renderWeighBridgeTable();
     scheduleWeighBridgeMidnightRefresh();
   }
+  if (page === "customer-deposits") renderCustomerDepositsTable();
+  if (page === "japan-deposits") renderJapanDepositsTable();
+  if (page === "clearance-costs") renderClearanceCostsTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
     initCalcChickenFormDefaults();
@@ -8699,6 +8889,20 @@ async function onActiveMeterBillRecipientChange(recipientId) {
   if (state.currentPage) showPage(state.currentPage);
 }
 
+async function loadCarImportsTenantData() {
+  const outcomes = await Promise.allSettled([
+    api("/api/car-customer-deposits"),
+    api("/api/car-japan-deposits"),
+    api("/api/car-clearance-costs"),
+  ]);
+  state.carCustomerDeposits = outcomes[0].status === "fulfilled" ? outcomes[0].value : [];
+  state.carJapanDeposits = outcomes[1].status === "fulfilled" ? outcomes[1].value : [];
+  state.carClearanceCosts = outcomes[2].status === "fulfilled" ? outcomes[2].value : [];
+  renderCustomerDepositsTable();
+  renderJapanDepositsTable();
+  renderClearanceCostsTable();
+}
+
 async function loadBillsTenantData() {
   if (meterBillRecipientsTenantEnabled()) {
     await loadMeterBillRecipients();
@@ -8819,6 +9023,10 @@ async function onActiveLotChange(lotId) {
 async function loadAllData() {
   if (isBillsTenant()) {
     await loadBillsTenantData();
+    return;
+  }
+  if (isCarImportsTenant()) {
+    await loadCarImportsTenantData();
     return;
   }
   await loadInventoryLots();
@@ -9601,6 +9809,30 @@ wireMoneyInputBlur(document.getElementById("weighBridgeUfarayKsh"));
 wireMoneyInputBlur(document.getElementById("weighBridgeAmanaKsh"));
 wireMoneyInputBlur(document.getElementById("pigsMoneyIn"));
 wireMoneyInputBlur(document.getElementById("pigsMoneyOut"));
+
+if (cdDateDisplay && cdDate && cdOpenCalendarBtn) {
+  wireDatePicker(cdDateDisplay, cdDate, cdOpenCalendarBtn);
+}
+if (jdDateDisplay && jdDate && jdOpenCalendarBtn) {
+  wireDatePicker(jdDateDisplay, jdDate, jdOpenCalendarBtn);
+}
+if (ccDateDisplay && ccDate && ccOpenCalendarBtn) {
+  wireDatePicker(ccDateDisplay, ccDate, ccOpenCalendarBtn);
+}
+document.getElementById("cdClearBtn")?.addEventListener("click", resetCustomerDepositsForm);
+document.getElementById("jdClearBtn")?.addEventListener("click", resetJapanDepositsForm);
+document.getElementById("ccClearBtn")?.addEventListener("click", resetClearanceCostsForm);
+["cdTotalAmount", "cdAmountPaid"].forEach((id) => {
+  const el = document.getElementById(id);
+  wireMoneyInputBlur(el);
+  el?.addEventListener("input", syncCustomerDepositUnpaidBalance);
+});
+["jdTotalAmount", "jdAmountPaid"].forEach((id) => {
+  const el = document.getElementById(id);
+  wireMoneyInputBlur(el);
+  el?.addEventListener("input", syncJapanDepositUnpaidBalance);
+});
+wireMoneyInputBlur(document.getElementById("ccAmount"));
 
 document.getElementById("mrMonth")?.addEventListener("change", () => renderMonthlyReport());
 document.getElementById("mrDownloadPdfBtn")?.addEventListener("click", () => {
@@ -11088,6 +11320,81 @@ weighBridgeForm?.addEventListener("submit", async (event) => {
   }
 });
 
+customerDepositsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = cdDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  syncCustomerDepositUnpaidBalance();
+  const totalAmount = parseMoneyFromInput(document.getElementById("cdTotalAmount")?.value) || 0;
+  const amountPaid = parseMoneyFromInput(document.getElementById("cdAmountPaid")?.value) || 0;
+  if (amountPaid > totalAmount) return alert("Amount paid cannot be more than total amount.");
+  const payload = { date: dateValue, total_amount: totalAmount, amount_paid: amountPaid };
+  try {
+    if (state.editCarCustomerDepositId) {
+      await api(`/api/car-customer-deposits/${state.editCarCustomerDepositId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api("/api/car-customer-deposits", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetCustomerDepositsForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+japanDepositsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = jdDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  syncJapanDepositUnpaidBalance();
+  const totalAmount = parseMoneyFromInput(document.getElementById("jdTotalAmount")?.value) || 0;
+  const amountPaid = parseMoneyFromInput(document.getElementById("jdAmountPaid")?.value) || 0;
+  if (amountPaid > totalAmount) return alert("Amount paid cannot be more than total amount.");
+  const payload = { date: dateValue, total_amount: totalAmount, amount_paid: amountPaid };
+  try {
+    if (state.editCarJapanDepositId) {
+      await api(`/api/car-japan-deposits/${state.editCarJapanDepositId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api("/api/car-japan-deposits", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetJapanDepositsForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+clearanceCostsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = ccDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  const payload = {
+    date: dateValue,
+    description: String(document.getElementById("ccDescription")?.value || "").trim(),
+    amount: parseMoneyFromInput(document.getElementById("ccAmount")?.value) || 0,
+  };
+  try {
+    if (state.editCarClearanceCostId) {
+      await api(`/api/car-clearance-costs/${state.editCarClearanceCostId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api("/api/car-clearance-costs", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetClearanceCostsForm();
+    await loadAllData();
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
 salesBagsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = sbDateDisplay.value.trim();
@@ -12540,6 +12847,107 @@ weighBridgeBody?.addEventListener("click", async (event) => {
     if (!window.confirm("Delete this entry?")) return;
     try {
       await api(`/api/weigh-bridge/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+customerDepositsBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "customer-deposits") return;
+  const row = state.carCustomerDeposits.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editCarCustomerDepositId = row.id;
+    if (cdDate) cdDate.value = toIsoDate(row.date);
+    if (cdDateDisplay) cdDateDisplay.value = formatDateDMY(row.date);
+    const totalEl = document.getElementById("cdTotalAmount");
+    const paidEl = document.getElementById("cdAmountPaid");
+    if (totalEl) totalEl.value = formatMoneyForInput(row.total_amount ?? 0);
+    if (paidEl) paidEl.value = formatMoneyForInput(row.amount_paid ?? 0);
+    syncCustomerDepositUnpaidBalance();
+    const saveBtn = document.getElementById("cdSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    document.getElementById("page-customer-deposits")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/car-customer-deposits/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+japanDepositsBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "japan-deposits") return;
+  const row = state.carJapanDeposits.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editCarJapanDepositId = row.id;
+    if (jdDate) jdDate.value = toIsoDate(row.date);
+    if (jdDateDisplay) jdDateDisplay.value = formatDateDMY(row.date);
+    const totalEl = document.getElementById("jdTotalAmount");
+    const paidEl = document.getElementById("jdAmountPaid");
+    if (totalEl) totalEl.value = formatMoneyForInput(row.total_amount ?? 0);
+    if (paidEl) paidEl.value = formatMoneyForInput(row.amount_paid ?? 0);
+    syncJapanDepositUnpaidBalance();
+    const saveBtn = document.getElementById("jdSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    document.getElementById("page-japan-deposits")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/car-japan-deposits/${id}`, { method: "DELETE" });
+      await loadAllData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
+
+clearanceCostsBody?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  const action = target.dataset.action;
+  const kind = target.dataset.kind;
+  if (!id || !action || kind !== "clearance-costs") return;
+  const row = state.carClearanceCosts.find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editCarClearanceCostId = row.id;
+    if (ccDate) ccDate.value = toIsoDate(row.date);
+    if (ccDateDisplay) ccDateDisplay.value = formatDateDMY(row.date);
+    const descEl = document.getElementById("ccDescription");
+    const amountEl = document.getElementById("ccAmount");
+    if (descEl) descEl.value = row.description || "";
+    if (amountEl) amountEl.value = formatMoneyForInput(row.amount ?? 0);
+    const saveBtn = document.getElementById("ccSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    document.getElementById("page-clearance-costs")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this entry?")) return;
+    try {
+      await api(`/api/car-clearance-costs/${id}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
