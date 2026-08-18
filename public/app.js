@@ -7922,30 +7922,88 @@ function renderWeighBridgeTable() {
   }
 }
 
-function syncCarDepositUnpaidBalance(totalEl, paidEl, unpaidEl) {
+function syncCustomerDepositUnpaidBalance() {
+  const totalEl = document.getElementById("cdTotalAmount");
+  const paidEl = document.getElementById("cdAmountPaid");
+  const unpaidEl = document.getElementById("cdUnpaidBalance");
   const total = Number.isFinite(parseMoneyFromInput(totalEl?.value))
     ? parseMoneyFromInput(totalEl.value)
     : 0;
-  const paid = Number.isFinite(parseMoneyFromInput(paidEl?.value))
+  const thisPaid = Number.isFinite(parseMoneyFromInput(paidEl?.value))
     ? parseMoneyFromInput(paidEl.value)
     : 0;
-  if (unpaidEl) unpaidEl.value = formatMoneyForInput(Math.max(0, roundMoney(total - paid)));
-}
-
-function syncCustomerDepositUnpaidBalance() {
-  syncCarDepositUnpaidBalance(
-    document.getElementById("cdTotalAmount"),
-    document.getElementById("cdAmountPaid"),
-    document.getElementById("cdUnpaidBalance")
-  );
+  let priorPaid = 0;
+  for (const row of state.carCustomerDeposits || []) {
+    if (
+      state.editCarCustomerDepositId != null &&
+      String(row.id) === String(state.editCarCustomerDepositId)
+    ) {
+      continue;
+    }
+    priorPaid += Number(row.amount_paid || 0);
+  }
+  if (unpaidEl) {
+    unpaidEl.value = formatMoneyForInput(Math.max(0, roundMoney(total - priorPaid - thisPaid)));
+  }
 }
 
 function syncJapanDepositUnpaidBalance() {
-  syncCarDepositUnpaidBalance(
-    document.getElementById("jdTotalAmount"),
-    document.getElementById("jdAmountPaid"),
-    document.getElementById("jdUnpaidBalance")
+  const totalEl = document.getElementById("jdTotalAmount");
+  const paidEl = document.getElementById("jdAmountPaid");
+  const unpaidEl = document.getElementById("jdUnpaidBalance");
+  const total = Number.isFinite(parseMoneyFromInput(totalEl?.value))
+    ? parseMoneyFromInput(totalEl.value)
+    : 0;
+  const thisPaid = Number.isFinite(parseMoneyFromInput(paidEl?.value))
+    ? parseMoneyFromInput(paidEl.value)
+    : 0;
+  let priorPaid = 0;
+  for (const row of state.carJapanDeposits || []) {
+    if (
+      state.editCarJapanDepositId != null &&
+      String(row.id) === String(state.editCarJapanDepositId)
+    ) {
+      continue;
+    }
+    priorPaid += Number(row.amount_paid || 0);
+  }
+  if (unpaidEl) {
+    unpaidEl.value = formatMoneyForInput(Math.max(0, roundMoney(total - priorPaid - thisPaid)));
+  }
+}
+
+/** Constant Total Amount from the first (oldest) deposit entry — not summed across rows. */
+function getCarDepositConstantTotal(entries) {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  const oldest = entries.reduce((best, row) =>
+    Number(row.id) < Number(best.id) ? row : best
   );
+  const n = Number(oldest.total_amount);
+  return Number.isFinite(n) ? roundMoney(n) : null;
+}
+
+function applyCustomerDepositTotalAutofill() {
+  const totalEl = document.getElementById("cdTotalAmount");
+  if (!totalEl || state.editCarCustomerDepositId != null) return;
+  const constant = getCarDepositConstantTotal(state.carCustomerDeposits);
+  if (constant != null) {
+    totalEl.value = formatMoneyForInput(constant);
+  } else {
+    totalEl.value = "0";
+  }
+  syncCustomerDepositUnpaidBalance();
+}
+
+function applyJapanDepositTotalAutofill() {
+  const totalEl = document.getElementById("jdTotalAmount");
+  if (!totalEl || state.editCarJapanDepositId != null) return;
+  const constant = getCarDepositConstantTotal(state.carJapanDeposits);
+  if (constant != null) {
+    totalEl.value = formatMoneyForInput(constant);
+  } else {
+    totalEl.value = "0";
+  }
+  syncJapanDepositUnpaidBalance();
 }
 
 function resetCustomerDepositsForm() {
@@ -7954,12 +8012,9 @@ function resetCustomerDepositsForm() {
   state.editCarCustomerDepositId = null;
   if (cdDate) cdDate.value = "";
   if (cdDateDisplay) cdDateDisplay.value = "";
-  const totalEl = document.getElementById("cdTotalAmount");
   const paidEl = document.getElementById("cdAmountPaid");
-  const unpaidEl = document.getElementById("cdUnpaidBalance");
-  if (totalEl) totalEl.value = "0";
   if (paidEl) paidEl.value = "0";
-  if (unpaidEl) unpaidEl.value = "0";
+  applyCustomerDepositTotalAutofill();
   const saveBtn = document.getElementById("cdSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
@@ -7970,12 +8025,9 @@ function resetJapanDepositsForm() {
   state.editCarJapanDepositId = null;
   if (jdDate) jdDate.value = "";
   if (jdDateDisplay) jdDateDisplay.value = "";
-  const totalEl = document.getElementById("jdTotalAmount");
   const paidEl = document.getElementById("jdAmountPaid");
-  const unpaidEl = document.getElementById("jdUnpaidBalance");
-  if (totalEl) totalEl.value = "0";
   if (paidEl) paidEl.value = "0";
-  if (unpaidEl) unpaidEl.value = "0";
+  applyJapanDepositTotalAutofill();
   const saveBtn = document.getElementById("jdSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
@@ -7998,27 +8050,31 @@ function renderCarDepositTable(bodyEl, rows, kind, sumIds) {
   const totalAmountEl = document.getElementById(sumIds.total);
   const amountPaidEl = document.getElementById(sumIds.paid);
   const unpaidEl = document.getElementById(sumIds.unpaid);
+  const constantTotal = getCarDepositConstantTotal(sorted);
   if (!sorted.length) {
     bodyEl.innerHTML = '<tr><td colspan="6" class="empty">No records.</td></tr>';
-    if (totalAmountEl) totalAmountEl.textContent = currency(0);
+    if (totalAmountEl) totalAmountEl.textContent = "—";
     if (amountPaidEl) amountPaidEl.textContent = currency(0);
     if (unpaidEl) unpaidEl.textContent = currency(0);
     return;
   }
-  let sumTotal = 0;
   let sumPaid = 0;
-  let sumUnpaid = 0;
+  const unpaidById = new Map();
+  const chronological = [...sorted].sort((a, b) => Number(a.id) - Number(b.id));
+  let runningPaid = 0;
+  const baseTotal = constantTotal != null ? constantTotal : 0;
+  for (const row of chronological) {
+    runningPaid += Number(row.amount_paid || 0);
+    unpaidById.set(row.id, roundMoney(Math.max(0, baseTotal - runningPaid)));
+  }
   bodyEl.innerHTML = sorted
     .map((row, idx) => {
-      const totalAmount = Number(row.total_amount || 0);
+      const totalAmount =
+        constantTotal != null ? constantTotal : Number(row.total_amount || 0);
       const amountPaid = Number(row.amount_paid || 0);
       const unpaid =
-        row.unpaid_balance != null
-          ? Number(row.unpaid_balance)
-          : roundMoney(Math.max(0, totalAmount - amountPaid));
-      sumTotal += totalAmount;
+        unpaidById.get(row.id) ?? roundMoney(Math.max(0, totalAmount - amountPaid));
       sumPaid += amountPaid;
-      sumUnpaid += unpaid;
       return `
       <tr>
         <td>${idx + 1}</td>
@@ -8035,9 +8091,12 @@ function renderCarDepositTable(bodyEl, rows, kind, sumIds) {
       </tr>`;
     })
     .join("");
-  if (totalAmountEl) totalAmountEl.textContent = currency(sumTotal);
+  // Total Amount is constant — do not sum it. Grand totals: Amount Paid + Unpaid Balance only.
+  if (totalAmountEl) totalAmountEl.textContent = "—";
   if (amountPaidEl) amountPaidEl.textContent = currency(sumPaid);
-  if (unpaidEl) unpaidEl.textContent = currency(sumUnpaid);
+  const grandUnpaid =
+    constantTotal != null ? roundMoney(Math.max(0, constantTotal - sumPaid)) : 0;
+  if (unpaidEl) unpaidEl.textContent = currency(grandUnpaid);
 }
 
 function renderCustomerDepositsTable() {
@@ -8901,6 +8960,8 @@ async function loadCarImportsTenantData() {
   renderCustomerDepositsTable();
   renderJapanDepositsTable();
   renderClearanceCostsTable();
+  if (state.editCarCustomerDepositId == null) applyCustomerDepositTotalAutofill();
+  if (state.editCarJapanDepositId == null) applyJapanDepositTotalAutofill();
 }
 
 async function loadBillsTenantData() {
@@ -11324,10 +11385,34 @@ customerDepositsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = cdDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  syncCustomerDepositUnpaidBalance();
-  const totalAmount = parseMoneyFromInput(document.getElementById("cdTotalAmount")?.value) || 0;
+  const constant = getCarDepositConstantTotal(state.carCustomerDeposits);
+  const oldestId =
+    state.carCustomerDeposits?.length > 0
+      ? Math.min(...state.carCustomerDeposits.map((x) => Number(x.id)))
+      : null;
+  const editingOldest =
+    state.editCarCustomerDepositId != null &&
+    oldestId != null &&
+    Number(state.editCarCustomerDepositId) === oldestId;
+  let totalAmount = parseMoneyFromInput(document.getElementById("cdTotalAmount")?.value) || 0;
+  // Keep Total Amount constant after the first entry (unless editing the first entry).
+  if (constant != null && !editingOldest) {
+    totalAmount = constant;
+  }
   const amountPaid = parseMoneyFromInput(document.getElementById("cdAmountPaid")?.value) || 0;
-  if (amountPaid > totalAmount) return alert("Amount paid cannot be more than total amount.");
+  let priorPaid = 0;
+  for (const row of state.carCustomerDeposits || []) {
+    if (
+      state.editCarCustomerDepositId != null &&
+      String(row.id) === String(state.editCarCustomerDepositId)
+    ) {
+      continue;
+    }
+    priorPaid += Number(row.amount_paid || 0);
+  }
+  if (priorPaid + amountPaid > totalAmount) {
+    return alert("Amount paid cannot be more than the unpaid balance on the total amount.");
+  }
   const payload = { date: dateValue, total_amount: totalAmount, amount_paid: amountPaid };
   try {
     if (state.editCarCustomerDepositId) {
@@ -11349,10 +11434,33 @@ japanDepositsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const dateValue = jdDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  syncJapanDepositUnpaidBalance();
-  const totalAmount = parseMoneyFromInput(document.getElementById("jdTotalAmount")?.value) || 0;
+  const constant = getCarDepositConstantTotal(state.carJapanDeposits);
+  const oldestId =
+    state.carJapanDeposits?.length > 0
+      ? Math.min(...state.carJapanDeposits.map((x) => Number(x.id)))
+      : null;
+  const editingOldest =
+    state.editCarJapanDepositId != null &&
+    oldestId != null &&
+    Number(state.editCarJapanDepositId) === oldestId;
+  let totalAmount = parseMoneyFromInput(document.getElementById("jdTotalAmount")?.value) || 0;
+  if (constant != null && !editingOldest) {
+    totalAmount = constant;
+  }
   const amountPaid = parseMoneyFromInput(document.getElementById("jdAmountPaid")?.value) || 0;
-  if (amountPaid > totalAmount) return alert("Amount paid cannot be more than total amount.");
+  let priorPaid = 0;
+  for (const row of state.carJapanDeposits || []) {
+    if (
+      state.editCarJapanDepositId != null &&
+      String(row.id) === String(state.editCarJapanDepositId)
+    ) {
+      continue;
+    }
+    priorPaid += Number(row.amount_paid || 0);
+  }
+  if (priorPaid + amountPaid > totalAmount) {
+    return alert("Amount paid cannot be more than the unpaid balance on the total amount.");
+  }
   const payload = { date: dateValue, total_amount: totalAmount, amount_paid: amountPaid };
   try {
     if (state.editCarJapanDepositId) {

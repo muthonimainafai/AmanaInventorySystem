@@ -2462,7 +2462,7 @@
         <div id="page-customer-deposits" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Customer Deposits</h3>
-            <p class="field-hint">Unpaid balance is calculated automatically as Total Amount − Amount Paid.</p>
+            <p class="field-hint">Total Amount is set once and reused on later entries. Unpaid Balance = Total Amount − Amount Paid. Grand totals are for Amount Paid and Unpaid Balance only.</p>
             <form id="customer-deposits-form">
               <div class="grid">
                 <label class="date-field">
@@ -2509,7 +2509,7 @@
                 <tfoot>
                   <tr>
                     <th colspan="2">Grand Total</th>
-                    <th id="cdTotalAmountSum">0</th>
+                    <th id="cdTotalAmountSum">—</th>
                     <th id="cdAmountPaidSum">0</th>
                     <th id="cdUnpaidBalanceSum">0</th>
                     <th>—</th>
@@ -2523,7 +2523,7 @@
         <div id="page-japan-deposits" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Japan Deposits</h3>
-            <p class="field-hint">Unpaid balance is calculated automatically as Total Amount − Amount Paid.</p>
+            <p class="field-hint">Total Amount is set once and reused on later entries. Unpaid Balance = Total Amount − Amount Paid. Grand totals are for Amount Paid and Unpaid Balance only.</p>
             <form id="japan-deposits-form">
               <div class="grid">
                 <label class="date-field">
@@ -2570,7 +2570,7 @@
                 <tfoot>
                   <tr>
                     <th colspan="2">Grand Total</th>
-                    <th id="jdTotalAmountSum">0</th>
+                    <th id="jdTotalAmountSum">—</th>
                     <th id="jdAmountPaidSum">0</th>
                     <th id="jdUnpaidBalanceSum">0</th>
                     <th>—</th>
@@ -3176,6 +3176,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-18-car-imports-crud"></script>
+    <script src="app.js?v=2026-08-18-deposit-constant-total"></script>
   </body>
 </html>
