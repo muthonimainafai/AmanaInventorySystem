@@ -219,6 +219,25 @@
           <p class="field-hint" id="inventoryLotHint">Records on Rose Inventory, Sales, Expenses, and Nahashon Records are saved per lot. Switch lots to view or add entries for a different batch.</p>
         </div>
 
+        <div id="carConsigneeBar" class="card inventory-lot-bar hidden">
+          <div class="inventory-lot-toolbar">
+            <label class="inventory-lot-select-field">
+              <span>Consignee</span>
+              <select id="carConsigneeSelect" aria-label="Select consignee"></select>
+            </label>
+            <button type="button" id="carConsigneeAddBtn" class="secondary">Add consignee</button>
+            <div id="carConsigneeNewWrap" class="inventory-lot-new-wrap hidden">
+              <label>
+                Consignee name
+                <input type="text" id="carConsigneeNewName" placeholder="e.g. John Kamau" />
+              </label>
+              <button type="button" id="carConsigneeSaveNewBtn">Save</button>
+              <button type="button" class="secondary" id="carConsigneeCancelNewBtn">Cancel</button>
+            </div>
+          </div>
+          <p class="field-hint" id="carConsigneeHint">Each consignee has their own Customer Deposits, Japan Deposits, and Clearance Costs. Add a consignee name, then enter the car make and model on each page.</p>
+        </div>
+
         <div id="page-inventory" class="app-page">
           <div class="card">
           <form id="inventory-form">
@@ -2465,6 +2484,10 @@
             <p class="field-hint">Total Amount is set once and reused on later entries. Unpaid Balance = Total Amount − Amount Paid. Grand totals are for Amount Paid and Unpaid Balance only.</p>
             <form id="customer-deposits-form">
               <div class="grid">
+                <label>
+                  Car make and model
+                  <input type="text" id="cdCarMakeModel" placeholder="e.g. Toyota Premio 2018" autocomplete="off" />
+                </label>
                 <label class="date-field">
                   <span class="date-field-label">Date (DD/MM/YYYY)</span>
                   <div class="date-picker-wrap">
@@ -2526,6 +2549,10 @@
             <p class="field-hint">Total Amount is set once and reused on later entries. Unpaid Balance = Total Amount − Amount Paid. Grand totals are for Amount Paid and Unpaid Balance only.</p>
             <form id="japan-deposits-form">
               <div class="grid">
+                <label>
+                  Car make and model
+                  <input type="text" id="jdCarMakeModel" placeholder="e.g. Toyota Premio 2018" autocomplete="off" />
+                </label>
                 <label class="date-field">
                   <span class="date-field-label">Date (DD/MM/YYYY)</span>
                   <div class="date-picker-wrap">
@@ -2587,6 +2614,10 @@
             <p class="field-hint">Record clearance cost lines. The Amount column total is shown in the footer.</p>
             <form id="clearance-costs-form">
               <div class="grid">
+                <label>
+                  Car make and model
+                  <input type="text" id="ccCarMakeModel" placeholder="e.g. Toyota Premio 2018" autocomplete="off" />
+                </label>
                 <label class="date-field">
                   <span class="date-field-label">Date (DD/MM/YYYY)</span>
                   <div class="date-picker-wrap">
@@ -3176,6 +3207,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-18-deposit-constant-total"></script>
+    <script src="app.js?v=2026-08-19-car-consignees"></script>
   </body>
 </html>

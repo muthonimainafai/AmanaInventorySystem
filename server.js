@@ -729,6 +729,43 @@ async function resolveMeterBillRecipientIdForRequest(req) {
   return recipientId;
 }
 
+async function migrateCarImportsConsigneeIds() {
+  const tables = ["car_customer_deposits", "car_japan_deposits", "car_clearance_costs"];
+  let orphanCount = 0;
+  for (const table of tables) {
+    try {
+      const row = await get(`SELECT COUNT(*) AS c FROM ${table} WHERE consignee_id IS NULL OR consignee_id = 0`);
+      orphanCount += Number(row?.c || 0);
+    } catch (_err) {
+      /* table may not exist yet on first boot */
+    }
+  }
+  if (orphanCount <= 0) return;
+  let consignee = await get("SELECT id FROM car_consignees ORDER BY id ASC LIMIT 1");
+  if (!consignee) {
+    const nowIso = new Date().toISOString();
+    const result = await run(
+      "INSERT INTO car_consignees (name, car_make_model, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ["Default", "", "owner", nowIso, nowIso]
+    );
+    consignee = { id: result.lastID };
+  }
+  for (const table of tables) {
+    await run(`UPDATE ${table} SET consignee_id = ? WHERE consignee_id IS NULL OR consignee_id = 0`, [
+      consignee.id,
+    ]).catch(() => {});
+  }
+}
+
+async function resolveCarConsigneeIdForRequest(req) {
+  const raw = req.query?.consignee_id ?? req.body?.consignee_id;
+  const consigneeId = parseLotIdParam(raw);
+  if (!consigneeId) return null;
+  const row = await get("SELECT id FROM car_consignees WHERE id = ?", [consigneeId]);
+  if (!row) return null;
+  return consigneeId;
+}
+
 /** One-time: accumulated_profit = total profit from bags recorded as sold (historical sales Ã— current margin). */
 async function migrateAccumulatedProfitFromSalesIfNeeded() {
   const row = await get("SELECT value FROM app_meta WHERE key = ?", ["accumulated_profit_v2"]);
@@ -1370,12 +1407,24 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS car_consignees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      car_make_model TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS car_customer_deposits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
       total_amount REAL NOT NULL DEFAULT 0,
       amount_paid REAL NOT NULL DEFAULT 0,
       unpaid_balance REAL NOT NULL DEFAULT 0,
+      consignee_id INTEGER NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -1389,6 +1438,7 @@ async function initDb() {
       total_amount REAL NOT NULL DEFAULT 0,
       amount_paid REAL NOT NULL DEFAULT 0,
       unpaid_balance REAL NOT NULL DEFAULT 0,
+      consignee_id INTEGER NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -1401,11 +1451,17 @@ async function initDb() {
       date TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       amount REAL NOT NULL DEFAULT 0,
+      consignee_id INTEGER NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
+
+  await run(`ALTER TABLE car_customer_deposits ADD COLUMN consignee_id INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE car_japan_deposits ADD COLUMN consignee_id INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE car_clearance_costs ADD COLUMN consignee_id INTEGER NOT NULL DEFAULT 0`).catch(() => {});
+  await migrateCarImportsConsigneeIds();
 
   await run(`
     CREATE TABLE IF NOT EXISTS monthly_records (
@@ -6132,18 +6188,66 @@ function requireCarImportsTenant(res) {
   return true;
 }
 
+app.get("/api/car-consignees", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  await migrateCarImportsConsigneeIds();
+  const rows = await all("SELECT * FROM car_consignees ORDER BY id ASC");
+  res.json(rows);
+});
+
+app.post("/api/car-consignees", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Consignee name is required." });
+  const carMakeModel = String(req.body?.car_make_model || "").trim();
+  const nowIso = new Date().toISOString();
+  const result = await run(
+    "INSERT INTO car_consignees (name, car_make_model, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    [name, carMakeModel, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true, id: result.lastID, name, car_make_model: carMakeModel });
+});
+
+app.put("/api/car-consignees/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireCarImportsTenant(res)) return;
+  const id = Number(req.params.id);
+  const existing = await get("SELECT * FROM car_consignees WHERE id = ?", [id]);
+  if (!existing) return res.status(404).json({ error: "Consignee not found." });
+  const name =
+    req.body?.name !== undefined ? String(req.body.name || "").trim() : String(existing.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Consignee name is required." });
+  const carMakeModel =
+    req.body?.car_make_model !== undefined
+      ? String(req.body.car_make_model || "").trim()
+      : String(existing.car_make_model || "").trim();
+  await run("UPDATE car_consignees SET name = ?, car_make_model = ?, updated_at = ? WHERE id = ?", [
+    name,
+    carMakeModel,
+    new Date().toISOString(),
+    id,
+  ]);
+  res.json({ ok: true, id, name, car_make_model: carMakeModel });
+});
+
 function mountCarDepositApi(routeSlug, tableName) {
   const base = `/api/${routeSlug}`;
   app.get(base, auth, allowRoles("owner", "employee"), async (req, res) => {
     if (!requireCarImportsTenant(res)) return;
+    const consigneeId = await resolveCarConsigneeIdForRequest(req);
+    if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
     const rows =
       req.user.role === "owner"
-        ? await all(`SELECT * FROM ${tableName} ORDER BY id DESC`)
-        : await all(`SELECT * FROM ${tableName} WHERE created_by = ? ORDER BY id DESC`, [req.user.username]);
+        ? await all(`SELECT * FROM ${tableName} WHERE consignee_id = ? ORDER BY id DESC`, [consigneeId])
+        : await all(
+            `SELECT * FROM ${tableName} WHERE consignee_id = ? AND created_by = ? ORDER BY id DESC`,
+            [consigneeId, req.user.username]
+          );
     res.json(rows);
   });
   app.post(base, auth, allowRoles("owner", "employee"), async (req, res) => {
     if (!requireCarImportsTenant(res)) return;
+    const consigneeId = await resolveCarConsigneeIdForRequest(req);
+    if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
     const p = req.body || {};
     const dateCanon = normalizeInventoryDate(p.date);
     if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -6160,19 +6264,25 @@ function mountCarDepositApi(routeSlug, tableName) {
     const unpaidBalance = roundMoney(Math.max(0, totalAmount - amountPaid));
     const nowIso = new Date().toISOString();
     await run(
-      `INSERT INTO ${tableName} (date, total_amount, amount_paid, unpaid_balance, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [dateCanon, totalAmount, amountPaid, unpaidBalance, req.user.username, nowIso, nowIso]
+      `INSERT INTO ${tableName} (date, total_amount, amount_paid, unpaid_balance, consignee_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [dateCanon, totalAmount, amountPaid, unpaidBalance, consigneeId, req.user.username, nowIso, nowIso]
     );
     res.json({ ok: true });
   });
   app.put(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
     if (!requireCarImportsTenant(res)) return;
+    const consigneeId = await resolveCarConsigneeIdForRequest(req);
+    if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
     const id = Number(req.params.id);
     const existing =
       req.user.role === "owner"
-        ? await get(`SELECT * FROM ${tableName} WHERE id = ?`, [id])
-        : await get(`SELECT * FROM ${tableName} WHERE id = ? AND created_by = ?`, [id, req.user.username]);
+        ? await get(`SELECT * FROM ${tableName} WHERE id = ? AND consignee_id = ?`, [id, consigneeId])
+        : await get(`SELECT * FROM ${tableName} WHERE id = ? AND consignee_id = ? AND created_by = ?`, [
+            id,
+            consigneeId,
+            req.user.username,
+          ]);
     if (!existing) return res.status(404).json({ error: "Record not found." });
     const p = req.body || {};
     const dateCanon = normalizeInventoryDate(p.date);
@@ -6189,18 +6299,24 @@ function mountCarDepositApi(routeSlug, tableName) {
     }
     const unpaidBalance = roundMoney(Math.max(0, totalAmount - amountPaid));
     await run(
-      `UPDATE ${tableName} SET date = ?, total_amount = ?, amount_paid = ?, unpaid_balance = ?, updated_at = ? WHERE id = ?`,
-      [dateCanon, totalAmount, amountPaid, unpaidBalance, new Date().toISOString(), id]
+      `UPDATE ${tableName} SET date = ?, total_amount = ?, amount_paid = ?, unpaid_balance = ?, updated_at = ? WHERE id = ? AND consignee_id = ?`,
+      [dateCanon, totalAmount, amountPaid, unpaidBalance, new Date().toISOString(), id, consigneeId]
     );
     res.json({ ok: true });
   });
   app.delete(`${base}/:id`, auth, allowRoles("owner", "employee"), async (req, res) => {
     if (!requireCarImportsTenant(res)) return;
+    const consigneeId = await resolveCarConsigneeIdForRequest(req);
+    if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
     const result =
       req.user.role === "owner"
-        ? await run(`DELETE FROM ${tableName} WHERE id = ?`, [Number(req.params.id)])
-        : await run(`DELETE FROM ${tableName} WHERE id = ? AND created_by = ?`, [
+        ? await run(`DELETE FROM ${tableName} WHERE id = ? AND consignee_id = ?`, [
             Number(req.params.id),
+            consigneeId,
+          ])
+        : await run(`DELETE FROM ${tableName} WHERE id = ? AND consignee_id = ? AND created_by = ?`, [
+            Number(req.params.id),
+            consigneeId,
             req.user.username,
           ]);
     if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
@@ -6213,15 +6329,22 @@ mountCarDepositApi("car-japan-deposits", "car_japan_deposits");
 
 app.get("/api/car-clearance-costs", auth, allowRoles("owner", "employee"), async (req, res) => {
   if (!requireCarImportsTenant(res)) return;
+  const consigneeId = await resolveCarConsigneeIdForRequest(req);
+  if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
   const rows =
     req.user.role === "owner"
-      ? await all("SELECT * FROM car_clearance_costs ORDER BY id DESC")
-      : await all("SELECT * FROM car_clearance_costs WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+      ? await all("SELECT * FROM car_clearance_costs WHERE consignee_id = ? ORDER BY id DESC", [consigneeId])
+      : await all("SELECT * FROM car_clearance_costs WHERE consignee_id = ? AND created_by = ? ORDER BY id DESC", [
+          consigneeId,
+          req.user.username,
+        ]);
   res.json(rows);
 });
 
 app.post("/api/car-clearance-costs", auth, allowRoles("owner", "employee"), async (req, res) => {
   if (!requireCarImportsTenant(res)) return;
+  const consigneeId = await resolveCarConsigneeIdForRequest(req);
+  if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -6234,20 +6357,26 @@ app.post("/api/car-clearance-costs", auth, allowRoles("owner", "employee"), asyn
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO car_clearance_costs (date, description, amount, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, amount, req.user.username, nowIso, nowIso]
+    `INSERT INTO car_clearance_costs (date, description, amount, consignee_id, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, amount, consigneeId, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
 
 app.put("/api/car-clearance-costs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   if (!requireCarImportsTenant(res)) return;
+  const consigneeId = await resolveCarConsigneeIdForRequest(req);
+  if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
   const id = Number(req.params.id);
   const existing =
     req.user.role === "owner"
-      ? await get("SELECT * FROM car_clearance_costs WHERE id = ?", [id])
-      : await get("SELECT * FROM car_clearance_costs WHERE id = ? AND created_by = ?", [id, req.user.username]);
+      ? await get("SELECT * FROM car_clearance_costs WHERE id = ? AND consignee_id = ?", [id, consigneeId])
+      : await get("SELECT * FROM car_clearance_costs WHERE id = ? AND consignee_id = ? AND created_by = ?", [
+          id,
+          consigneeId,
+          req.user.username,
+        ]);
   if (!existing) return res.status(404).json({ error: "Record not found." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
@@ -6260,19 +6389,25 @@ app.put("/api/car-clearance-costs/:id", auth, allowRoles("owner", "employee"), a
     return res.status(400).json({ error: err.message });
   }
   await run(
-    `UPDATE car_clearance_costs SET date = ?, description = ?, amount = ?, updated_at = ? WHERE id = ?`,
-    [dateCanon, description, amount, new Date().toISOString(), id]
+    `UPDATE car_clearance_costs SET date = ?, description = ?, amount = ?, updated_at = ? WHERE id = ? AND consignee_id = ?`,
+    [dateCanon, description, amount, new Date().toISOString(), id, consigneeId]
   );
   res.json({ ok: true });
 });
 
 app.delete("/api/car-clearance-costs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   if (!requireCarImportsTenant(res)) return;
+  const consigneeId = await resolveCarConsigneeIdForRequest(req);
+  if (consigneeId == null) return res.status(400).json({ error: "consignee_id is required." });
   const result =
     req.user.role === "owner"
-      ? await run("DELETE FROM car_clearance_costs WHERE id = ?", [Number(req.params.id)])
-      : await run("DELETE FROM car_clearance_costs WHERE id = ? AND created_by = ?", [
+      ? await run("DELETE FROM car_clearance_costs WHERE id = ? AND consignee_id = ?", [
           Number(req.params.id),
+          consigneeId,
+        ])
+      : await run("DELETE FROM car_clearance_costs WHERE id = ? AND consignee_id = ? AND created_by = ?", [
+          Number(req.params.id),
+          consigneeId,
           req.user.username,
         ]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });

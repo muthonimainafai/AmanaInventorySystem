@@ -111,6 +111,8 @@ const state = {
   editCarJapanDepositId: null,
   carClearanceCosts: [],
   editCarClearanceCostId: null,
+  carConsignees: [],
+  activeCarConsigneeId: null,
   waterBillsEntries: [],
   editWaterBillsId: null,
   electricityBillsEntries: [],
@@ -163,6 +165,46 @@ function isRecordsTenant() {
 
 function isCarImportsTenant() {
   return state.appInstance === "car-imports";
+}
+
+function carConsigneesTenantEnabled() {
+  return isCarImportsTenant();
+}
+
+function activeCarConsigneeStorageKey() {
+  return `amanaCarConsigneeId:${state.appInstance}`;
+}
+
+function persistActiveCarConsigneeId(consigneeId) {
+  if (!carConsigneesTenantEnabled() || !consigneeId) return;
+  sessionStorage.setItem(activeCarConsigneeStorageKey(), String(consigneeId));
+}
+
+function readPersistedActiveCarConsigneeId() {
+  const raw = sessionStorage.getItem(activeCarConsigneeStorageKey());
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function activeCarConsignee() {
+  return (state.carConsignees || []).find(
+    (c) => Number(c.id) === Number(state.activeCarConsigneeId)
+  );
+}
+
+function activeCarConsigneeName() {
+  const consignee = activeCarConsignee();
+  return consignee?.name || (state.activeCarConsigneeId ? `Consignee ${state.activeCarConsigneeId}` : "");
+}
+
+function carConsigneeApiQuery() {
+  if (!carConsigneesTenantEnabled() || !state.activeCarConsigneeId) return "";
+  return `?consignee_id=${encodeURIComponent(state.activeCarConsigneeId)}`;
+}
+
+function withActiveCarConsigneeId(payload) {
+  if (!carConsigneesTenantEnabled() || !state.activeCarConsigneeId) return payload;
+  return { ...payload, consignee_id: state.activeCarConsigneeId };
 }
 
 function isWaterBillsTenant() {
@@ -4942,6 +4984,7 @@ function showLoggedIn() {
   applyMeterBillsOwnerBalanceUi();
   updateInventoryLotBarUi();
   updateMeterBillRecipientBarUi();
+  updateCarConsigneeBarUi();
 }
 
 function showVehicleLoggedIn() {
@@ -8015,6 +8058,7 @@ function resetCustomerDepositsForm() {
   const paidEl = document.getElementById("cdAmountPaid");
   if (paidEl) paidEl.value = "0";
   applyCustomerDepositTotalAutofill();
+  syncCarMakeModelFieldsFromActiveConsignee();
   const saveBtn = document.getElementById("cdSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
@@ -8028,6 +8072,7 @@ function resetJapanDepositsForm() {
   const paidEl = document.getElementById("jdAmountPaid");
   if (paidEl) paidEl.value = "0";
   applyJapanDepositTotalAutofill();
+  syncCarMakeModelFieldsFromActiveConsignee();
   const saveBtn = document.getElementById("jdSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
@@ -8040,6 +8085,7 @@ function resetClearanceCostsForm() {
   if (ccDateDisplay) ccDateDisplay.value = "";
   const amountEl = document.getElementById("ccAmount");
   if (amountEl) amountEl.value = "0";
+  syncCarMakeModelFieldsFromActiveConsignee();
   const saveBtn = document.getElementById("ccSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
@@ -8676,6 +8722,13 @@ function showPage(page) {
     const baseTitle = PAGE_HEADINGS[page] || pageHeading.textContent || page;
     pageHeading.textContent = `${baseTitle} — ${activeMeterBillRecipientName()}`;
   }
+  if (
+    (page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs") &&
+    activeCarConsigneeName()
+  ) {
+    const baseTitle = PAGE_HEADINGS[page] || pageHeading.textContent || page;
+    pageHeading.textContent = `${baseTitle} — ${activeCarConsigneeName()}`;
+  }
   updateElectricityBillsMeterInfoUi();
   const lotScopedPages = new Set(["rose-inventory", "nahashon-records", "faith-expenses", "faith-sales", "balance"]);
   if (lotScopedPages.has(page) && inventoryLotsTenantEnabled() && activeLotName()) {
@@ -8948,11 +9001,130 @@ async function onActiveMeterBillRecipientChange(recipientId) {
   if (state.currentPage) showPage(state.currentPage);
 }
 
+async function loadCarConsignees() {
+  if (!carConsigneesTenantEnabled()) {
+    state.carConsignees = [];
+    state.activeCarConsigneeId = null;
+    updateCarConsigneeBarUi();
+    return;
+  }
+  try {
+    const rows = await api("/api/car-consignees");
+    state.carConsignees = Array.isArray(rows) ? rows : [];
+    let consigneeId = readPersistedActiveCarConsigneeId();
+    if (!state.carConsignees.some((c) => Number(c.id) === Number(consigneeId))) {
+      consigneeId = state.carConsignees[0]?.id ?? null;
+    }
+    state.activeCarConsigneeId = consigneeId;
+    if (consigneeId) persistActiveCarConsigneeId(consigneeId);
+  } catch (_error) {
+    state.carConsignees = [];
+    state.activeCarConsigneeId = null;
+  }
+  updateCarConsigneeBarUi();
+  syncCarMakeModelFieldsFromActiveConsignee();
+}
+
+function updateCarConsigneeBarUi() {
+  const bar = document.getElementById("carConsigneeBar");
+  const select = document.getElementById("carConsigneeSelect");
+  if (!bar || !select) return;
+  const enabled = carConsigneesTenantEnabled();
+  bar.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+  const current = String(state.activeCarConsigneeId || "");
+  select.innerHTML = "";
+  if (!(state.carConsignees || []).length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Add a consignee…";
+    select.appendChild(opt);
+  } else {
+    for (const consignee of state.carConsignees) {
+      const opt = document.createElement("option");
+      opt.value = String(consignee.id);
+      opt.textContent = consignee.name || `Consignee ${consignee.id}`;
+      select.appendChild(opt);
+    }
+  }
+  if (current && [...select.options].some((o) => o.value === current)) {
+    select.value = current;
+  } else if (select.options.length && select.options[0].value) {
+    select.value = select.options[0].value;
+    state.activeCarConsigneeId = Number(select.value);
+    persistActiveCarConsigneeId(state.activeCarConsigneeId);
+  } else {
+    state.activeCarConsigneeId = null;
+  }
+  const hintEl = document.getElementById("carConsigneeHint");
+  if (hintEl) {
+    hintEl.textContent = activeCarConsigneeName()
+      ? `Showing records for ${activeCarConsigneeName()}. Each consignee has separate Customer Deposits, Japan Deposits, and Clearance Costs.`
+      : "Add a consignee name to start. Each consignee has the three pages and their own car make and model.";
+  }
+}
+
+function syncCarMakeModelFieldsFromActiveConsignee() {
+  const value = String(activeCarConsignee()?.car_make_model || "");
+  for (const id of ["cdCarMakeModel", "jdCarMakeModel", "ccCarMakeModel"]) {
+    const el = document.getElementById(id);
+    if (el && document.activeElement !== el) el.value = value;
+  }
+}
+
+async function saveActiveCarConsigneeMakeModel(fromEl) {
+  if (!state.activeCarConsigneeId) return;
+  const value = String(fromEl?.value || "").trim();
+  for (const id of ["cdCarMakeModel", "jdCarMakeModel", "ccCarMakeModel"]) {
+    const el = document.getElementById(id);
+    if (el && el !== fromEl) el.value = value;
+  }
+  try {
+    const result = await api(`/api/car-consignees/${state.activeCarConsigneeId}`, {
+      method: "PUT",
+      body: JSON.stringify({ car_make_model: value }),
+    });
+    const consignee = activeCarConsignee();
+    if (consignee) consignee.car_make_model = result?.car_make_model ?? value;
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function onActiveCarConsigneeChange(consigneeId) {
+  const nextId = Number(consigneeId);
+  if (!Number.isFinite(nextId) || nextId <= 0) return;
+  state.activeCarConsigneeId = nextId;
+  persistActiveCarConsigneeId(nextId);
+  state.editCarCustomerDepositId = null;
+  state.editCarJapanDepositId = null;
+  state.editCarClearanceCostId = null;
+  resetCustomerDepositsForm();
+  resetJapanDepositsForm();
+  resetClearanceCostsForm();
+  updateCarConsigneeBarUi();
+  syncCarMakeModelFieldsFromActiveConsignee();
+  await loadCarImportsTenantData();
+  if (state.currentPage) showPage(state.currentPage);
+}
+
 async function loadCarImportsTenantData() {
+  await loadCarConsignees();
+  if (!state.activeCarConsigneeId) {
+    state.carCustomerDeposits = [];
+    state.carJapanDeposits = [];
+    state.carClearanceCosts = [];
+    renderCustomerDepositsTable();
+    renderJapanDepositsTable();
+    renderClearanceCostsTable();
+    syncCarMakeModelFieldsFromActiveConsignee();
+    return;
+  }
+  const q = carConsigneeApiQuery();
   const outcomes = await Promise.allSettled([
-    api("/api/car-customer-deposits"),
-    api("/api/car-japan-deposits"),
-    api("/api/car-clearance-costs"),
+    api(`/api/car-customer-deposits${q}`),
+    api(`/api/car-japan-deposits${q}`),
+    api(`/api/car-clearance-costs${q}`),
   ]);
   state.carCustomerDeposits = outcomes[0].status === "fulfilled" ? outcomes[0].value : [];
   state.carJapanDeposits = outcomes[1].status === "fulfilled" ? outcomes[1].value : [];
@@ -8960,6 +9132,7 @@ async function loadCarImportsTenantData() {
   renderCustomerDepositsTable();
   renderJapanDepositsTable();
   renderClearanceCostsTable();
+  syncCarMakeModelFieldsFromActiveConsignee();
   if (state.editCarCustomerDepositId == null) applyCustomerDepositTotalAutofill();
   if (state.editCarJapanDepositId == null) applyJapanDepositTotalAutofill();
 }
@@ -11383,8 +11556,10 @@ weighBridgeForm?.addEventListener("submit", async (event) => {
 
 customerDepositsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.activeCarConsigneeId) return alert("Add and select a consignee first.");
   const dateValue = cdDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  await saveActiveCarConsigneeMakeModel(document.getElementById("cdCarMakeModel"));
   const constant = getCarDepositConstantTotal(state.carCustomerDeposits);
   const oldestId =
     state.carCustomerDeposits?.length > 0
@@ -11413,10 +11588,15 @@ customerDepositsForm?.addEventListener("submit", async (event) => {
   if (priorPaid + amountPaid > totalAmount) {
     return alert("Amount paid cannot be more than the unpaid balance on the total amount.");
   }
-  const payload = { date: dateValue, total_amount: totalAmount, amount_paid: amountPaid };
+  const payload = withActiveCarConsigneeId({
+    date: dateValue,
+    total_amount: totalAmount,
+    amount_paid: amountPaid,
+  });
+  const q = carConsigneeApiQuery();
   try {
     if (state.editCarCustomerDepositId) {
-      await api(`/api/car-customer-deposits/${state.editCarCustomerDepositId}`, {
+      await api(`/api/car-customer-deposits/${state.editCarCustomerDepositId}${q}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -11432,8 +11612,10 @@ customerDepositsForm?.addEventListener("submit", async (event) => {
 
 japanDepositsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.activeCarConsigneeId) return alert("Add and select a consignee first.");
   const dateValue = jdDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
+  await saveActiveCarConsigneeMakeModel(document.getElementById("jdCarMakeModel"));
   const constant = getCarDepositConstantTotal(state.carJapanDeposits);
   const oldestId =
     state.carJapanDeposits?.length > 0
@@ -11461,10 +11643,15 @@ japanDepositsForm?.addEventListener("submit", async (event) => {
   if (priorPaid + amountPaid > totalAmount) {
     return alert("Amount paid cannot be more than the unpaid balance on the total amount.");
   }
-  const payload = { date: dateValue, total_amount: totalAmount, amount_paid: amountPaid };
+  const payload = withActiveCarConsigneeId({
+    date: dateValue,
+    total_amount: totalAmount,
+    amount_paid: amountPaid,
+  });
+  const q = carConsigneeApiQuery();
   try {
     if (state.editCarJapanDepositId) {
-      await api(`/api/car-japan-deposits/${state.editCarJapanDepositId}`, {
+      await api(`/api/car-japan-deposits/${state.editCarJapanDepositId}${q}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -11480,16 +11667,19 @@ japanDepositsForm?.addEventListener("submit", async (event) => {
 
 clearanceCostsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!state.activeCarConsigneeId) return alert("Add and select a consignee first.");
   const dateValue = ccDateDisplay?.value?.trim() || "";
   if (!isValidDMY(dateValue)) return alert("Date must be in DD/MM/YYYY format.");
-  const payload = {
+  await saveActiveCarConsigneeMakeModel(document.getElementById("ccCarMakeModel"));
+  const payload = withActiveCarConsigneeId({
     date: dateValue,
     description: String(document.getElementById("ccDescription")?.value || "").trim(),
     amount: parseMoneyFromInput(document.getElementById("ccAmount")?.value) || 0,
-  };
+  });
+  const q = carConsigneeApiQuery();
   try {
     if (state.editCarClearanceCostId) {
-      await api(`/api/car-clearance-costs/${state.editCarClearanceCostId}`, {
+      await api(`/api/car-clearance-costs/${state.editCarClearanceCostId}${q}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       });
@@ -12988,7 +13178,7 @@ customerDepositsBody?.addEventListener("click", async (event) => {
   if (action === "delete") {
     if (!window.confirm("Delete this entry?")) return;
     try {
-      await api(`/api/car-customer-deposits/${id}`, { method: "DELETE" });
+      await api(`/api/car-customer-deposits/${id}${carConsigneeApiQuery()}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
@@ -13022,7 +13212,7 @@ japanDepositsBody?.addEventListener("click", async (event) => {
   if (action === "delete") {
     if (!window.confirm("Delete this entry?")) return;
     try {
-      await api(`/api/car-japan-deposits/${id}`, { method: "DELETE" });
+      await api(`/api/car-japan-deposits/${id}${carConsigneeApiQuery()}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
@@ -13055,7 +13245,7 @@ clearanceCostsBody?.addEventListener("click", async (event) => {
   if (action === "delete") {
     if (!window.confirm("Delete this entry?")) return;
     try {
-      await api(`/api/car-clearance-costs/${id}`, { method: "DELETE" });
+      await api(`/api/car-clearance-costs/${id}${carConsigneeApiQuery()}`, { method: "DELETE" });
       await loadAllData();
     } catch (error) {
       alert(error.message);
@@ -13082,6 +13272,43 @@ document.getElementById("inventoryLotCancelNewBtn")?.addEventListener("click", (
 document.getElementById("meterBillRecipientSelect")?.addEventListener("change", (event) => {
   const value = event.target instanceof HTMLSelectElement ? event.target.value : "";
   if (value) onActiveMeterBillRecipientChange(value);
+});
+
+document.getElementById("carConsigneeSelect")?.addEventListener("change", (event) => {
+  const value = event.target instanceof HTMLSelectElement ? event.target.value : "";
+  if (value) onActiveCarConsigneeChange(value);
+});
+
+document.getElementById("carConsigneeAddBtn")?.addEventListener("click", () => {
+  document.getElementById("carConsigneeNewWrap")?.classList.remove("hidden");
+  document.getElementById("carConsigneeNewName")?.focus();
+});
+
+document.getElementById("carConsigneeCancelNewBtn")?.addEventListener("click", () => {
+  document.getElementById("carConsigneeNewWrap")?.classList.add("hidden");
+  const nameInput = document.getElementById("carConsigneeNewName");
+  if (nameInput) nameInput.value = "";
+});
+
+document.getElementById("carConsigneeSaveNewBtn")?.addEventListener("click", async () => {
+  const name = String(document.getElementById("carConsigneeNewName")?.value || "").trim();
+  if (!name) return alert("Enter a consignee name.");
+  try {
+    const result = await api("/api/car-consignees", { method: "POST", body: JSON.stringify({ name }) });
+    document.getElementById("carConsigneeNewWrap")?.classList.add("hidden");
+    const nameInput = document.getElementById("carConsigneeNewName");
+    if (nameInput) nameInput.value = "";
+    await loadCarConsignees();
+    if (result?.id) await onActiveCarConsigneeChange(result.id);
+  } catch (error) {
+    alert(error.message);
+  }
+});
+
+["cdCarMakeModel", "jdCarMakeModel", "ccCarMakeModel"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("blur", (event) => {
+    if (event.target instanceof HTMLInputElement) saveActiveCarConsigneeMakeModel(event.target);
+  });
 });
 
 document.getElementById("meterBillRecipientAddBtn")?.addEventListener("click", () => {
