@@ -1407,6 +1407,16 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS weigh_bridge_withdrawals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE,
+      amount REAL NOT NULL DEFAULT 2000,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS car_consignees (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -6178,6 +6188,63 @@ app.delete("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async
       : await run("DELETE FROM weigh_bridge_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
+});
+
+const WEIGH_BRIDGE_DAILY_WITHDRAWAL_KES = 2000;
+
+function dmyPartsToUtcDate(parts) {
+  return new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
+}
+
+function utcDateToDmy(date) {
+  const d = date.getUTCDate();
+  const m = date.getUTCMonth() + 1;
+  const y = date.getUTCFullYear();
+  return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+}
+
+/** Persist KES 2,000 for every calendar day after the latest weigh-bridge entry through today. */
+async function ensureWeighBridgeWithdrawals(username = "") {
+  const latest = await get(
+    `SELECT date FROM weigh_bridge_entries
+     ORDER BY substr(date, 7, 4) DESC, substr(date, 4, 2) DESC, substr(date, 1, 2) DESC
+     LIMIT 1`
+  );
+  if (!latest?.date) {
+    return await all("SELECT * FROM weigh_bridge_withdrawals ORDER BY substr(date, 7, 4) DESC, substr(date, 4, 2) DESC, substr(date, 1, 2) DESC");
+  }
+  const lastParts = parseSaleDateDMY(normalizeInventoryDate(latest.date) || latest.date);
+  const todayParts = parseSaleDateDMY(todayDMY());
+  if (!lastParts || !todayParts) {
+    return await all("SELECT * FROM weigh_bridge_withdrawals ORDER BY substr(date, 7, 4) DESC, substr(date, 4, 2) DESC, substr(date, 1, 2) DESC");
+  }
+  const lastUtc = dmyPartsToUtcDate(lastParts);
+  const todayUtc = dmyPartsToUtcDate(todayParts);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const nowIso = new Date().toISOString();
+  for (let t = lastUtc.getTime() + dayMs; t <= todayUtc.getTime(); t += dayMs) {
+    const dateCanon = utcDateToDmy(new Date(t));
+    const existing = await get("SELECT id FROM weigh_bridge_withdrawals WHERE date = ?", [dateCanon]);
+    if (existing) continue;
+    await run(
+      "INSERT INTO weigh_bridge_withdrawals (date, amount, created_by, created_at) VALUES (?, ?, ?, ?)",
+      [dateCanon, WEIGH_BRIDGE_DAILY_WITHDRAWAL_KES, username || "system", nowIso]
+    );
+  }
+  return await all(
+    "SELECT * FROM weigh_bridge_withdrawals ORDER BY substr(date, 7, 4) DESC, substr(date, 4, 2) DESC, substr(date, 1, 2) DESC"
+  );
+}
+
+app.get("/api/weigh-bridge/withdrawals", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows = await ensureWeighBridgeWithdrawals(req.user.username);
+  res.json(rows);
+});
+
+app.post("/api/weigh-bridge/withdrawals/sync", auth, allowRoles("owner", "employee"), async (req, res) => {
+  const rows = await ensureWeighBridgeWithdrawals(req.user.username);
+  const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  res.json({ ok: true, rows, total: roundMoney(total) });
 });
 
 function requireCarImportsTenant(res) {

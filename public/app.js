@@ -105,6 +105,7 @@ const state = {
   editPigsId: null,
   weighBridgeEntries: [],
   editWeighBridgeId: null,
+  weighBridgeWithdrawals: [],
   carCustomerDeposits: [],
   editCarCustomerDepositId: null,
   carJapanDeposits: [],
@@ -756,6 +757,7 @@ const pigsDate = document.getElementById("pigsDate");
 const pigsOpenCalendarBtn = document.getElementById("pigsOpenCalendarBtn");
 const weighBridgeForm = document.getElementById("weigh-bridge-form");
 const weighBridgeBody = document.getElementById("weigh-bridge-body");
+const weighBridgeWithdrawalsBody = document.getElementById("weigh-bridge-withdrawals-body");
 const weighBridgeDateDisplay = document.getElementById("weighBridgeDateDisplay");
 const weighBridgeDate = document.getElementById("weighBridgeDate");
 const weighBridgeOpenCalendarBtn = document.getElementById("weighBridgeOpenCalendarBtn");
@@ -7858,22 +7860,93 @@ function resetWeighBridgeForm() {
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
 
+const WEIGH_BRIDGE_DAILY_WITHDRAWAL_KES = 2000;
+let weighBridgeMidnightTimer = null;
+
+function scheduleWeighBridgeMidnightRefresh() {
+  if (weighBridgeMidnightTimer) {
+    clearTimeout(weighBridgeMidnightTimer);
+    weighBridgeMidnightTimer = null;
+  }
+  const now = new Date();
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0);
+  const delay = Math.max(1000, nextMidnight.getTime() - now.getTime());
+  weighBridgeMidnightTimer = setTimeout(async () => {
+    weighBridgeMidnightTimer = null;
+    if (state.currentPage === "weigh-bridge") {
+      try {
+        await syncWeighBridgeWithdrawals();
+      } catch (_err) {
+        /* keep showing last known totals */
+      }
+      renderWeighBridgeTable();
+    }
+    scheduleWeighBridgeMidnightRefresh();
+  }, delay);
+}
+
+function weighBridgeWithdrawalsTotal() {
+  return roundMoney(
+    (state.weighBridgeWithdrawals || []).reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  );
+}
+
+function renderWeighBridgeWithdrawalsTable() {
+  const totalEl = document.getElementById("wbWithdrawalsTotal");
+  const hintEl = document.getElementById("wbWithdrawalsHint");
+  const rows = sortRowsLatestFirst(state.weighBridgeWithdrawals || []);
+  const total = weighBridgeWithdrawalsTotal();
+  if (hintEl) {
+    const days = rows.length;
+    hintEl.textContent =
+      days > 0
+        ? `${days} day${days === 1 ? "" : "s"} × ${currency(WEIGH_BRIDGE_DAILY_WITHDRAWAL_KES)} = ${currency(total)} added to Ufaray. Credit grows by ${currency(WEIGH_BRIDGE_DAILY_WITHDRAWAL_KES)} every calendar day after the last weigh-bridge entry.`
+        : `KES 2,000 is added to Ufaray for every calendar day after the last weigh-bridge entry through today. These withdrawals stay counted on the Ufaray grand total.`;
+  }
+  if (!weighBridgeWithdrawalsBody) return;
+  if (!rows.length) {
+    weighBridgeWithdrawalsBody.innerHTML = '<tr><td colspan="3" class="empty">No withdrawals yet.</td></tr>';
+    if (totalEl) totalEl.textContent = currency(0);
+    return;
+  }
+  weighBridgeWithdrawalsBody.innerHTML = rows
+    .map(
+      (row, idx) => `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${currency(row.amount)}</td>
+      </tr>`
+    )
+    .join("");
+  if (totalEl) totalEl.textContent = currency(total);
+}
+
+async function syncWeighBridgeWithdrawals() {
+  const rows = await api("/api/weigh-bridge/withdrawals");
+  state.weighBridgeWithdrawals = Array.isArray(rows) ? rows : [];
+}
+
 function renderWeighBridgeTable() {
   if (!weighBridgeBody) return;
+  renderWeighBridgeWithdrawalsTable();
   const rows = sortRowsLatestFirst(state.weighBridgeEntries || []);
   const totalAmountEl = document.getElementById("wbTotalAmount");
   const totalUfarayKshEl = document.getElementById("wbTotalUfarayKsh");
   const totalAmanaKshEl = document.getElementById("wbTotalAmanaKsh");
   const totalBalanceEl = document.getElementById("wbTotalBalance");
+  const withdrawalsTotal = weighBridgeWithdrawalsTotal();
   if (!rows.length) {
     weighBridgeBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
     if (totalAmountEl) totalAmountEl.textContent = currency(0);
-    if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(0);
+    // Ufaray grand total still includes accumulated withdrawals even with no entry rows.
+    if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(withdrawalsTotal);
     if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(0);
+    const emptyBalance = roundMoney(withdrawalsTotal);
     if (totalBalanceEl) {
-      totalBalanceEl.textContent = currency(0);
-      totalBalanceEl.style.color = "";
-      totalBalanceEl.style.fontWeight = "";
+      totalBalanceEl.textContent = currency(emptyBalance);
+      totalBalanceEl.style.color = emptyBalance < 0 ? "red" : "";
+      totalBalanceEl.style.fontWeight = emptyBalance < 0 ? "600" : "";
     }
     return;
   }
@@ -7906,11 +7979,12 @@ function renderWeighBridgeTable() {
       </tr>`;
     })
     .join("");
+  // Ufaray grand total = entry Ufaray Ksh + accumulated daily withdrawals (KES 2,000/day).
+  const ufarayGrand = roundMoney(sumUfarayKsh + withdrawalsTotal);
+  const totalBalance = roundMoney(ufarayGrand - sumAmanaKsh);
   if (totalAmountEl) totalAmountEl.textContent = currency(sumAmount);
-  if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(sumUfarayKsh);
+  if (totalUfarayKshEl) totalUfarayKshEl.textContent = currency(ufarayGrand);
   if (totalAmanaKshEl) totalAmanaKshEl.textContent = currency(sumAmanaKsh);
-  // Match the original Weigh Bridge PDF: Grand Total Balance = Total Ufaray Ksh − Total Amana Ksh.
-  const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh);
   if (totalBalanceEl) {
     totalBalanceEl.textContent = currency(totalBalance);
     totalBalanceEl.style.color = totalBalance < 0 ? "red" : "";
@@ -8756,6 +8830,7 @@ function showPage(page) {
   if (page === "pigs") renderPigsTable();
   if (page === "weigh-bridge") {
     renderWeighBridgeTable();
+    scheduleWeighBridgeMidnightRefresh();
   }
   if (page === "customer-deposits") renderCustomerDepositsTable();
   if (page === "japan-deposits") renderJapanDepositsTable();
@@ -9364,6 +9439,11 @@ async function loadAllData() {
   state.creditAccounts = extras[18].status === "fulfilled" ? extras[18].value : [];
   state.creditEntries = extras[19].status === "fulfilled" ? extras[19].value : [];
   state.weighBridgeEntries = extras[20].status === "fulfilled" ? extras[20].value : [];
+  try {
+    await syncWeighBridgeWithdrawals();
+  } catch (_err) {
+    state.weighBridgeWithdrawals = [];
+  }
 
   await loadMonthlyRecordsData();
   await loadLoanRepaymentsData();

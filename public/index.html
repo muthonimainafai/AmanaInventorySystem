@@ -2447,6 +2447,28 @@
             </form>
           </div>
           <div class="card">
+            <h3 class="card-title">Withdrawals</h3>
+            <p class="field-hint" id="wbWithdrawalsHint">KES 2,000 is added to Ufaray for every calendar day after the last weigh-bridge entry through today. These withdrawals stay counted on the Ufaray grand total.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Date</th>
+                    <th>Amount (Ufaray)</th>
+                  </tr>
+                </thead>
+                <tbody id="weigh-bridge-withdrawals-body"><tr><td colspan="3" class="empty">No withdrawals yet.</td></tr></tbody>
+                <tfoot>
+                  <tr>
+                    <th colspan="2">Total Withdrawals</th>
+                    <th id="wbWithdrawalsTotal">0</th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+          <div class="card">
             <div class="table-wrap">
               <table>
                 <thead>
@@ -3207,6 +3229,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-21-weigh-bridge-original"></script>
+    <script src="app.js?v=2026-08-21-weigh-bridge-withdrawals"></script>
   </body>
 </html>
