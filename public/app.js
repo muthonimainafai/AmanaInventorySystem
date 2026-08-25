@@ -5057,6 +5057,48 @@ function populateBrands() {
   populateBrandSelect(brandSelect);
 }
 
+async function refreshFeedCatalogEverywhere(preferredBrand = "", preferredFeedType = "") {
+  state.catalog = await loadCatalogFromServer();
+  catalogInitialized = true;
+  populateBrands();
+  populateBrandSelect(sbBrand);
+  populateBrandSelect(skBrand);
+  if (rfBrand) populateBrandSelect(rfBrand);
+  if (chFeedBrand) populateBrandSelect(chFeedBrand);
+  if (chFeedBrand2) populateBrandSelect(chFeedBrand2);
+  const brandKey = preferredBrand ? resolveBrandKey(preferredBrand) : "";
+  if (brandKey && brandSelect && [...brandSelect.options].some((o) => o.value === brandKey)) {
+    brandSelect.value = brandKey;
+    populateFeedTypes(brandKey, preferredFeedType);
+  }
+  if (sbBrand?.value) populateSbFeedTypes(sbBrand.value);
+  if (skBrand?.value) populateSkFeedTypes(skBrand.value, skFeedType?.value || "");
+}
+
+async function saveCustomFeedCatalogLine({ brand, feedType, bagSize }) {
+  const result = await api("/api/catalog/feed", {
+    method: "POST",
+    body: JSON.stringify({
+      brand,
+      feed_type: feedType,
+      bag_size: bagSize,
+    }),
+  });
+  if (result?.catalog && typeof result.catalog === "object") {
+    state.catalog = result.catalog;
+    catalogInitialized = true;
+    populateBrands();
+    populateBrandSelect(sbBrand);
+    populateBrandSelect(skBrand);
+    if (rfBrand) populateBrandSelect(rfBrand);
+    if (chFeedBrand) populateBrandSelect(chFeedBrand);
+    if (chFeedBrand2) populateBrandSelect(chFeedBrand2);
+  } else {
+    await refreshFeedCatalogEverywhere(brand, feedType);
+  }
+  return result;
+}
+
 function populateFeedTypes(brand, preferredFeedType = "") {
   const brandKey = resolveBrandKey(brand);
   const prevFeed = preferredFeedType || feedTypeSelect.value;
@@ -9766,6 +9808,85 @@ feedTypeSelect.addEventListener("change", () => {
   inventoryPricesDirty = false;
   bagSizeInput.value = bagSizeFor(brandSelect.value, feedTypeSelect.value);
   applyInventoryPriceDefaults();
+});
+
+document.getElementById("invAddBrandBtn")?.addEventListener("click", () => {
+  document.getElementById("invAddFeedTypeWrap")?.classList.add("hidden");
+  const wrap = document.getElementById("invAddBrandWrap");
+  wrap?.classList.remove("hidden");
+  document.getElementById("invAddBrandName")?.focus();
+});
+
+document.getElementById("invAddBrandCancelBtn")?.addEventListener("click", () => {
+  document.getElementById("invAddBrandWrap")?.classList.add("hidden");
+});
+
+document.getElementById("invAddBrandSaveBtn")?.addEventListener("click", async () => {
+  const brand = String(document.getElementById("invAddBrandName")?.value || "").trim();
+  const feedType = String(document.getElementById("invAddBrandFeedType")?.value || "").trim();
+  const bagSize = Number(document.getElementById("invAddBrandBagSize")?.value);
+  if (!brand) return alert("Enter a brand name.");
+  if (!feedType) return alert("Enter a feed type for the new brand.");
+  if (!Number.isFinite(bagSize) || bagSize <= 0) return alert("Enter a valid bag size (kg).");
+  const saveBtn = document.getElementById("invAddBrandSaveBtn");
+  if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+  try {
+    const result = await saveCustomFeedCatalogLine({ brand, feedType, bagSize });
+    const brandKey = resolveBrandKey(result?.brand || brand);
+    if (brandSelect) brandSelect.value = brandKey;
+    populateFeedTypes(brandKey, result?.feed_type || feedType);
+    applyInventoryPriceDefaults();
+    document.getElementById("invAddBrandWrap")?.classList.add("hidden");
+    const nameEl = document.getElementById("invAddBrandName");
+    const typeEl = document.getElementById("invAddBrandFeedType");
+    if (nameEl) nameEl.value = "";
+    if (typeEl) typeEl.value = "";
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+  }
+});
+
+document.getElementById("invAddFeedTypeBtn")?.addEventListener("click", () => {
+  document.getElementById("invAddBrandWrap")?.classList.add("hidden");
+  const wrap = document.getElementById("invAddFeedTypeWrap");
+  wrap?.classList.remove("hidden");
+  const brandInput = document.getElementById("invAddFeedTypeBrand");
+  if (brandInput instanceof HTMLInputElement) {
+    brandInput.value = brandSelect?.value ? displayBrand(brandSelect.value) : "";
+  }
+  document.getElementById("invAddFeedTypeName")?.focus();
+});
+
+document.getElementById("invAddFeedTypeCancelBtn")?.addEventListener("click", () => {
+  document.getElementById("invAddFeedTypeWrap")?.classList.add("hidden");
+});
+
+document.getElementById("invAddFeedTypeSaveBtn")?.addEventListener("click", async () => {
+  const brandFromInput = String(document.getElementById("invAddFeedTypeBrand")?.value || "").trim();
+  const brand = brandFromInput || brandSelect?.value || "";
+  const feedType = String(document.getElementById("invAddFeedTypeName")?.value || "").trim();
+  const bagSize = Number(document.getElementById("invAddFeedTypeBagSize")?.value);
+  if (!brand) return alert("Select or enter a brand first.");
+  if (!feedType) return alert("Enter a feed type.");
+  if (!Number.isFinite(bagSize) || bagSize <= 0) return alert("Enter a valid bag size (kg).");
+  const saveBtn = document.getElementById("invAddFeedTypeSaveBtn");
+  if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
+  try {
+    const result = await saveCustomFeedCatalogLine({ brand, feedType, bagSize });
+    const brandKey = resolveBrandKey(result?.brand || brand);
+    if (brandSelect) brandSelect.value = brandKey;
+    populateFeedTypes(brandKey, result?.feed_type || feedType);
+    applyInventoryPriceDefaults();
+    document.getElementById("invAddFeedTypeWrap")?.classList.add("hidden");
+    const typeEl = document.getElementById("invAddFeedTypeName");
+    if (typeEl) typeEl.value = "";
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
+  }
 });
 
 wireMoneyInputBlur(buyingPriceInput);

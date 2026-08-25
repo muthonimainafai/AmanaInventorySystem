@@ -585,6 +585,9 @@ app.use(async (req, res, next) => {
   }
   return tenantContext.run({ tenant }, async () => {
     try {
+      if (!customFeedCatalogCache.has(tenant)) {
+        await refreshCustomFeedCatalogCache();
+      }
       await ensureCurrentBusinessMonth();
       next();
     } catch (err) {
@@ -1198,6 +1201,17 @@ async function initDb() {
   `);
 
   await run(`
+    CREATE TABLE IF NOT EXISTS custom_feed_catalog (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      brand TEXT NOT NULL,
+      feed_type TEXT NOT NULL,
+      bag_size REAL NOT NULL,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  await run(`
     CREATE TABLE IF NOT EXISTS faith_expenses_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
@@ -1800,7 +1814,10 @@ function allowRoles(...roles) {
 }
 
 function validateFeed(brand, feedType, bagSize) {
-  const items = catalogForActiveTenant()[resolveBrandKey(brand)];
+  const catalog = catalogForActiveTenant();
+  const brandKey =
+    Object.keys(catalog).find((b) => normalizeBrand(b) === normalizeBrand(brand)) || resolveBrandKey(brand);
+  const items = catalog[brandKey];
   if (!items) return false;
   return items.some((i) => normalizeFeedType(i.type) === normalizeFeedType(feedType) && i.bagSize === Number(bagSize));
 }
@@ -1816,7 +1833,8 @@ function isTerryCessOrShopTenant() {
   );
 }
 
-function catalogForActiveTenant() {
+/** Static / built-in feed catalog for the active tenant (no custom DB brands). */
+function baseCatalogForActiveTenant() {
   if (!isTerryCessOrShopTenant()) return feedCatalog;
   const sigmaKey = Object.keys(feedCatalog).find((b) => normalizeBrand(b) === normalizeBrand("Sigma"));
   if (!sigmaKey) return {};
@@ -1825,6 +1843,59 @@ function catalogForActiveTenant() {
     return ft === normalizeFeedType("Starter") || ft === normalizeFeedType("Finisher");
   });
   return { [sigmaKey]: sigmaItems };
+}
+
+/** tenantId -> custom feed rows from DB */
+const customFeedCatalogCache = new Map();
+
+async function loadCustomFeedCatalogRows() {
+  try {
+    return await all(
+      "SELECT brand, feed_type, bag_size FROM custom_feed_catalog ORDER BY id ASC"
+    );
+  } catch (_err) {
+    return [];
+  }
+}
+
+async function refreshCustomFeedCatalogCache() {
+  const rows = await loadCustomFeedCatalogRows();
+  customFeedCatalogCache.set(activeTenant(), rows);
+  return rows;
+}
+
+function getCachedCustomFeedRows() {
+  return customFeedCatalogCache.get(activeTenant()) || [];
+}
+
+function mergeFeedCatalog(baseCatalog, customRows) {
+  const merged = {};
+  for (const [brand, items] of Object.entries(baseCatalog || {})) {
+    merged[brand] = (Array.isArray(items) ? items : []).map((i) => ({
+      type: i.type,
+      bagSize: Number(i.bagSize),
+    }));
+  }
+  for (const row of customRows || []) {
+    const brandName = String(row.brand || "").trim();
+    const feedType = String(row.feed_type || "").trim();
+    const bagSize = Number(row.bag_size);
+    if (!brandName || !feedType || !Number.isFinite(bagSize) || bagSize <= 0) continue;
+    let key = Object.keys(merged).find((b) => normalizeBrand(b) === normalizeBrand(brandName));
+    if (!key) {
+      key = brandName;
+      merged[key] = [];
+    }
+    const exists = merged[key].some(
+      (i) => normalizeFeedType(i.type) === normalizeFeedType(feedType) && Number(i.bagSize) === bagSize
+    );
+    if (!exists) merged[key].push({ type: feedType, bagSize });
+  }
+  return merged;
+}
+
+function catalogForActiveTenant() {
+  return mergeFeedCatalog(baseCatalogForActiveTenant(), getCachedCustomFeedRows());
 }
 
 function normalizeBrand(name) {
@@ -1869,7 +1940,8 @@ function feedTypeEquivalent(a, b, aBagSizeHint, bBagSizeHint) {
 
 function resolveBrandKey(brand) {
   const target = normalizeBrand(brand);
-  return Object.keys(feedCatalog).find((b) => normalizeBrand(b) === target) || brand;
+  const catalogKeys = Object.keys(catalogForActiveTenant());
+  return catalogKeys.find((b) => normalizeBrand(b) === target) || brand;
 }
 
 function feedCatalogTypeValue(brandKey, feedType) {
@@ -3186,9 +3258,41 @@ app.delete("/api/vehicle/kax/:id", vehicleAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/** Public product list (brands / feed types / bag sizes) â€” no auth so the UI can always populate dropdowns. */
-app.get("/api/catalog", (_req, res) => {
+/** Public product list (brands / feed types / bag sizes) — no auth so the UI can always populate dropdowns. */
+app.get("/api/catalog", async (_req, res) => {
+  await refreshCustomFeedCatalogCache();
   res.json(catalogForActiveTenant());
+});
+
+/** Owner: add a custom brand + feed type + bag size (also used to add another feed line to an existing brand). */
+app.post("/api/catalog/feed", auth, allowRoles("owner"), async (req, res) => {
+  const brand = String(req.body?.brand || "").trim();
+  const feedType = String(req.body?.feed_type || "").trim();
+  const bagSize = Number(req.body?.bag_size);
+  if (!brand) return res.status(400).json({ error: "Brand name is required." });
+  if (!feedType) return res.status(400).json({ error: "Feed type is required." });
+  if (!Number.isFinite(bagSize) || bagSize <= 0) {
+    return res.status(400).json({ error: "Bag size (kg) must be greater than zero." });
+  }
+  await refreshCustomFeedCatalogCache();
+  const catalog = catalogForActiveTenant();
+  const existingKey = Object.keys(catalog).find((b) => normalizeBrand(b) === normalizeBrand(brand));
+  const brandKey = existingKey || brand;
+  const items = catalog[brandKey] || [];
+  if (
+    items.some(
+      (i) => normalizeFeedType(i.type) === normalizeFeedType(feedType) && Number(i.bagSize) === bagSize
+    )
+  ) {
+    return res.status(400).json({ error: "That brand / feed type / bag size already exists." });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    "INSERT INTO custom_feed_catalog (brand, feed_type, bag_size, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    [brandKey, feedType, bagSize, req.user.username, nowIso]
+  );
+  await refreshCustomFeedCatalogCache();
+  res.json({ ok: true, brand: brandKey, feed_type: feedType, bag_size: bagSize, catalog: catalogForActiveTenant() });
 });
 
 /** Cumulative profit from Sales Per Bags for the current calendar month. `today` is shop day for UI only. */
