@@ -2271,7 +2271,10 @@ function totalBagsOpenedFromKgSalesChronological(productRows, weightMap) {
   let pool = 0;
   let bagsFromInventory = 0;
   for (const r of sorted) {
-    const step = applySalesKgPoolStep(pool, bagSize, r.bag_opened, r.kg_sold);
+    let bagOpenedForStep = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
+    // Same rule as the Total(kgs) remaining column: do not count another open while kg remain.
+    if (pool > 1e-6 && bagOpenedForStep > 0) bagOpenedForStep = 0;
+    const step = applySalesKgPoolStep(pool, bagSize, bagOpenedForStep, r.kg_sold);
     pool = step.pool;
     bagsFromInventory += step.bagsAdded;
   }
@@ -2408,6 +2411,41 @@ async function sumBagOpenedTodayForProduct(brandKey, rawFeedType, dateCanonNorm,
     sum += Number(r.bag_opened || 0);
   }
   return sum;
+}
+
+/**
+ * Kg remaining right now for a staff member + product — same meaning as Total(kgs) remaining.
+ * Carryover covers days before `dateCanon`; then only that calendar day's rows are applied
+ * (avoids double-counting prior days, which wrongly forced a new bag open).
+ */
+function currentSalesKgRemainingForStaff(dateCanon, brandKey, feedType, createdBy, allKgRows, weightMap) {
+  const bagSize = effectiveKgPerOpenedBagForDisplay(weightMap, brandKey, feedType);
+  if (!Number.isFinite(bagSize) || bagSize <= 0) return 0;
+  const staff = String(createdBy ?? "").trim();
+  let pool = remainingKgCarryoverBeforeSaleDateWithMap(
+    dateCanon,
+    brandKey,
+    feedType,
+    allKgRows,
+    weightMap,
+    { crossBrand: true, sameStaffOnly: true, createdBy: staff }
+  );
+  const ftN = normalizeFeedType(feedType);
+  const bk = resolveBrandKey(brandKey);
+  const todayRows = [];
+  for (const r of allKgRows) {
+    if (resolveBrandKey(r.brand) !== bk) continue;
+    if (normalizeFeedType(r.feed_type) !== ftN) continue;
+    if (staff && String(r.created_by ?? "").trim() !== staff) continue;
+    if (normalizeInventoryDate(r.date) !== dateCanon) continue;
+    todayRows.push(r);
+  }
+  for (const r of sortSalesKgRowsChronological(todayRows)) {
+    let bagOpenedForStep = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
+    if (pool > 1e-6 && bagOpenedForStep > 0) bagOpenedForStep = 0;
+    pool = applySalesKgPoolStep(pool, bagSize, bagOpenedForStep, r.kg_sold).pool;
+  }
+  return pool;
 }
 
 function enrichSalesKgRowsWithCumulative(rows, weightMap) {
@@ -7145,8 +7183,19 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
         wmCoerce,
         { crossBrand: true, sameStaffOnly: true, createdBy: existing.created_by }
       );
+      const remainingNow = currentSalesKgRemainingForStaff(
+        dateCanon,
+        brandKey,
+        p.feed_type,
+        existing.created_by,
+        allSkForCarryMerge,
+        wmCoerce
+      );
+      const saleFitsInRemaining = addKg <= remainingNow + 1e-6;
       let incrementBag = bagOpened;
-      if (incrementBag > 0) {
+      if (incrementBag > 0 && (saleFitsInRemaining || remainingNow > 1e-6)) {
+        incrementBag = 0;
+      } else if (incrementBag > 0) {
         const effBagSz = effectiveKgPerOpenedBagForDisplay(wmCoerce, brandKey, p.feed_type);
         const openedTodayTotal = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
         const kgSoldToday = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
@@ -7154,16 +7203,21 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
         if (pool > 1e-6) incrementBag = 0;
       }
       let baseBagOpened = Number(existing.bag_opened || 0);
-      if (carriedBefore > 1e-6 && baseBagOpened > 0) baseBagOpened = 0;
+      if ((carriedBefore > 1e-6 || remainingNow > 1e-6) && baseBagOpened > 0) baseBagOpened = 0;
 
       const newKgSold = Number(existing.kg_sold) + addKg;
       let newBagOpened = baseBagOpened + incrementBag;
       const effBagSzMerge = effectiveKgPerOpenedBagForDisplay(wmCoerce, brandKey, p.feed_type);
       const productRowsBefore = await getSalesKgRowsForProduct(brandKey, p.feed_type);
-      const sortedBeforeMerge = sortSalesKgRowsChronological(productRowsBefore);
-      const poolBeforeMergeRow = poolBeforeSalesKgRow(sortedBeforeMerge, existing.id, effBagSzMerge);
-      const minOpensMerge = requiredBagOpenedOnRow(poolBeforeMergeRow, effBagSzMerge, newKgSold);
-      newBagOpened = Math.max(newBagOpened, minOpensMerge);
+      if (!saleFitsInRemaining) {
+        const sortedBeforeMerge = sortSalesKgRowsChronological(productRowsBefore);
+        const poolBeforeMergeRow = poolBeforeSalesKgRow(sortedBeforeMerge, existing.id, effBagSzMerge);
+        const minOpensMerge = requiredBagOpenedOnRow(poolBeforeMergeRow, effBagSzMerge, newKgSold);
+        newBagOpened = Math.max(newBagOpened, minOpensMerge);
+      } else {
+        // Keep existing opens — finishing remaining kg must not demand another bag from stock.
+        newBagOpened = Math.max(0, Math.floor(Number(existing.bag_opened || 0)));
+      }
       const productRowsAfter = productRowsBefore.map((r) =>
         Number(r.id) === Number(existing.id)
           ? { ...r, kg_sold: newKgSold, bag_opened: newBagOpened }
@@ -7178,9 +7232,12 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
         { allKgRows: allSkForMetrics, weightMap: wmCoerce }
       );
       const rowMetrics = mergeMetrics.get(Number(existing.id));
-      const consumedBefore = totalBagsOpenedFromKgSalesChronological(productRowsBefore, weightMapForKg);
-      const consumedAfter = totalBagsOpenedFromKgSalesChronological(productRowsAfter, weightMapForKg);
-      const invDelta = consumedAfter - consumedBefore;
+      let invDelta = 0;
+      if (!saleFitsInRemaining) {
+        const consumedBefore = totalBagsOpenedFromKgSalesChronological(productRowsBefore, weightMapForKg);
+        const consumedAfter = totalBagsOpenedFromKgSalesChronological(productRowsAfter, weightMapForKg);
+        invDelta = consumedAfter - consumedBefore;
+      }
       if (invDelta !== 0) {
         try {
           await adjustInventoryBags({
@@ -7215,52 +7272,31 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
   }
 
   let insertBagOpened = bagOpened;
-  if (req.user.role === "employee") {
-    const allSkForCarry = await all("SELECT * FROM sales_kg");
-    const carriedBefore = remainingKgCarryoverBeforeSaleDateWithMap(
-      dateCanon,
-      brandKey,
-      p.feed_type,
-      allSkForCarry,
-      wmCoerce,
-      { crossBrand: true, sameStaffOnly: true, createdBy: req.user.username }
-    );
-    if (insertBagOpened > 0) {
-      const effBagSz = effectiveKgPerOpenedBagForDisplay(wmCoerce, brandKey, p.feed_type);
-      const openedToday = await sumBagOpenedTodayForProduct(brandKey, p.feed_type, dateCanon, null);
-      const kgSoldToday = await sumKgSoldForSalesKgLine(dateCanon, brandKey, p.feed_type, null);
-      const pool = carriedBefore + (openedToday * effBagSz) - kgSoldToday;
-      if (pool > 1e-6) insertBagOpened = 0;
-    }
-  }
-
-  const productRowsBeforeInsert = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+  const creatorForPool =
+    req.user.role === "employee" ? req.user.username : p.created_by || req.user.username;
   const allSkForCarryInsert = await all("SELECT * FROM sales_kg");
-  let poolBeforeInsert = remainingKgCarryoverBeforeSaleDateWithMap(
+  const poolBeforeInsert = currentSalesKgRemainingForStaff(
     dateCanon,
     brandKey,
     p.feed_type,
+    creatorForPool,
     allSkForCarryInsert,
-    weightMapForKg,
-    {
-      crossBrand: true,
-      sameStaffOnly: true,
-      createdBy: req.user.role === "employee" ? req.user.username : p.created_by || req.user.username,
-    }
-  );
-  for (const r of sortSalesKgRowsChronological(productRowsBeforeInsert)) {
-    let bagOpenedStep = Math.max(0, Math.floor(Number(r.bag_opened || 0)));
-    if (poolBeforeInsert > 1e-6 && bagOpenedStep > 0) bagOpenedStep = 0;
-    poolBeforeInsert = applySalesKgPoolStep(poolBeforeInsert, effBagSizeKg, bagOpenedStep, r.kg_sold).pool;
-  }
-  const minOpensInsert = requiredBagOpenedOnRow(poolBeforeInsert, effBagSizeKg, kgSold);
-  insertBagOpened = Math.max(insertBagOpened, minOpensInsert);
-
-  const totalAmount = kgSold * pricePerKg;
-  const consumedBeforeInsert = totalBagsOpenedFromKgSalesChronological(
-    productRowsBeforeInsert,
     weightMapForKg
   );
+  const saleFitsInRemainingInsert = kgSold <= poolBeforeInsert + 1e-6;
+  if (saleFitsInRemainingInsert) {
+    insertBagOpened = 0;
+  } else if (insertBagOpened > 0 && poolBeforeInsert > 1e-6) {
+    insertBagOpened = 0;
+  }
+
+  const productRowsBeforeInsert = await getSalesKgRowsForProduct(brandKey, p.feed_type);
+  if (!saleFitsInRemainingInsert) {
+    const minOpensInsert = requiredBagOpenedOnRow(poolBeforeInsert, effBagSizeKg, kgSold);
+    insertBagOpened = Math.max(insertBagOpened, minOpensInsert);
+  }
+
+  const totalAmount = kgSold * pricePerKg;
   const simulatedInsertRow = {
     id: Number.MAX_SAFE_INTEGER,
     date: dateCanon,
@@ -7268,6 +7304,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     feed_type: p.feed_type,
     kg_sold: kgSold,
     bag_opened: insertBagOpened,
+    created_by: req.user.username,
   };
   const insertSorted = sortSalesKgRowsChronological([...productRowsBeforeInsert, simulatedInsertRow]);
   const insertMetrics = enrichSalesKgPoolMetrics(
@@ -7280,11 +7317,18 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
     { allKgRows: allSkForCarryInsert, weightMap: weightMapForKg }
   );
   const incrementalBags = insertMetrics.get(Number.MAX_SAFE_INTEGER)?.bags_sold_row_delta ?? 0;
-  const consumedAfterInsert = totalBagsOpenedFromKgSalesChronological(
-    [...productRowsBeforeInsert, simulatedInsertRow],
-    weightMapForKg
-  );
-  const invDeltaInsert = consumedAfterInsert - consumedBeforeInsert;
+  let invDeltaInsert = 0;
+  if (!saleFitsInRemainingInsert) {
+    const consumedBeforeInsert = totalBagsOpenedFromKgSalesChronological(
+      productRowsBeforeInsert,
+      weightMapForKg
+    );
+    const consumedAfterInsert = totalBagsOpenedFromKgSalesChronological(
+      [...productRowsBeforeInsert, simulatedInsertRow],
+      weightMapForKg
+    );
+    invDeltaInsert = consumedAfterInsert - consumedBeforeInsert;
+  }
   if (invDeltaInsert !== 0) {
     try {
       await adjustInventoryBags({
