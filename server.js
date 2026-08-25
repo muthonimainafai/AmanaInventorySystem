@@ -6343,15 +6343,12 @@ app.delete("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, r
   res.json({ ok: true });
 });
 
-app.get("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req, res) => {
-  const rows =
-    req.user.role === "owner"
-      ? await all("SELECT * FROM weigh_bridge_entries ORDER BY id DESC")
-      : await all("SELECT * FROM weigh_bridge_entries WHERE created_by = ? ORDER BY id DESC", [req.user.username]);
+app.get("/api/weigh-bridge", auth, allowRoles("owner"), async (req, res) => {
+  const rows = await all("SELECT * FROM weigh_bridge_entries ORDER BY id DESC");
   res.json(rows);
 });
 
-app.post("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.post("/api/weigh-bridge", auth, allowRoles("owner"), async (req, res) => {
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
@@ -6374,12 +6371,9 @@ app.post("/api/weigh-bridge", auth, allowRoles("owner", "employee"), async (req,
   res.json({ ok: true });
 });
 
-app.put("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.put("/api/weigh-bridge/:id", auth, allowRoles("owner"), async (req, res) => {
   const id = Number(req.params.id);
-  const existing =
-    req.user.role === "owner"
-      ? await get("SELECT * FROM weigh_bridge_entries WHERE id = ?", [id])
-      : await get("SELECT * FROM weigh_bridge_entries WHERE id = ? AND created_by = ?", [id, req.user.username]);
+  const existing = await get("SELECT * FROM weigh_bridge_entries WHERE id = ?", [id]);
   if (!existing) return res.status(404).json({ error: "Record not found." });
   const p = req.body || {};
   const dateCanon = normalizeInventoryDate(p.date);
@@ -6401,11 +6395,8 @@ app.put("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async (r
   res.json({ ok: true });
 });
 
-app.delete("/api/weigh-bridge/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
-  const result =
-    req.user.role === "owner"
-      ? await run("DELETE FROM weigh_bridge_entries WHERE id = ?", [Number(req.params.id)])
-      : await run("DELETE FROM weigh_bridge_entries WHERE id = ? AND created_by = ?", [Number(req.params.id), req.user.username]);
+app.delete("/api/weigh-bridge/:id", auth, allowRoles("owner"), async (req, res) => {
+  const result = await run("DELETE FROM weigh_bridge_entries WHERE id = ?", [Number(req.params.id)]);
   if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
   res.json({ ok: true });
 });
@@ -6456,12 +6447,12 @@ async function ensureWeighBridgeWithdrawals(username = "") {
   );
 }
 
-app.get("/api/weigh-bridge/withdrawals", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.get("/api/weigh-bridge/withdrawals", auth, allowRoles("owner"), async (req, res) => {
   const rows = await ensureWeighBridgeWithdrawals(req.user.username);
   res.json(rows);
 });
 
-app.post("/api/weigh-bridge/withdrawals/sync", auth, allowRoles("owner", "employee"), async (req, res) => {
+app.post("/api/weigh-bridge/withdrawals/sync", auth, allowRoles("owner"), async (req, res) => {
   const rows = await ensureWeighBridgeWithdrawals(req.user.username);
   const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   res.json({ ok: true, rows, total: roundMoney(total) });

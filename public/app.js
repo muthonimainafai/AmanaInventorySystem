@@ -2968,6 +2968,7 @@ function downloadStandardPageTablePdf({ pageTitle, subtitle, filename, sections,
 function pdfSectionsFromPageElement(pageEl) {
   const sections = [];
   pageEl.querySelectorAll(".table-wrap table").forEach((table) => {
+    if (table.closest("[data-pdf-exclude]")) return;
     const data = tableElementToPdfData(table);
     if (!data || !data.body.length) return;
     const card = table.closest(".card");
@@ -3629,6 +3630,53 @@ function downloadCreditPagePdf() {
   });
 }
 
+function downloadWeighBridgePagePdf() {
+  const rows = sortRowsLatestFirst(state.weighBridgeEntries || []);
+  const body = [];
+  let sumAmount = 0;
+  let sumUfarayKsh = 0;
+  let sumAmanaKsh = 0;
+  rows.forEach((row, idx) => {
+    const ufarayKsh = Number(row.ufaray_ksh || 0);
+    const amanaKsh = Number(row.amana_ksh || 0);
+    const balance = roundMoney(ufarayKsh - amanaKsh);
+    sumAmount += Number(row.amount || 0);
+    sumUfarayKsh += ufarayKsh;
+    sumAmanaKsh += amanaKsh;
+    body.push([
+      String(idx + 1),
+      formatDateDMY(row.date),
+      row.description || "",
+      String(Number(row.qty || 0)),
+      currency(row.amount),
+      currency(ufarayKsh),
+      currency(amanaKsh),
+      currency(balance),
+    ]);
+  });
+  if (body.length) {
+    const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh);
+    body.push([
+      { content: "Grand Total", colSpan: 4, styles: { fontStyle: "bold", halign: "right" } },
+      { content: currency(sumAmount), styles: { fontStyle: "bold", halign: "right" } },
+      { content: currency(sumUfarayKsh), styles: { fontStyle: "bold", halign: "right" } },
+      { content: currency(sumAmanaKsh), styles: { fontStyle: "bold", halign: "right" } },
+      { content: currency(totalBalance), styles: { fontStyle: "bold", halign: "right" } },
+    ]);
+  }
+  const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
+  downloadStandardPageTablePdf({
+    pageTitle: "Ufaray/Amana Weigh Bridge",
+    subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
+    filename: `${pdfSafeSlug(pdfBusinessTitle())}-weigh-bridge-${today || "export"}.pdf`,
+    sections: {
+      headers: ["No", "Date", "Description", "Qty", "Price Per Unit", "Ufaray Ksh", "Amana Ksh", "Balance"],
+      body,
+    },
+    landscape: true,
+  });
+}
+
 function downloadCurrentPagePdf() {
   const page = state.currentPage;
   if (page === "calculator") {
@@ -3665,6 +3713,10 @@ function downloadCurrentPagePdf() {
   }
   if (page === "water-bills" || page === "electricity-bills") {
     showMeterBillsPdfModal();
+    return;
+  }
+  if (page === "weigh-bridge") {
+    downloadWeighBridgePagePdf();
     return;
   }
   downloadGenericCurrentPagePdf();
@@ -4901,6 +4953,9 @@ function showLoggedIn() {
       shouldShow = !expensesPageTenantEnabled() && shouldShow;
     }
     if (page === "pigs") {
+      shouldShow = state.appInstance === "amana" && isOwner;
+    }
+    if (page === "weigh-bridge") {
       shouldShow = state.appInstance === "amana" && isOwner;
     }
     if (page === "monthly-report") {
@@ -8746,7 +8801,7 @@ function showPage(page) {
   if (page === "pigs" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
-  if (page === "weigh-bridge" && state.appInstance !== "amana") {
+  if (page === "weigh-bridge" && (state.appInstance !== "amana" || state.user?.role !== "owner")) {
     return showPage(state.user?.role === "owner" ? "inventory" : "sales-bags");
   }
   if (page === "nahashon-records" && state.appInstance !== "terry") {
@@ -9539,7 +9594,7 @@ async function loadAllData() {
     api("/api/pigs"),
     api("/api/credit-accounts"),
     api("/api/credit-entries"),
-    api("/api/weigh-bridge"),
+    state.user?.role === "owner" ? api("/api/weigh-bridge") : Promise.resolve([]),
   ]);
   state.feedersDrinkersCatalog = extras[0].status === "fulfilled" ? extras[0].value : [];
   state.feedersDrinkersInventory = extras[1].status === "fulfilled" ? extras[1].value : [];
@@ -9562,9 +9617,14 @@ async function loadAllData() {
   state.pigsEntries = extras[17].status === "fulfilled" ? extras[17].value : [];
   state.creditAccounts = extras[18].status === "fulfilled" ? extras[18].value : [];
   state.creditEntries = extras[19].status === "fulfilled" ? extras[19].value : [];
-  state.weighBridgeEntries = extras[20].status === "fulfilled" ? extras[20].value : [];
+  state.weighBridgeEntries =
+    state.user?.role === "owner" && extras[20].status === "fulfilled" ? extras[20].value : [];
   try {
-    await syncWeighBridgeWithdrawals();
+    if (state.user?.role === "owner") {
+      await syncWeighBridgeWithdrawals();
+    } else {
+      state.weighBridgeWithdrawals = [];
+    }
   } catch (_err) {
     state.weighBridgeWithdrawals = [];
   }
@@ -10046,6 +10106,8 @@ function userMayNavigateToPage(page) {
   if ((page === "water-bills" || page === "electricity-bills") && state.user.role !== "owner") return false;
   if (page === "faith-expenses" && !expensesPageTenantEnabled()) return false;
   if (page === "faith-sales" && !faithSalesPageTenantEnabled()) return false;
+  if (page === "weigh-bridge" && (state.appInstance !== "amana" || state.user.role !== "owner")) return false;
+  if (page === "pigs" && (state.appInstance !== "amana" || state.user.role !== "owner")) return false;
   if (state.user.role === "owner") {
     return OWNER_ALLOWED_PAGES.has(page);
   }
