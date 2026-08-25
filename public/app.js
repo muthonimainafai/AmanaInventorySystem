@@ -5467,7 +5467,9 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
       : String(state.user?.username ?? "").trim();
   const filtered = [];
   for (const r of state.salesKg || []) {
-    if (feedTypeCatalogValue(resolveBrandKey(r.brand), r.feed_type) !== ftWant) continue;
+    // Same brand + feed only — never mix another brand's Finisher into this product's open bag.
+    if (resolveBrandKey(r.brand) !== bk) continue;
+    if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
     if (staffUser && String(r.created_by ?? "").trim() !== staffUser) continue;
     const rd = parseDMYParts(r.date);
     if (!rd) continue;
@@ -5493,6 +5495,7 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
     }
     pool -= sold;
     if (pool < 0) pool = 0;
+    pool = Math.round(pool * 100) / 100;
   }
   return pool;
 }

@@ -1068,9 +1068,9 @@
                     <th>Brand</th>
                     <th>Feed Type</th>
                     <th title="Shows 1 once any bag is opened for this product that day.">Bag opened</th>
-                    <th title="Kg remaining from opened bags after this line (catalog bag size × bags opened − kg sold so far).">Total(kgs) remaining</th>
+                    <th title="Kg remaining from opened bags for this brand + feed only (other brands do not share this pool).">Total(kgs) remaining</th>
                     <th title="Full bags completed through this line (1 per bag when accumulated kg in the current bag reaches bag size, e.g. 50 kg).">Bags sold</th>
-                    <th title="Kg sold from the current open bag (0 after a full bag is used; resets when the next bag opens).">Accumulated kg sold (current bag)</th>
+                    <th title="Kg sold from the current open bag for this brand + feed (0 after a full bag is used; resets when the next bag opens).">Accumulated kg sold (current bag)</th>
                     <th>Price/kg</th>
                     <th title="Cumulative line total: total kg on this line × price per kg.">Total</th>
                     <th>Via</th>
@@ -3248,6 +3248,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-25-sell-remaining-kg-v2"></script>
+    <script src="app.js?v=2026-08-25-kg-pool-per-brand"></script>
   </body>
 </html>

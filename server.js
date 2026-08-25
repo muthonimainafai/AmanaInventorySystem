@@ -2121,37 +2121,43 @@ function sortSalesKgRowsChronological(rows) {
 
 /** Kg sold from the currently open bag after a pool step (0 once a full bag is used up). */
 function kgSoldInCurrentBagFromPool(pool, bagSize) {
-  if (pool <= 1e-6) return 0;
-  const mod = pool % bagSize;
-  const remaining = mod === 0 ? bagSize : mod;
-  return bagSize - remaining;
+  const p = roundMoney(Number(pool) || 0);
+  const bs = Number(bagSize) || 0;
+  if (!Number.isFinite(p) || p <= 1e-6 || !Number.isFinite(bs) || bs <= 0) return 0;
+  const mod = roundMoney(p % bs);
+  // Full bag(s) left with no partial remainder ⇒ nothing sold from the current open bag yet.
+  if (mod <= 1e-6) return 0;
+  return roundMoney(bs - mod);
 }
 
 /**
  * One Sales Per Kg line: apply bag_opened, auto-open when kg sold exceeds pool, subtract sold kg.
  */
 function applySalesKgPoolStep(pool, bagSize, bagOpened, kgSold) {
-  let p = Number(pool) || 0;
+  let p = roundMoney(Number(pool) || 0);
   let bagsAdded = 0;
+  const bs = Number(bagSize) || 0;
   const explicitOpens = Math.max(0, Math.floor(Number(bagOpened || 0)));
-  p += explicitOpens * bagSize;
+  if (Number.isFinite(bs) && bs > 0) {
+    p = roundMoney(p + explicitOpens * bs);
+  }
   bagsAdded += explicitOpens;
-  const sold = Number(kgSold || 0);
+  const sold = roundMoney(Number(kgSold || 0));
   let autoOpens = 0;
   // Epsilon: selling exactly the displayed remaining kg must not spuriously open another bag.
-  if (sold > p + 1e-6) {
-    autoOpens = Math.ceil((sold - p) / bagSize);
-    p += autoOpens * bagSize;
+  if (Number.isFinite(bs) && bs > 0 && sold > p + 1e-6) {
+    autoOpens = Math.ceil((sold - p) / bs);
+    p = roundMoney(p + autoOpens * bs);
     bagsAdded += autoOpens;
   }
-  p -= sold;
+  p = roundMoney(p - sold);
   if (p < 0) p = 0;
   return {
     pool: p,
     bagsAdded,
     autoOpens,
     explicitOpens,
-    kgInCurrentBag: kgSoldInCurrentBagFromPool(p, bagSize),
+    kgInCurrentBag: kgSoldInCurrentBagFromPool(p, bs),
   };
 }
 
@@ -2225,7 +2231,9 @@ function enrichSalesKgPoolMetrics(sortedRows, bagSize, options = {}) {
     allKgRows,
     wm,
     {
-      crossBrand: true,
+      // Each brand keeps its own open-bag pool. Sharing "Finisher" across brands
+      // mixed leftovers (e.g. Isinya) into Spenza and broke Remaining / Accumulated.
+      crossBrand: false,
       sameStaffOnly: true,
       createdBy: first.created_by,
     }
@@ -2428,7 +2436,7 @@ function currentSalesKgRemainingForStaff(dateCanon, brandKey, feedType, createdB
     feedType,
     allKgRows,
     weightMap,
-    { crossBrand: true, sameStaffOnly: true, createdBy: staff }
+    { crossBrand: false, sameStaffOnly: true, createdBy: staff }
   );
   const ftN = normalizeFeedType(feedType);
   const bk = resolveBrandKey(brandKey);
@@ -7181,7 +7189,7 @@ app.post("/api/sales/kg", auth, allowRoles("owner", "employee"), async (req, res
         p.feed_type,
         allSkForCarryMerge,
         wmCoerce,
-        { crossBrand: true, sameStaffOnly: true, createdBy: existing.created_by }
+        { crossBrand: false, sameStaffOnly: true, createdBy: existing.created_by }
       );
       const remainingNow = currentSalesKgRemainingForStaff(
         dateCanon,
