@@ -5122,13 +5122,14 @@ async function refreshFeedCatalogEverywhere(preferredBrand = "", preferredFeedTy
   if (skBrand?.value) populateSkFeedTypes(skBrand.value, skFeedType?.value || "");
 }
 
-async function saveCustomFeedCatalogLine({ brand, feedType, bagSize }) {
+async function saveCustomFeedCatalogLine({ brand, feedType, bagSize, forceNewBrand = false }) {
   const result = await api("/api/catalog/feed", {
     method: "POST",
     body: JSON.stringify({
       brand,
       feed_type: feedType,
       bag_size: bagSize,
+      force_new_brand: Boolean(forceNewBrand),
     }),
   });
   if (result?.catalog && typeof result.catalog === "object") {
@@ -9935,11 +9936,15 @@ form.addEventListener("submit", async (event) => {
     }
     const payload = formPayload();
     if (payload._addingNewBrand) {
-      await saveCustomFeedCatalogLine({
+      const catalogResult = await saveCustomFeedCatalogLine({
         brand: payload.brand,
         feedType: payload.feed_type,
         bagSize: payload.bag_size,
+        forceNewBrand: true,
       });
+      if (catalogResult?.brand) {
+        payload.brand = catalogResult.brand;
+      }
     }
     const { _addingNewBrand, ...inventoryPayload } = payload;
     if (editId != null && Number.isFinite(editId) && editId > 0) {

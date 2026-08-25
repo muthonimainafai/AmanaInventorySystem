@@ -3269,30 +3269,55 @@ app.post("/api/catalog/feed", auth, allowRoles("owner"), async (req, res) => {
   const brand = String(req.body?.brand || "").trim();
   const feedType = String(req.body?.feed_type || "").trim();
   const bagSize = Number(req.body?.bag_size);
+  const forceNewBrand = Boolean(req.body?.force_new_brand);
   if (!brand) return res.status(400).json({ error: "Brand name is required." });
   if (!feedType) return res.status(400).json({ error: "Feed type is required." });
   if (!Number.isFinite(bagSize) || bagSize <= 0) {
     return res.status(400).json({ error: "Bag size (kg) must be greater than zero." });
   }
+  if (!normalizeBrand(brand)) return res.status(400).json({ error: "Brand name is required." });
+
   await refreshCustomFeedCatalogCache();
   const catalog = catalogForActiveTenant();
-  const existingKey = Object.keys(catalog).find((b) => normalizeBrand(b) === normalizeBrand(brand));
-  const brandKey = existingKey || brand;
+
+  // force_new_brand: use the typed name as its own brand key (case-insensitive exact match only).
+  // Do NOT map "Acme" onto "Acme Feeds" — that blocked new brands that reuse Starter/Finisher.
+  // Without force_new_brand: allow soft match via normalizeBrand (e.g. adding a feed line to Fugo Feeds).
+  const exactKey = Object.keys(catalog).find((b) => b.toLowerCase() === brand.toLowerCase()) || null;
+  const softKey = Object.keys(catalog).find((b) => normalizeBrand(b) === normalizeBrand(brand)) || null;
+  const brandKey = forceNewBrand ? exactKey || brand : softKey || brand;
   const items = catalog[brandKey] || [];
-  if (
-    items.some(
-      (i) => normalizeFeedType(i.type) === normalizeFeedType(feedType) && Number(i.bagSize) === bagSize
-    )
-  ) {
-    return res.status(400).json({ error: "That brand / feed type / bag size already exists." });
+  const lineExistsOnThisBrand = items.some(
+    (i) => normalizeFeedType(i.type) === normalizeFeedType(feedType) && Number(i.bagSize) === bagSize
+  );
+
+  // Same brand + feed type + bag size: succeed idempotently (retry / re-save).
+  // Different brands may all use Starter/Finisher at the same bag size.
+  if (lineExistsOnThisBrand) {
+    return res.json({
+      ok: true,
+      brand: brandKey,
+      feed_type: feedType,
+      bag_size: bagSize,
+      catalog: catalogForActiveTenant(),
+      already_existed: true,
+    });
   }
+
   const nowIso = new Date().toISOString();
   await run(
     "INSERT INTO custom_feed_catalog (brand, feed_type, bag_size, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
     [brandKey, feedType, bagSize, req.user.username, nowIso]
   );
   await refreshCustomFeedCatalogCache();
-  res.json({ ok: true, brand: brandKey, feed_type: feedType, bag_size: bagSize, catalog: catalogForActiveTenant() });
+  res.json({
+    ok: true,
+    brand: brandKey,
+    feed_type: feedType,
+    bag_size: bagSize,
+    catalog: catalogForActiveTenant(),
+    already_existed: false,
+  });
 });
 
 /** Cumulative profit from Sales Per Bags for the current calendar month. `today` is shop day for UI only. */
