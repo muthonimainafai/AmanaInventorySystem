@@ -5039,7 +5039,10 @@ async function loadVehicleKaxData() {
   renderVehicleKaxTable();
 }
 
-function populateBrandSelect(selectEl) {
+const ADD_NEW_BRAND_VALUE = "__add_new_brand__";
+
+function populateBrandSelect(selectEl, options = {}) {
+  const includeAddNewBrand = Boolean(options.includeAddNewBrand);
   const prev = selectEl instanceof HTMLSelectElement ? selectEl.value : "";
   selectEl.innerHTML = '<option value="">Select brand</option>';
   Object.keys(state.catalog).forEach((brand) => {
@@ -5048,13 +5051,56 @@ function populateBrandSelect(selectEl) {
     option.textContent = displayBrand(brand);
     selectEl.appendChild(option);
   });
+  if (includeAddNewBrand && state.user?.role === "owner") {
+    const option = document.createElement("option");
+    option.value = ADD_NEW_BRAND_VALUE;
+    option.textContent = "Add New Brand";
+    selectEl.appendChild(option);
+  }
   if (prev && [...selectEl.options].some((o) => o.value === prev)) {
     selectEl.value = prev;
   }
 }
 
 function populateBrands() {
-  populateBrandSelect(brandSelect);
+  populateBrandSelect(brandSelect, { includeAddNewBrand: true });
+}
+
+function isInventoryNewBrandMode() {
+  return brandSelect?.value === ADD_NEW_BRAND_VALUE;
+}
+
+function setInventoryNewBrandMode(enabled) {
+  const panel = document.getElementById("invNewBrandPanel");
+  panel?.classList.toggle("hidden", !enabled);
+  document.getElementById("invFeedTypeLabel")?.classList.toggle("hidden", enabled);
+  document.getElementById("invBagSizeLabel")?.classList.toggle("hidden", enabled);
+  if (feedTypeSelect) {
+    feedTypeSelect.disabled = enabled || !brandSelect?.value || brandSelect.value === ADD_NEW_BRAND_VALUE;
+    feedTypeSelect.required = !enabled;
+    if (enabled) {
+      feedTypeSelect.innerHTML = '<option value="">Select feed type</option>';
+      feedTypeSelect.value = "";
+    }
+  }
+  if (bagSizeInput && !enabled) {
+    bagSizeInput.readOnly = true;
+  }
+  const newBrandName = document.getElementById("invNewBrandName");
+  const newFeedType = document.getElementById("invNewFeedType");
+  const newBagSize = document.getElementById("invNewBagSize");
+  if (newBrandName instanceof HTMLInputElement) {
+    newBrandName.required = enabled;
+    if (!enabled) newBrandName.value = "";
+  }
+  if (newFeedType instanceof HTMLInputElement) {
+    newFeedType.required = enabled;
+    if (!enabled) newFeedType.value = "";
+  }
+  if (newBagSize instanceof HTMLInputElement) {
+    newBagSize.required = enabled;
+    if (!enabled) newBagSize.value = "50";
+  }
 }
 
 async function refreshFeedCatalogEverywhere(preferredBrand = "", preferredFeedType = "") {
@@ -5069,6 +5115,7 @@ async function refreshFeedCatalogEverywhere(preferredBrand = "", preferredFeedTy
   const brandKey = preferredBrand ? resolveBrandKey(preferredBrand) : "";
   if (brandKey && brandSelect && [...brandSelect.options].some((o) => o.value === brandKey)) {
     brandSelect.value = brandKey;
+    setInventoryNewBrandMode(false);
     populateFeedTypes(brandKey, preferredFeedType);
   }
   if (sbBrand?.value) populateSbFeedTypes(sbBrand.value);
@@ -5694,6 +5741,7 @@ function resetForm() {
   document.getElementById("accumulatedBags").value = "";
   if (bagsBoughtInput) bagsBoughtInput.value = "";
   if (quantityInput) quantityInput.value = "";
+  setInventoryNewBrandMode(false);
   setInventoryPriceEditMode(true);
   document.getElementById("saveBtn").textContent = "Save Record";
   updateInventoryStockFieldsMode();
@@ -8904,6 +8952,7 @@ function populateForm(row) {
   const id = Number(row.id);
   state.editId = Number.isFinite(id) ? id : null;
   inventoryPricesDirty = false;
+  setInventoryNewBrandMode(false);
   dateInput.value = toIsoDate(row.date);
   dateDisplayInput.value = formatDateDMY(row.date);
   const brandKey = resolveBrandKey(row.brand);
@@ -8933,7 +8982,18 @@ function formPayload() {
   if (!isValidDMY(dateValue)) {
     throw new Error("Date must be in DD/MM/YYYY format.");
   }
-  const brandKey = resolveBrandKey(brandSelect.value);
+  const addingNewBrand = isInventoryNewBrandMode();
+  const newBrandName = String(document.getElementById("invNewBrandName")?.value || "").trim();
+  const newFeedType = String(document.getElementById("invNewFeedType")?.value || "").trim();
+  const newBagSize = Number(document.getElementById("invNewBagSize")?.value);
+  const brandKey = addingNewBrand ? newBrandName : resolveBrandKey(brandSelect.value);
+  const feedType = addingNewBrand ? newFeedType : feedTypeCatalogValue(brandKey, feedTypeSelect.value);
+  const bagSize = addingNewBrand ? newBagSize : Number(bagSizeInput.value || 0);
+  if (addingNewBrand) {
+    if (!brandKey) throw new Error("Enter a new brand name.");
+    if (!feedType) throw new Error("Enter a feed type for the new brand.");
+    if (!Number.isFinite(bagSize) || bagSize <= 0) throw new Error("Enter a valid bag size (kg).");
+  }
   const dateCanon = formatDateDMY(dateValue).trim();
 
   const bagsBoughtRaw = bagsBoughtInput?.value != null ? String(bagsBoughtInput.value).trim() : "";
@@ -8949,8 +9009,8 @@ function formPayload() {
   return {
     date: dateCanon,
     brand: brandKey,
-    feed_type: feedTypeCatalogValue(brandKey, feedTypeSelect.value),
-    bag_size: Number(bagSizeInput.value || 0),
+    feed_type: feedType,
+    bag_size: bagSize,
     quantity_in_stock: Number(quantityInput.value || 0),
     bags_bought: Number.isFinite(bagsBoughtNum) ? Math.max(0, Math.floor(bagsBoughtNum)) : null,
     accumulated_bags:
@@ -8959,6 +9019,7 @@ function formPayload() {
     selling_price: Number.isFinite(sellParsed) ? sellParsed : 0,
     profit_margin_per_bag: Number.isFinite(marginParsed) ? marginParsed : 0,
     reorder_level: Number(document.getElementById("reorderLevel").value || 0),
+    _addingNewBrand: addingNewBrand,
   };
 }
 
@@ -9800,6 +9861,12 @@ vehicleLogoutBtn?.addEventListener("click", () => {
 
 brandSelect.addEventListener("change", () => {
   inventoryPricesDirty = false;
+  if (isInventoryNewBrandMode()) {
+    setInventoryNewBrandMode(true);
+    document.getElementById("invNewBrandName")?.focus();
+    return;
+  }
+  setInventoryNewBrandMode(false);
   populateFeedTypes(brandSelect.value);
   applyInventoryPriceDefaults();
 });
@@ -9808,85 +9875,6 @@ feedTypeSelect.addEventListener("change", () => {
   inventoryPricesDirty = false;
   bagSizeInput.value = bagSizeFor(brandSelect.value, feedTypeSelect.value);
   applyInventoryPriceDefaults();
-});
-
-document.getElementById("invAddBrandBtn")?.addEventListener("click", () => {
-  document.getElementById("invAddFeedTypeWrap")?.classList.add("hidden");
-  const wrap = document.getElementById("invAddBrandWrap");
-  wrap?.classList.remove("hidden");
-  document.getElementById("invAddBrandName")?.focus();
-});
-
-document.getElementById("invAddBrandCancelBtn")?.addEventListener("click", () => {
-  document.getElementById("invAddBrandWrap")?.classList.add("hidden");
-});
-
-document.getElementById("invAddBrandSaveBtn")?.addEventListener("click", async () => {
-  const brand = String(document.getElementById("invAddBrandName")?.value || "").trim();
-  const feedType = String(document.getElementById("invAddBrandFeedType")?.value || "").trim();
-  const bagSize = Number(document.getElementById("invAddBrandBagSize")?.value);
-  if (!brand) return alert("Enter a brand name.");
-  if (!feedType) return alert("Enter a feed type for the new brand.");
-  if (!Number.isFinite(bagSize) || bagSize <= 0) return alert("Enter a valid bag size (kg).");
-  const saveBtn = document.getElementById("invAddBrandSaveBtn");
-  if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
-  try {
-    const result = await saveCustomFeedCatalogLine({ brand, feedType, bagSize });
-    const brandKey = resolveBrandKey(result?.brand || brand);
-    if (brandSelect) brandSelect.value = brandKey;
-    populateFeedTypes(brandKey, result?.feed_type || feedType);
-    applyInventoryPriceDefaults();
-    document.getElementById("invAddBrandWrap")?.classList.add("hidden");
-    const nameEl = document.getElementById("invAddBrandName");
-    const typeEl = document.getElementById("invAddBrandFeedType");
-    if (nameEl) nameEl.value = "";
-    if (typeEl) typeEl.value = "";
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
-  }
-});
-
-document.getElementById("invAddFeedTypeBtn")?.addEventListener("click", () => {
-  document.getElementById("invAddBrandWrap")?.classList.add("hidden");
-  const wrap = document.getElementById("invAddFeedTypeWrap");
-  wrap?.classList.remove("hidden");
-  const brandInput = document.getElementById("invAddFeedTypeBrand");
-  if (brandInput instanceof HTMLInputElement) {
-    brandInput.value = brandSelect?.value ? displayBrand(brandSelect.value) : "";
-  }
-  document.getElementById("invAddFeedTypeName")?.focus();
-});
-
-document.getElementById("invAddFeedTypeCancelBtn")?.addEventListener("click", () => {
-  document.getElementById("invAddFeedTypeWrap")?.classList.add("hidden");
-});
-
-document.getElementById("invAddFeedTypeSaveBtn")?.addEventListener("click", async () => {
-  const brandFromInput = String(document.getElementById("invAddFeedTypeBrand")?.value || "").trim();
-  const brand = brandFromInput || brandSelect?.value || "";
-  const feedType = String(document.getElementById("invAddFeedTypeName")?.value || "").trim();
-  const bagSize = Number(document.getElementById("invAddFeedTypeBagSize")?.value);
-  if (!brand) return alert("Select or enter a brand first.");
-  if (!feedType) return alert("Enter a feed type.");
-  if (!Number.isFinite(bagSize) || bagSize <= 0) return alert("Enter a valid bag size (kg).");
-  const saveBtn = document.getElementById("invAddFeedTypeSaveBtn");
-  if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = true;
-  try {
-    const result = await saveCustomFeedCatalogLine({ brand, feedType, bagSize });
-    const brandKey = resolveBrandKey(result?.brand || brand);
-    if (brandSelect) brandSelect.value = brandKey;
-    populateFeedTypes(brandKey, result?.feed_type || feedType);
-    applyInventoryPriceDefaults();
-    document.getElementById("invAddFeedTypeWrap")?.classList.add("hidden");
-    const typeEl = document.getElementById("invAddFeedTypeName");
-    if (typeEl) typeEl.value = "";
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    if (saveBtn instanceof HTMLButtonElement) saveBtn.disabled = false;
-  }
 });
 
 wireMoneyInputBlur(buyingPriceInput);
@@ -9946,15 +9934,23 @@ form.addEventListener("submit", async (event) => {
       }
     }
     const payload = formPayload();
+    if (payload._addingNewBrand) {
+      await saveCustomFeedCatalogLine({
+        brand: payload.brand,
+        feedType: payload.feed_type,
+        bagSize: payload.bag_size,
+      });
+    }
+    const { _addingNewBrand, ...inventoryPayload } = payload;
     if (editId != null && Number.isFinite(editId) && editId > 0) {
       await api(`/api/inventory/${editId}`, {
         method: "PUT",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(inventoryPayload),
       });
     } else {
       await api("/api/inventory", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(inventoryPayload),
       });
     }
     resetForm();

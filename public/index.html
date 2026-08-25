@@ -265,63 +265,33 @@
                   <option value="">Select brand</option>
                 </select>
               </label>
-              <div class="owner-only-highlight hidden" style="display:flex;flex-direction:column;gap:0.35rem;justify-content:flex-end;">
-                <button type="button" class="secondary" id="invAddBrandBtn">Add brand</button>
-              </div>
-              <div id="invAddBrandWrap" class="hidden add-catalog-item-wrap owner-only-highlight" style="grid-column:1/-1;">
-                <p class="field-hint">Add a new brand with at least one feed type and bag size. It will appear in Feed Inventory and Sales.</p>
+
+              <div id="invNewBrandPanel" class="hidden" style="grid-column:1/-1;">
+                <p class="field-hint">Enter the new brand details below, then fill Bags bought, Buying price, and Selling price. Profit margin and stock fields work the same as a normal save.</p>
                 <div class="grid">
                   <label>
                     New brand name
-                    <input type="text" id="invAddBrandName" placeholder="e.g. Pembe Feeds" autocomplete="off" />
+                    <input type="text" id="invNewBrandName" placeholder="e.g. Pembe Feeds" autocomplete="off" />
                   </label>
                   <label>
                     Feed type
-                    <input type="text" id="invAddBrandFeedType" placeholder="e.g. Starter bags" autocomplete="off" />
+                    <input type="text" id="invNewFeedType" placeholder="e.g. Starter bags" autocomplete="off" />
                   </label>
                   <label>
                     Bag size (kg)
-                    <input type="number" id="invAddBrandBagSize" min="1" step="1" value="50" />
+                    <input type="number" id="invNewBagSize" min="1" step="1" value="50" />
                   </label>
-                </div>
-                <div class="actions" style="margin-top:0.5rem;">
-                  <button type="button" id="invAddBrandSaveBtn">Save brand</button>
-                  <button type="button" class="secondary" id="invAddBrandCancelBtn">Cancel</button>
                 </div>
               </div>
 
-              <label>
+              <label id="invFeedTypeLabel">
                 Feed Type
                 <select id="feedType" required disabled>
                   <option value="">Select feed type</option>
                 </select>
               </label>
-              <div class="owner-only-highlight hidden" style="display:flex;flex-direction:column;gap:0.35rem;justify-content:flex-end;">
-                <button type="button" class="secondary" id="invAddFeedTypeBtn">Add feed type</button>
-              </div>
-              <div id="invAddFeedTypeWrap" class="hidden add-catalog-item-wrap owner-only-highlight" style="grid-column:1/-1;">
-                <p class="field-hint">Add another feed type for the brand selected above (or type a brand name below).</p>
-                <div class="grid">
-                  <label>
-                    Brand
-                    <input type="text" id="invAddFeedTypeBrand" placeholder="Uses selected brand if left blank" autocomplete="off" />
-                  </label>
-                  <label>
-                    Feed type
-                    <input type="text" id="invAddFeedTypeName" placeholder="e.g. Growers bags" autocomplete="off" />
-                  </label>
-                  <label>
-                    Bag size (kg)
-                    <input type="number" id="invAddFeedTypeBagSize" min="1" step="1" value="50" />
-                  </label>
-                </div>
-                <div class="actions" style="margin-top:0.5rem;">
-                  <button type="button" id="invAddFeedTypeSaveBtn">Save feed type</button>
-                  <button type="button" class="secondary" id="invAddFeedTypeCancelBtn">Cancel</button>
-                </div>
-              </div>
 
-              <label>
+              <label id="invBagSizeLabel">
                 Bag Size (kg)
                 <input type="number" id="bagSize" min="1" step="1" readonly />
               </label>
@@ -3277,6 +3247,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-25-add-feed-brand"></script>
+    <script src="app.js?v=2026-08-25-add-new-brand-dropdown"></script>
   </body>
 </html>
