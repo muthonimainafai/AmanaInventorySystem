@@ -5487,7 +5487,7 @@ function skCarryoverKgBeforeSelectedDate(selDateDMY, brand, feedType) {
     if (pool > 1e-6 && bagOpenedStep > 0) bagOpenedStep = 0;
     pool += bagOpenedStep * bagSize;
     const sold = Number(r.kg_sold || 0);
-    if (sold > pool) {
+    if (sold > pool + 1e-6) {
       const autoOpen = Math.ceil((sold - pool) / bagSize);
       pool += autoOpen * bagSize;
     }
@@ -5527,6 +5527,23 @@ function sumKgSoldForSkLine(dateStr, brand, feedType) {
     sum += Number(r.kg_sold || 0);
   }
   return sum;
+}
+
+/** Latest Total(kgs) remaining for a product (prefer current user's newest row). */
+function latestSalesKgRemainingForProduct(brand, feedType) {
+  const bk = resolveBrandKey(brand);
+  const ftWant = feedTypeCatalogValue(bk, feedType);
+  const me = String(state.user?.username || "").trim();
+  let best = null;
+  for (const r of state.salesKg || []) {
+    if (resolveBrandKey(r.brand) !== bk) continue;
+    if (feedTypeCatalogValue(bk, r.feed_type) !== ftWant) continue;
+    if (me && String(r.created_by ?? "").trim() !== me && state.user?.role === "employee") continue;
+    if (!best || Number(r.id) > Number(best.id)) best = r;
+  }
+  if (!best || best.total_kgs_remaining == null) return null;
+  const n = Number(best.total_kgs_remaining);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** Default bag opened: 0 while remaining kg in the current open bag > 0; 1 once the bag is consumed.
@@ -11898,10 +11915,13 @@ salesKgForm.addEventListener("submit", async (event) => {
     alert("Enter a valid price per kg.");
     return;
   }
+  const brandForSale = resolveBrandKey(skBrand.value);
+  const feedForSale = skFeedType.value;
+  const remainingBefore = latestSalesKgRemainingForProduct(brandForSale, feedForSale);
   const payload = {
     date: dateValue,
-    brand: resolveBrandKey(skBrand.value),
-    feed_type: skFeedType.value,
+    brand: brandForSale,
+    feed_type: feedForSale,
     bag_opened: Number(document.getElementById("skBagOpened").value || 0),
     kg_sold: kgVal,
     price_per_kg: priceVal,
@@ -11936,6 +11956,33 @@ salesKgForm.addEventListener("submit", async (event) => {
       document.getElementById("skSaveBtn").textContent = "Save sale";
     } else {
       resetSalesKgForm();
+    }
+
+    // After finishing the last kg of an open bag, prompt to open the next bag.
+    if (!wasEdit && remainingBefore != null && remainingBefore > 1e-6 && kgVal + 1e-6 >= remainingBefore) {
+      const remainingAfter = latestSalesKgRemainingForProduct(brandForSale, feedForSale);
+      if (remainingAfter != null && remainingAfter <= 1e-6) {
+        const openNext = window.confirm(
+          "The open bag is finished (0 kg remaining). Open a new bag for the next sale?"
+        );
+        skDateDisplay.value = dateValue;
+        skDate.value = toIsoDate(dateValue);
+        skBrand.value = brandForSale;
+        populateSkFeedTypes(brandForSale);
+        skFeedType.value = feedForSale;
+        skFeedType.disabled = false;
+        document.getElementById("skKgSold").value = "";
+        applyEmployeeSalesKgPriceFromInventory();
+        applyEmployeeFeedSalePricingUi();
+        const bagEl = document.getElementById("skBagOpened");
+        if (bagEl) {
+          bagEl.value = openNext ? "1" : "0";
+          bagEl.readOnly = state.user?.role === "employee";
+        }
+        if (openNext) {
+          document.getElementById("skKgSold")?.focus();
+        }
+      }
     }
   } catch (error) {
     alert(error.message);

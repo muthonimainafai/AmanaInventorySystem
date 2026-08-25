@@ -1048,9 +1048,10 @@
               <p id="skOwnerWeightHint" class="field-hint hidden" style="margin-top: 0.5rem" role="status"></p>
               <p class="field-hint" style="margin-top: 0.75rem">
                 <strong>Total Kgs</strong> is the kg left from opened bags for that product that day (starts at the owner’s weight per bag when set under Retail
-                Feed Inventory, otherwise the catalog bag size, e.g. 50 kg, and goes down as you record sales). Each time you save,
+                Feed Inventory, otherwise the catalog bag size, e.g. 50 kg, and goes down as you record sales). You can always sell exactly the amount shown in
+                <strong>Total(kgs) remaining</strong> — that finishes the open bag and does not require another bag in stock. Each time you save,
                 <strong>Kg sold (this sale)</strong> is added onto the same row for that product/day (no duplicate rows). <strong>Bags sold</strong> counts
-                full bags <em>completed</em> through this line (counts 1 only when accumulated kg in the current bag reaches the full bag size, e.g. 50 kg; a new bag is then opened automatically). <strong>Accumulated kg sold</strong> is kg sold from the <em>current</em> open bag only (returns to 0 when that bag is finished).
+                full bags <em>completed</em> through this line (counts 1 only when accumulated kg in the current bag reaches the full bag size, e.g. 50 kg; you are then prompted to open a new bag). <strong>Accumulated kg sold</strong> is kg sold from the <em>current</em> open bag only (returns to 0 when that bag is finished).
               </p>
               <div class="actions">
                 <button type="submit" id="skSaveBtn">Save sale</button>
@@ -3247,6 +3248,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-25-new-brand-same-feed-types"></script>
+    <script src="app.js?v=2026-08-25-sell-remaining-kg"></script>
   </body>
 </html>
