@@ -3413,6 +3413,7 @@ function downloadGenericCurrentPagePdf() {
     "cess-accounts",
     "credit",
     "pigs",
+    "weigh-bridge",
     "water-bills",
     "electricity-bills",
   ]);
@@ -3631,48 +3632,20 @@ function downloadCreditPagePdf() {
 }
 
 function downloadWeighBridgePagePdf() {
-  const rows = sortRowsLatestFirst(state.weighBridgeEntries || []);
-  const body = [];
-  let sumAmount = 0;
-  let sumUfarayKsh = 0;
-  let sumAmanaKsh = 0;
-  rows.forEach((row, idx) => {
-    const ufarayKsh = Number(row.ufaray_ksh || 0);
-    const amanaKsh = Number(row.amana_ksh || 0);
-    const balance = roundMoney(ufarayKsh - amanaKsh);
-    sumAmount += Number(row.amount || 0);
-    sumUfarayKsh += ufarayKsh;
-    sumAmanaKsh += amanaKsh;
-    body.push([
-      String(idx + 1),
-      formatDateDMY(row.date),
-      row.description || "",
-      String(Number(row.qty || 0)),
-      currency(row.amount),
-      currency(ufarayKsh),
-      currency(amanaKsh),
-      currency(balance),
-    ]);
-  });
-  if (body.length) {
-    const totalBalance = roundMoney(sumUfarayKsh - sumAmanaKsh);
-    body.push([
-      { content: "Grand Total", colSpan: 4, styles: { fontStyle: "bold", halign: "right" } },
-      { content: currency(sumAmount), styles: { fontStyle: "bold", halign: "right" } },
-      { content: currency(sumUfarayKsh), styles: { fontStyle: "bold", halign: "right" } },
-      { content: currency(sumAmanaKsh), styles: { fontStyle: "bold", halign: "right" } },
-      { content: currency(totalBalance), styles: { fontStyle: "bold", halign: "right" } },
-    ]);
+  // Export the on-screen entries table as-is (including Grand Total / latest balance),
+  // but never the Withdrawals section (marked data-pdf-exclude on the page).
+  const pageEl = document.getElementById("page-weigh-bridge");
+  if (!pageEl) {
+    alert("Nothing to export on this page.");
+    return;
   }
+  const sections = pdfSectionsFromPageElement(pageEl);
   const today = (state.shopToday || clientShopTodayDMY()).replace(/\//g, "");
   downloadStandardPageTablePdf({
     pageTitle: "Ufaray/Amana Weigh Bridge",
     subtitle: `Exported ${state.shopToday || clientShopTodayDMY()}`,
     filename: `${pdfSafeSlug(pdfBusinessTitle())}-weigh-bridge-${today || "export"}.pdf`,
-    sections: {
-      headers: ["No", "Date", "Description", "Qty", "Price Per Unit", "Ufaray Ksh", "Amana Ksh", "Balance"],
-      body,
-    },
+    sections,
     landscape: true,
   });
 }
