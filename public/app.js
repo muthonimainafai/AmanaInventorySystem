@@ -11688,7 +11688,7 @@ async function downloadReceiptPdf() {
     doc.text(`TOTAL CHICKS: ${chickenRow.qtyNum}`, rightX, totalsY, { align: "right" });
     totalsY += 16;
   }
-  drawInvoicePaymentSummaryPdf(doc, {
+  const summaryY = drawInvoicePaymentSummaryPdf(doc, {
     rightX,
     startY: totalsY + 14,
     darkColor: G.dark,
@@ -11698,6 +11698,11 @@ async function downloadReceiptPdf() {
       { label: "UNPAID BALANCE", value: unpaidBalance },
     ],
   });
+
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  doc.setTextColor(80, 80, 80);
+  doc.text("Goods once sold cannot be returned", margin, summaryY + 22);
 
   doc.save(`${safeBusiness}-receipt-${fileDate}.pdf`);
 }
