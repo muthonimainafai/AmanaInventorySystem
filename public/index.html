@@ -162,6 +162,7 @@
           <button type="button" class="nav-tab" data-page="pigs">Pigs Page</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="weigh-bridge">Weigh Bridge</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="calculator">Calculator</button>
+          <button type="button" class="nav-tab owner-only-tab" data-page="receipt">Receipt</button>
           <button type="button" class="nav-tab" data-page="expenditure">Expenditure</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="monthly-report">Monthly Report</button>
           <button type="button" class="nav-tab owner-only-tab" data-page="monthly-records">Monthly Records</button>
@@ -1633,6 +1634,114 @@
               <button type="button" id="calcDownloadPdfBtn">Download PDF</button>
               <button type="button" id="calcDownloadProformaBtn">Download ProForma Invoice</button>
               <button type="button" id="calcDownloadInvoiceBtn">Download Invoice</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-receipt" class="app-page hidden">
+          <div class="card">
+            <h3 class="card-title">Receipt</h3>
+            <p class="field-hint">
+              Build a customer receipt at selling prices (same layout as an invoice). Line items use the bags and prices you enter below.
+              The downloaded PDF is titled <strong>RECEIPT</strong> and does not include Valid Until or M-Pesa payment details.
+            </p>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Chicken line (optional)</h3>
+            <p class="field-hint">
+              Optional. Price per chick comes from <strong>Chicken Sales Inventory</strong>. Total = chicks × price per chick.
+            </p>
+            <form id="receiptChickenForm" class="calc-chicken-form">
+              <div class="grid">
+                <label class="date-field">
+                  <span class="date-field-label">Date (DD/MM/YYYY)</span>
+                  <div class="date-picker-wrap">
+                    <input
+                      type="text"
+                      id="receiptChDateDisplay"
+                      placeholder="DD/MM/YYYY"
+                      pattern="(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/[0-9]{4}"
+                    />
+                    <button type="button" id="receiptChOpenCalendarBtn" class="calendar-btn" aria-label="Open calendar">📅</button>
+                  </div>
+                  <input type="date" id="receiptChDate" class="date-input-native" lang="en-GB" tabindex="-1" aria-hidden="true" />
+                </label>
+                <label>
+                  Breed
+                  <select id="receiptChBreed">
+                    <option value="">Select breed</option>
+                  </select>
+                </label>
+                <label>
+                  Number of chicks
+                  <input type="number" id="receiptChQuantity" min="1" step="1" placeholder="e.g. 100" />
+                </label>
+                <label>
+                  Price per chick
+                  <input type="text" id="receiptChPricePerChick" readonly tabindex="-1" title="Selling price per chick from Chicken Sales Inventory" />
+                </label>
+                <label>
+                  Total amount
+                  <input type="text" id="receiptChTotal" readonly tabindex="-1" title="Number of chicks × price per chick" />
+                </label>
+              </div>
+              <div class="actions" style="margin-top: 0.5rem">
+                <button type="button" class="secondary" id="receiptChClearBtn">Clear chicken line</button>
+              </div>
+            </form>
+          </div>
+          <div class="card">
+            <div id="receiptBrandHeader" class="calc-brand-header hidden" aria-label="Business logo and contact">
+              <img src="/amana-kuku-logo.png" alt="Amana Kuku Feeds" class="calc-brand-logo" width="120" height="120" />
+              <p class="calc-brand-mobile">Mobile number : 0141 388 444</p>
+            </div>
+            <h4 class="card-title" id="receiptTitle">Amana Kuku Feeds</h4>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Brand</th>
+                    <th>Feed Type</th>
+                    <th>Bag Size (kg)</th>
+                    <th>Number of bags</th>
+                    <th>Buying price (per bag)</th>
+                    <th>Selling price (per bag)</th>
+                    <th>Total (selling)</th>
+                  </tr>
+                </thead>
+                <tbody id="receipt-body"><tr><td colspan="7" class="empty">No feed catalog loaded.</td></tr></tbody>
+              </table>
+            </div>
+            <form id="receiptCustomerForm" class="calc-customer-form">
+              <div class="grid" style="margin-top: 0.75rem">
+                <label>
+                  Customer name
+                  <input type="text" id="receiptCustomerName" maxlength="160" placeholder="Customer or business name" autocomplete="name" />
+                </label>
+                <label>
+                  Mobile number
+                  <input type="tel" id="receiptCustomerMobile" maxlength="32" placeholder="e.g. 0712 345 678" autocomplete="tel" />
+                </label>
+                <label>
+                  Receipt total (selling)
+                  <input type="text" id="receiptSellingTotal" readonly tabindex="-1" title="Feed (bags × selling price) plus chicken line when filled" />
+                </label>
+                <label>
+                  Paid amount
+                  <input type="number" id="receiptPaidAmount" min="0" step="0.01" value="0" title="Amount the customer has paid" />
+                </label>
+                <label>
+                  Unpaid balance
+                  <input type="text" id="receiptUnpaidBalance" readonly tabindex="-1" title="Total amount minus paid amount" />
+                </label>
+              </div>
+              <p class="field-hint">
+                Receipt totals use <strong>selling</strong> prices. Download creates a PDF headed <strong>RECEIPT</strong> (no Valid Until date and no M-Pesa block).
+              </p>
+            </form>
+            <div class="actions calc-pdf-actions">
+              <button type="button" class="secondary" id="receiptClearBtn">Clear receipt</button>
+              <button type="button" id="receiptDownloadBtn">Download Receipt</button>
             </div>
           </div>
         </div>
@@ -3248,6 +3357,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-08-26-weigh-bridge-pdf-as-shown"></script>
+    <script src="app.js?v=2026-09-04-receipt-pdf"></script>
   </body>
 </html>

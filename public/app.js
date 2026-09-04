@@ -121,6 +121,7 @@ const state = {
   meterBillRecipients: [],
   activeMeterBillRecipientId: null,
   calculatorValues: {},
+  receiptValues: {},
 };
 
 const PAGE_HEADINGS = {
@@ -144,6 +145,7 @@ const PAGE_HEADINGS = {
   "clearance-costs": "Clearance Costs",
   credit: "Credit",
   calculator: "Calculator",
+  receipt: "Receipt",
   pigs: "Pigs Page",
   "weigh-bridge": "Ufaray/Amana Weigh Bridge",
   expenditure: "Expenditure",
@@ -511,6 +513,7 @@ const OWNER_INVENTORY_PAGES = new Set([
   "inventory",
   "retail-inventory",
   "calculator",
+  "receipt",
   "balance",
   "monthly-report",
   "monthly-records",
@@ -537,6 +540,7 @@ const OWNER_ALLOWED_PAGES = new Set([
   "japan-deposits",
   "clearance-costs",
   "calculator",
+  "receipt",
   "expenditure",
   "monthly-report",
   "monthly-records",
@@ -777,6 +781,7 @@ const ccDateDisplay = document.getElementById("ccDateDisplay");
 const ccDate = document.getElementById("ccDate");
 const ccOpenCalendarBtn = document.getElementById("ccOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
+const receiptBody = document.getElementById("receipt-body");
 const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
 const calcDueDate = document.getElementById("calcDueDate");
 const calcDueOpenCalendarBtn = document.getElementById("calcDueOpenCalendarBtn");
@@ -3656,6 +3661,13 @@ function downloadCurrentPagePdf() {
     downloadCalculatorPdf("calculator");
     return;
   }
+  if (page === "receipt") {
+    downloadReceiptPdf().catch((err) => {
+      console.error(err);
+      alert(err?.message || "Could not generate the receipt PDF.");
+    });
+    return;
+  }
   if (page === "chicken-inventory" && state.user?.role === "owner") {
     downloadChickenSalesPdf();
     return;
@@ -4883,13 +4895,13 @@ function showLoggedIn() {
       : carImportsTenant
       ? page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs"
       : state.appInstance === "terry"
-      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
+      ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "receipt" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : state.appInstance === "cess" ||
           state.appInstance === "maina-faith-cess" ||
           state.appInstance === "terry-and-cess"
-      ? page === "rose-inventory" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
+      ? page === "rose-inventory" || page === "calculator" || page === "receipt" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : state.appInstance === "shop"
-      ? page === "inventory" || page === "sales-bags" || page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
+      ? page === "inventory" || page === "sales-bags" || page === "calculator" || page === "receipt" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : terryCessShopTenant
       ? page === "inventory"
       : recordsTenant
@@ -4901,6 +4913,9 @@ function showLoggedIn() {
           : !OWNER_INVENTORY_PAGES.has(page);
     if (!isOwner && page === "calculator" && staffMayAccessCalculatorTenant()) {
       shouldShow = true;
+    }
+    if (page === "receipt") {
+      shouldShow = isOwner && shouldShow;
     }
     if (page === "cess-accounts") {
       shouldShow = state.appInstance === "amana" && isOwner;
@@ -6856,6 +6871,320 @@ function renderCalculatorTable() {
   }
 }
 
+function receiptRememberRowFromInputs(tr) {
+  if (!(tr instanceof HTMLTableRowElement) || !receiptBody?.contains(tr)) return;
+  const brand = tr.dataset.calcBrand || "";
+  const feedType = tr.dataset.calcFeedType || "";
+  const bagSize = Number(tr.dataset.calcBagSize || 0);
+  if (!brand || !feedType || !Number.isFinite(bagSize) || bagSize <= 0) return;
+  const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+  const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+  const sellEl = tr.querySelector("input[data-kind='calc-selling']");
+  const key = calculatorRowKey(brand, feedType, bagSize);
+  const bags = bagsEl instanceof HTMLInputElement ? String(bagsEl.value || "").trim() : "";
+  if (!bags) {
+    delete state.receiptValues[key];
+    return;
+  }
+  state.receiptValues[key] = {
+    bags,
+    buying: buyEl instanceof HTMLInputElement ? String(buyEl.value || "").trim() : "",
+    selling: sellEl instanceof HTMLInputElement ? String(sellEl.value || "").trim() : "",
+  };
+}
+
+function updateReceiptBrandHeader() {
+  const hdr = document.getElementById("receiptBrandHeader");
+  const title = document.getElementById("receiptTitle");
+  const isUfaray = state.appInstance === "ufaray";
+  if (title) title.textContent = isUfaray ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  if (hdr) {
+    const img = hdr.querySelector("img");
+    const mobile = hdr.querySelector(".calc-brand-mobile");
+    if (img instanceof HTMLImageElement) {
+      img.src = isUfaray ? "/ufaray-logo.jpeg" : "/amana-kuku-logo.png";
+      img.alt = isUfaray ? "Ufaray Feeds" : "Amana Kuku Feeds";
+    }
+    if (mobile) mobile.textContent = isUfaray ? "Mobile number : 0116 322 881" : "Mobile number : 0141 388 444";
+    hdr.classList.remove("hidden");
+  }
+}
+
+function populateReceiptChickenBreedSelect() {
+  const sel = document.getElementById("receiptChBreed");
+  if (!(sel instanceof HTMLSelectElement)) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Select breed</option>';
+  for (const r of getChickenBreedsRows()) {
+    if (!r.breed) continue;
+    const opt = document.createElement("option");
+    opt.value = r.breed;
+    opt.textContent = r.breed;
+    sel.appendChild(opt);
+  }
+  if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+function applyReceiptChickenPriceFromBreed() {
+  const breedEl = document.getElementById("receiptChBreed");
+  const priceEl = document.getElementById("receiptChPricePerChick");
+  if (!(priceEl instanceof HTMLInputElement)) return;
+  const breed = breedEl instanceof HTMLSelectElement ? breedEl.value.trim() : "";
+  const sp = findChickenSellingPriceForCalculator(breed);
+  priceEl.value = sp != null ? formatMoneyForInput(sp) : "";
+}
+
+function updateReceiptChickenTotalDisplay() {
+  const qtyEl = document.getElementById("receiptChQuantity");
+  const priceEl = document.getElementById("receiptChPricePerChick");
+  const totalEl = document.getElementById("receiptChTotal");
+  if (!(totalEl instanceof HTMLInputElement)) return;
+  const qty = Number(String(qtyEl?.value || "").trim());
+  const unit = parseMoneyFromInput(priceEl?.value);
+  const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 0;
+  const safeUnit = Number.isFinite(unit) && unit >= 0 ? unit : 0;
+  if (safeQty > 0 && safeUnit >= 0 && String(priceEl?.value || "").trim()) {
+    totalEl.value = currency(safeQty * safeUnit);
+  } else {
+    totalEl.value = "";
+  }
+  updateReceiptPaymentSummary();
+}
+
+function initReceiptChickenFormDefaults() {
+  const dateDisplay = document.getElementById("receiptChDateDisplay");
+  const dateHidden = document.getElementById("receiptChDate");
+  if (dateDisplay instanceof HTMLInputElement && !dateDisplay.value.trim()) {
+    const todayStr = state.shopToday || clientShopTodayDMY();
+    dateDisplay.value = todayStr;
+    if (dateHidden instanceof HTMLInputElement) dateHidden.value = toIsoDate(todayStr);
+  }
+}
+
+function resetReceiptChickenForm() {
+  const dateDisplay = document.getElementById("receiptChDateDisplay");
+  const dateHidden = document.getElementById("receiptChDate");
+  const breed = document.getElementById("receiptChBreed");
+  const qty = document.getElementById("receiptChQuantity");
+  const price = document.getElementById("receiptChPricePerChick");
+  const total = document.getElementById("receiptChTotal");
+  if (dateDisplay instanceof HTMLInputElement) dateDisplay.value = "";
+  if (dateHidden instanceof HTMLInputElement) dateHidden.value = "";
+  if (breed instanceof HTMLSelectElement) breed.value = "";
+  if (qty instanceof HTMLInputElement) qty.value = "";
+  if (price instanceof HTMLInputElement) price.value = "";
+  if (total instanceof HTMLInputElement) total.value = "";
+  initReceiptChickenFormDefaults();
+  applyReceiptChickenPriceFromBreed();
+  updateReceiptChickenTotalDisplay();
+}
+
+function collectReceiptChickenRowForPdfExport() {
+  const breedEl = document.getElementById("receiptChBreed");
+  const qtyEl = document.getElementById("receiptChQuantity");
+  if (!(breedEl instanceof HTMLSelectElement) || !(qtyEl instanceof HTMLInputElement)) return null;
+  const breed = breedEl.value.trim();
+  const qtyNum = Number(String(qtyEl.value || "").trim());
+  if (!breed || !Number.isFinite(qtyNum) || qtyNum <= 0) return null;
+  const unitPrice = findChickenSellingPriceForCalculator(breed);
+  if (unitPrice == null || !Number.isFinite(unitPrice) || unitPrice < 0) return null;
+  const dateDisplay = document.getElementById("receiptChDateDisplay");
+  const t = dateDisplay instanceof HTMLInputElement ? dateDisplay.value.trim() : "";
+  const dateStr = t && isValidDMY(t) ? t : state.shopToday || clientShopTodayDMY();
+  return { breed, dateStr, qtyNum, unitPrice, lineTotal: qtyNum * unitPrice };
+}
+
+function getReceiptCustomerBillPdfText() {
+  const nameEl = document.getElementById("receiptCustomerName");
+  const mobileEl = document.getElementById("receiptCustomerMobile");
+  const name = nameEl instanceof HTMLInputElement ? nameEl.value.trim() : "";
+  const mobile = mobileEl instanceof HTMLInputElement ? mobileEl.value.trim() : "";
+  const parts = [];
+  if (name) parts.push(name);
+  if (mobile) parts.push(`Mobile: ${mobile}`);
+  return parts.join("\n") || "—";
+}
+
+function getReceiptPaidAmountForPdf() {
+  const el = document.getElementById("receiptPaidAmount");
+  if (!(el instanceof HTMLInputElement)) return 0;
+  const n = Number(el.value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function receiptSellingFeedTotal() {
+  if (!receiptBody) return 0;
+  let total = 0;
+  receiptBody.querySelectorAll("tr").forEach((tr) => {
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const sellEl = tr.querySelector("input[data-kind='calc-selling']");
+    if (!(bagsEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement)) return;
+    const bags = Number(String(bagsEl.value || "").trim());
+    const selling = Number(String(sellEl.value || "").trim());
+    if (!Number.isFinite(bags) || bags <= 0) return;
+    total += bags * Math.max(0, Number.isFinite(selling) ? selling : 0);
+  });
+  return total;
+}
+
+function updateReceiptPaymentSummary() {
+  const totalEl = document.getElementById("receiptSellingTotal");
+  const unpaidEl = document.getElementById("receiptUnpaidBalance");
+  const chicken = collectReceiptChickenRowForPdfExport();
+  const total = receiptSellingFeedTotal() + (chicken ? chicken.lineTotal : 0);
+  const paid = getReceiptPaidAmountForPdf();
+  if (totalEl instanceof HTMLInputElement) totalEl.value = currency(total);
+  if (unpaidEl instanceof HTMLInputElement) unpaidEl.value = currency(total - paid);
+}
+
+function updateReceiptRowTotals() {
+  if (!receiptBody) return;
+  receiptBody.querySelectorAll("tr").forEach((tr) => {
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const sellEl = tr.querySelector("input[data-kind='calc-selling']");
+    const totalCell = tr.querySelector(".js-receipt-row-total");
+    if (!(bagsEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
+    const bags = Number(String(bagsEl.value || "").trim());
+    const selling = Number(String(sellEl.value || "").trim());
+    const safeBags = Math.max(0, Number.isFinite(bags) ? bags : 0);
+    const rowTotal = safeBags * Math.max(0, Number.isFinite(selling) ? selling : 0);
+    totalCell.textContent = currency(rowTotal);
+  });
+  updateReceiptPaymentSummary();
+}
+
+function renderReceiptTable() {
+  if (!receiptBody) return;
+  const activeEl = document.activeElement;
+  let activeKey = "";
+  let activeKind = "";
+  let selStart = null;
+  let selEnd = null;
+  let activeBrand = "";
+  let activeFeedType = "";
+  let activeBagSize = 0;
+  if (activeEl instanceof HTMLInputElement && receiptBody.contains(activeEl)) {
+    const tr = activeEl.closest("tr");
+    if (tr instanceof HTMLTableRowElement) {
+      activeBrand = tr.dataset.calcBrand || "";
+      activeFeedType = tr.dataset.calcFeedType || "";
+      activeBagSize = Number(tr.dataset.calcBagSize || 0);
+      activeKey = calculatorRowKey(activeBrand, activeFeedType, activeBagSize);
+      activeKind = activeEl.dataset.kind || "";
+      selStart = activeEl.selectionStart;
+      selEnd = activeEl.selectionEnd;
+    }
+  }
+  const rows = calculatorRowsFromCatalog();
+  if (!rows.length) {
+    receiptBody.innerHTML = '<tr><td colspan="7" class="empty">No feed catalog loaded.</td></tr>';
+    updateReceiptPaymentSummary();
+    return;
+  }
+  receiptBody.innerHTML = rows
+    .map((row) => {
+      const rowKey = calculatorRowKey(row.brand, row.feedType, row.bagSize);
+      const remembered = state.receiptValues[rowKey];
+      const defaultBuying = findInventoryBuyingPriceForCalculator(row.brand, row.feedType, row.bagSize);
+      const defaultSelling = findInventorySellingPriceForCalculator(row.brand, row.feedType, row.bagSize);
+      const buyingValue =
+        remembered?.buying != null && String(remembered.buying).trim() !== ""
+          ? String(remembered.buying)
+          : defaultBuying != null
+            ? String(defaultBuying)
+            : "";
+      const sellingValue =
+        remembered?.selling != null && String(remembered.selling).trim() !== ""
+          ? String(remembered.selling)
+          : defaultSelling != null
+            ? String(defaultSelling)
+            : "";
+      return `
+      <tr data-calc-brand="${escapeHtmlCell(row.brand)}" data-calc-feed-type="${escapeHtmlCell(row.feedType)}" data-calc-bag-size="${row.bagSize}">
+        <td>${displayBrand(row.brand)}</td>
+        <td>${displayFeedType(row.feedType)}</td>
+        <td>${row.bagSize}</td>
+        <td><input type="text" data-kind="calc-bags" inputmode="numeric" placeholder="Bags" value="${escapeHtmlCell(remembered?.bags || "")}" /></td>
+        <td><input type="text" data-kind="calc-buying" inputmode="decimal" placeholder="Buying price" value="${escapeHtmlCell(buyingValue)}" /></td>
+        <td><input type="text" data-kind="calc-selling" inputmode="decimal" placeholder="Selling price" value="${escapeHtmlCell(sellingValue)}" /></td>
+        <td class="js-receipt-row-total">${currency(0)}</td>
+      </tr>`;
+    })
+    .join("");
+  updateReceiptRowTotals();
+  if (activeKey && (activeKind === "calc-bags" || activeKind === "calc-buying" || activeKind === "calc-selling")) {
+    const tr = [...receiptBody.querySelectorAll("tr")].find(
+      (row) =>
+        row instanceof HTMLTableRowElement &&
+        calculatorRowKey(row.dataset.calcBrand || "", row.dataset.calcFeedType || "", Number(row.dataset.calcBagSize || 0)) ===
+          calculatorRowKey(activeBrand, activeFeedType, activeBagSize)
+    );
+    if (tr instanceof HTMLTableRowElement) {
+      const input = tr.querySelector(`input[data-kind='${activeKind}']`);
+      if (input instanceof HTMLInputElement) {
+        input.focus();
+        if (selStart != null && selEnd != null) {
+          try {
+            input.setSelectionRange(selStart, selEnd);
+          } catch (_e) {
+            // ignore
+          }
+        }
+      }
+    }
+  }
+}
+
+function collectFeedRowsForPdfExport(tbody) {
+  const rows = [];
+  if (!tbody) return rows;
+  tbody.querySelectorAll("tr").forEach((tr) => {
+    if (!(tr instanceof HTMLTableRowElement)) return;
+    const cells = tr.querySelectorAll("td");
+    if (cells.length < 7) return;
+    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
+    const buyEl = tr.querySelector("input[data-kind='calc-buying']");
+    const sellEl = tr.querySelector("input[data-kind='calc-selling']");
+    const totalCell = tr.querySelector(".js-calc-row-total, .js-receipt-row-total");
+    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement)) return;
+    const bagsRaw = String(bagsEl.value || "").trim();
+    const bagsNum = Number(bagsRaw);
+    if (!bagsRaw || !Number.isFinite(bagsNum) || bagsNum <= 0) return;
+    const buyingNum = Number(String(buyEl.value || "").trim());
+    const sellingNum = Number(String(sellEl.value || "").trim());
+    rows.push({
+      brand: cells[0]?.textContent?.trim() || "—",
+      feedType: cells[1]?.textContent?.trim() || "—",
+      bagSize: cells[2]?.textContent?.trim() || "—",
+      bagsStr: bagsRaw,
+      bagsNum,
+      buyingStr: String(buyEl.value || "").trim() || "—",
+      sellingStr: String(sellEl.value || "").trim() || "—",
+      buyingNum,
+      sellingNum,
+      totalCellText: totalCell?.textContent?.trim() || "—",
+    });
+  });
+  return rows;
+}
+
+function resetReceiptForm() {
+  if (receiptBody) {
+    state.receiptValues = {};
+    receiptBody.querySelectorAll("input[data-kind='calc-bags'], input[data-kind='calc-buying'], input[data-kind='calc-selling']").forEach((el) => {
+      if (el instanceof HTMLInputElement) el.value = "";
+    });
+  }
+  const nameEl = document.getElementById("receiptCustomerName");
+  const mobileEl = document.getElementById("receiptCustomerMobile");
+  const paidEl = document.getElementById("receiptPaidAmount");
+  if (nameEl instanceof HTMLInputElement) nameEl.value = "";
+  if (mobileEl instanceof HTMLInputElement) mobileEl.value = "";
+  if (paidEl instanceof HTMLInputElement) paidEl.value = "0";
+  resetReceiptChickenForm();
+  renderReceiptTable();
+}
+
 function resetExpenditureForm() {
   if (!expenditureForm) return;
   expenditureForm.reset();
@@ -8754,8 +9083,8 @@ function showPage(page) {
     return showPage("inventory");
   }
   if (state.appInstance === "shop" && page !== "inventory" && page !== "sales-bags") {
-    if (page === "calculator" || page === "faith-expenses" || page === "faith-sales" || page === "balance") {
-      // Calculator, Expenses, Sales, and Balance are allowed for Faith Inventory shop users.
+    if (page === "calculator" || page === "receipt" || page === "faith-expenses" || page === "faith-sales" || page === "balance") {
+      // Calculator, Receipt, Expenses, Sales, and Balance are allowed for Faith Inventory shop users.
     } else {
       return showPage("inventory");
     }
@@ -8785,6 +9114,7 @@ function showPage(page) {
     page !== "rose-inventory" &&
     page !== "nahashon-records" &&
     page !== "calculator" &&
+    page !== "receipt" &&
     page !== "faith-expenses" &&
     page !== "faith-sales" &&
     page !== "balance"
@@ -8797,6 +9127,7 @@ function showPage(page) {
       state.appInstance === "terry-and-cess") &&
     page !== "rose-inventory" &&
     page !== "calculator" &&
+    page !== "receipt" &&
     page !== "faith-expenses" &&
     page !== "faith-sales" &&
     page !== "balance"
@@ -8822,6 +9153,9 @@ function showPage(page) {
     // Allow calculator for owner and staff on Amana, Ufaray, and Nahah shop tenants.
   } else if (page === "calculator" && state.user?.role !== "owner") {
     return showPage("inventory");
+  }
+  if (page === "receipt" && state.user?.role !== "owner") {
+    return showPage(state.user?.role === "employee" ? "sales-bags" : "inventory");
   }
   if (page === "balance" && !faithRoseBalancePageEnabled() && state.user?.role !== "owner") {
     return showPage("sales-bags");
@@ -8981,6 +9315,14 @@ function showPage(page) {
     applyCalcChickenPriceFromBreed();
     updateCalcChickenTotalDisplay();
     renderCalculatorTable();
+  }
+  if (page === "receipt") {
+    populateReceiptChickenBreedSelect();
+    initReceiptChickenFormDefaults();
+    applyReceiptChickenPriceFromBreed();
+    updateReceiptChickenTotalDisplay();
+    renderReceiptTable();
+    updateReceiptBrandHeader();
   }
   if (page === "expenditure") {
     ensureExpenditureStatementMonth();
@@ -10505,11 +10847,11 @@ function loadUfarayLogoForPdf() {
 }
 
 /**
- * Calculator PDFs: Ufaray logo on invoice/proforma only; Amana logo on Amana (never Ufaray on Amana).
- * @param {"calculator"|"proforma"|"invoice"} mode
+ * Calculator PDFs: Ufaray logo on invoice/proforma/receipt only; Amana logo on Amana (never Ufaray on Amana).
+ * @param {"calculator"|"proforma"|"invoice"|"receipt"} mode
  */
 async function loadCalculatorPdfLogo(mode) {
-  if (mode === "proforma" || mode === "invoice") {
+  if (mode === "proforma" || mode === "invoice" || mode === "receipt") {
     if (state.appInstance === "ufaray") return loadUfarayLogoForPdf();
     return loadAmanaLogoForPdf();
   }
@@ -10521,7 +10863,7 @@ async function loadCalculatorPdfLogo(mode) {
 
 function getCalcBusinessMobileLineForPdf(mode) {
   if (state.appInstance === "amana") return AMANA_CALC_BUSINESS_MOBILE_LINE;
-  if (state.appInstance === "ufaray" && (mode === "proforma" || mode === "invoice")) {
+  if (state.appInstance === "ufaray" && (mode === "proforma" || mode === "invoice" || mode === "receipt")) {
     return UFARAY_CALC_BUSINESS_MOBILE_LINE;
   }
   return "";
@@ -10868,36 +11210,7 @@ async function downloadCalcChickenProformaPdf() {
 
 /** Rows with bags > 0 plus parsed prices for PDF exports. */
 function collectCalculatorRowsForPdfExport() {
-  const rows = [];
-  if (!calcBody) return rows;
-  calcBody.querySelectorAll("tr").forEach((tr) => {
-    if (!(tr instanceof HTMLTableRowElement)) return;
-    const cells = tr.querySelectorAll("td");
-    if (cells.length < 7) return;
-    const bagsEl = tr.querySelector("input[data-kind='calc-bags']");
-    const buyEl = tr.querySelector("input[data-kind='calc-buying']");
-    const sellEl = tr.querySelector("input[data-kind='calc-selling']");
-    const totalCell = tr.querySelector(".js-calc-row-total");
-    if (!(bagsEl instanceof HTMLInputElement) || !(buyEl instanceof HTMLInputElement) || !(sellEl instanceof HTMLInputElement) || !(totalCell instanceof HTMLElement)) return;
-    const bagsRaw = String(bagsEl.value || "").trim();
-    const bagsNum = Number(bagsRaw);
-    if (!bagsRaw || !Number.isFinite(bagsNum) || bagsNum <= 0) return;
-    const buyingNum = Number(String(buyEl.value || "").trim());
-    const sellingNum = Number(String(sellEl.value || "").trim());
-    rows.push({
-      brand: cells[0]?.textContent?.trim() || "—",
-      feedType: cells[1]?.textContent?.trim() || "—",
-      bagSize: cells[2]?.textContent?.trim() || "—",
-      bagsStr: bagsRaw,
-      bagsNum,
-      buyingStr: String(buyEl.value || "").trim() || "—",
-      sellingStr: String(sellEl.value || "").trim() || "—",
-      buyingNum,
-      sellingNum,
-      totalCellText: totalCell.textContent?.trim() || "—",
-    });
-  });
-  return rows;
+  return collectFeedRowsForPdfExport(calcBody);
 }
 
 /**
@@ -11221,9 +11534,209 @@ async function downloadCalculatorPdf(mode = "calculator") {
   doc.save(`${safeBusiness}-${safeMode}-${fileDate}.pdf`);
 }
 
+/** Receipt PDF: same layout as Invoice, headed RECEIPT, with no Valid Until and no M-Pesa block. */
+async function downloadReceiptPdf() {
+  if (!receiptBody) return;
+  const jsPdfNs = window.jspdf;
+  const JsPdfCtor = jsPdfNs?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    alert("PDF generator is not loaded. Refresh and try again.");
+    return;
+  }
+  const exportRows = collectFeedRowsForPdfExport(receiptBody);
+  const chickenRow = collectReceiptChickenRowForPdfExport();
+  if (!exportRows.length && !chickenRow) {
+    alert("Enter at least one receipt row with number of bags and/or complete the chicken line before downloading.");
+    return;
+  }
+  if (exportRows.length) {
+    const bad = exportRows.find((r) => !Number.isFinite(r.sellingNum) || r.sellingNum < 0);
+    if (bad) {
+      alert("For a receipt, enter a valid selling price on every line that has bags.");
+      return;
+    }
+  }
+  if (chickenRow && (!Number.isFinite(chickenRow.unitPrice) || chickenRow.unitPrice < 0)) {
+    alert("For this PDF, ensure the chicken breed has a valid selling price in Chicken Sales Inventory.");
+    return;
+  }
+
+  const today = state.shopToday || clientShopTodayDMY();
+  const businessTitle = state.appInstance === "ufaray" ? "Ufaray Feeds" : "Amana Kuku Feeds";
+  const fileDate = today.replace(/\//g, "-");
+  const safeBusiness = businessTitle.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const logoMeta = await loadCalculatorPdfLogo("receipt");
+
+  const doc = new JsPdfCtor({ orientation: "portrait", unit: "pt", format: "a4" });
+  if (typeof doc.autoTable !== "function" && typeof jsPdfNs?.autoTable !== "function") {
+    alert("PDF table helper is not loaded. Refresh and try again.");
+    return;
+  }
+
+  const docSuffix = String(Math.floor(10000 + Math.random() * 90000));
+  const docNo = `RCP-${docSuffix}`;
+  const totalBags = exportRows.reduce((s, r) => s + r.bagsNum, 0);
+  const feedTotal = exportRows.reduce((s, r) => s + r.bagsNum * r.sellingNum, 0);
+  const receiptTotal = feedTotal + (chickenRow ? chickenRow.lineTotal : 0);
+  const paidAmount = getReceiptPaidAmountForPdf();
+  const unpaidBalance = receiptTotal - paidAmount;
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const rightX = pageW - margin;
+  const tableW = pageW - 2 * margin;
+  const colW = { desc: 250, qty: 65, rate: 100, amt: 100 };
+  if (colW.desc + colW.qty + colW.rate + colW.amt !== tableW) colW.desc = tableW - colW.qty - colW.rate - colW.amt;
+
+  const G = { dark: [14, 92, 58], accent: [39, 150, 99], mint: [234, 248, 240], edge: [186, 222, 198] };
+  const brandLine = state.appInstance === "ufaray" ? "UFARAY FEEDS" : "AMANA KUKU FEEDS";
+  const blockTop = drawInvoicePdfHeaderBand(doc, {
+    logoMeta,
+    hdr: "RECEIPT",
+    brandLine,
+    margin,
+    pageW,
+    G,
+    pdfMode: "receipt",
+  });
+  const billRaw = getReceiptCustomerBillPdfText();
+  const billLines = doc.splitTextToSize(billRaw === "—" ? " " : billRaw, 250);
+  const leftBlockH = 14 + billLines.length * 12;
+  const rightBlockH = 14 * 2;
+  const headerBottom = blockTop + Math.max(leftBlockH, rightBlockH, 36) + 18;
+
+  doc.setFillColor(...G.mint);
+  doc.setDrawColor(...G.edge);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(margin, blockTop - 8, tableW, headerBottom - blockTop + 6, 5, 5, "FD");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...G.dark);
+  doc.text("BILL TO", margin, blockTop);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(33, 33, 33);
+  doc.text(billLines, margin, blockTop + 14);
+  let ry = blockTop;
+  doc.setFont("helvetica", "bold");
+  doc.text(`RECEIPT NO. ${docNo}`, rightX, ry, { align: "right" });
+  ry += 14;
+  doc.text(`DATE: ${formatDateWithDayName(today)}`, rightX, ry, { align: "right" });
+
+  const tableBody = exportRows.map((r) => {
+    const rate = r.sellingNum;
+    const amount = r.bagsNum * rate;
+    const desc = `${r.brand} ${r.feedType} ${r.bagSize}kg`
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+    return [desc, String(r.bagsNum), `Ksh${formatKshPlainNumber(rate)}`, `Ksh${formatKshPlainNumber(amount)}`];
+  });
+  if (chickenRow) {
+    const desc = `${chickenRow.breed} DAY-OLD CHICKS`.replace(/\s+/g, " ").trim().toUpperCase();
+    tableBody.push([
+      desc,
+      String(chickenRow.qtyNum),
+      `Ksh${formatKshPlainNumber(chickenRow.unitPrice)}`,
+      `Ksh${formatKshPlainNumber(chickenRow.lineTotal)}`,
+    ]);
+  }
+
+  runPdfAutoTable(doc, jsPdfNs, {
+    head: [["DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]],
+    body: tableBody,
+    startY: headerBottom,
+    margin: { left: margin, right: margin },
+    tableWidth: tableW,
+    styles: {
+      font: "helvetica",
+      fontSize: 10,
+      cellPadding: { top: 9, bottom: 9, left: 10, right: 10 },
+      valign: "middle",
+      lineColor: G.edge,
+      lineWidth: 0.2,
+      textColor: [33, 33, 33],
+    },
+    headStyles: {
+      fillColor: G.dark,
+      textColor: 255,
+      fontStyle: "bold",
+      halign: "center",
+      valign: "middle",
+      fontSize: 9.5,
+    },
+    columnStyles: {
+      0: { halign: "left", cellWidth: colW.desc },
+      1: { halign: "right", cellWidth: colW.qty },
+      2: { halign: "right", cellWidth: colW.rate },
+      3: { halign: "right", cellWidth: colW.amt },
+    },
+    alternateRowStyles: { fillColor: [252, 255, 253] },
+    theme: "plain",
+  });
+
+  const finalY = doc.lastAutoTable?.finalY || headerBottom;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...G.dark);
+  let totalsY = finalY + 22;
+  if (totalBags > 0) {
+    doc.text(`TOTAL BAGS: ${totalBags}`, rightX, totalsY, { align: "right" });
+    totalsY += 16;
+  }
+  if (chickenRow) {
+    doc.text(`TOTAL CHICKS: ${chickenRow.qtyNum}`, rightX, totalsY, { align: "right" });
+    totalsY += 16;
+  }
+  drawInvoicePaymentSummaryPdf(doc, {
+    rightX,
+    startY: totalsY + 14,
+    darkColor: G.dark,
+    rows: [
+      { label: "TOTAL AMOUNT", value: receiptTotal },
+      { label: "PAID AMOUNT", value: paidAmount },
+      { label: "UNPAID BALANCE", value: unpaidBalance },
+    ],
+  });
+
+  doc.save(`${safeBusiness}-receipt-${fileDate}.pdf`);
+}
+
 document.getElementById("calcDownloadPdfBtn")?.addEventListener("click", () => downloadCalculatorPdf("calculator"));
 document.getElementById("calcDownloadProformaBtn")?.addEventListener("click", () => downloadCalculatorPdf("proforma"));
 document.getElementById("calcDownloadInvoiceBtn")?.addEventListener("click", () => downloadCalculatorPdf("invoice"));
+
+receiptBody?.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.dataset.kind !== "calc-bags" && target.dataset.kind !== "calc-buying" && target.dataset.kind !== "calc-selling") return;
+  receiptRememberRowFromInputs(target.closest("tr"));
+  updateReceiptRowTotals();
+});
+document.getElementById("receiptClearBtn")?.addEventListener("click", () => resetReceiptForm());
+document.getElementById("receiptDownloadBtn")?.addEventListener("click", () => {
+  downloadReceiptPdf().catch((err) => {
+    console.error(err);
+    alert(err?.message || "Could not generate the receipt PDF.");
+  });
+});
+document.getElementById("receiptPaidAmount")?.addEventListener("input", updateReceiptPaymentSummary);
+document.getElementById("receiptCustomerForm")?.addEventListener("submit", (e) => e.preventDefault());
+document.getElementById("receiptChickenForm")?.addEventListener("submit", (e) => e.preventDefault());
+document.getElementById("receiptChBreed")?.addEventListener("change", () => {
+  applyReceiptChickenPriceFromBreed();
+  updateReceiptChickenTotalDisplay();
+});
+document.getElementById("receiptChQuantity")?.addEventListener("input", updateReceiptChickenTotalDisplay);
+document.getElementById("receiptChClearBtn")?.addEventListener("click", () => resetReceiptChickenForm());
+{
+  const receiptChDateDisplay = document.getElementById("receiptChDateDisplay");
+  const receiptChDate = document.getElementById("receiptChDate");
+  const receiptChOpenCalendarBtn = document.getElementById("receiptChOpenCalendarBtn");
+  if (receiptChDateDisplay && receiptChDate && receiptChOpenCalendarBtn) {
+    wireDatePicker(receiptChDateDisplay, receiptChDate, receiptChOpenCalendarBtn);
+  }
+}
 
 document.getElementById("chBreed")?.addEventListener("change", () => {
   if (state.user?.role === "employee") {
