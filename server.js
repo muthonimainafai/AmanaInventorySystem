@@ -1424,12 +1424,22 @@ async function initDb() {
       amount_usd REAL NOT NULL DEFAULT 0,
       amount_ksh REAL NOT NULL DEFAULT 0,
       china_tracking_no TEXT NOT NULL DEFAULT '',
+      kit_tracking_no TEXT NOT NULL DEFAULT '',
+      cylinder_tracking_no TEXT NOT NULL DEFAULT '',
       expected_cbm REAL NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
+  await run("ALTER TABLE autogas_entries ADD COLUMN kit_tracking_no TEXT NOT NULL DEFAULT ''").catch(() => {});
+  await run("ALTER TABLE autogas_entries ADD COLUMN cylinder_tracking_no TEXT NOT NULL DEFAULT ''").catch(() => {});
+  await run(
+    `UPDATE autogas_entries
+     SET kit_tracking_no = china_tracking_no
+     WHERE TRIM(COALESCE(kit_tracking_no, '')) = ''
+       AND TRIM(COALESCE(china_tracking_no, '')) != ''`
+  ).catch(() => {});
 
   await run(`
     CREATE TABLE IF NOT EXISTS pigs_entries (
@@ -6398,7 +6408,8 @@ app.post("/api/autogas", auth, allowRoles("owner", "employee"), async (req, res)
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
-  const chinaTracking = String(p.china_tracking_no || "").trim();
+  const kitTracking = String(p.kit_tracking_no != null ? p.kit_tracking_no : p.china_tracking_no || "").trim();
+  const cylinderTracking = String(p.cylinder_tracking_no || "").trim();
   let amountUsd, amountKsh, expectedCbm;
   try {
     amountUsd = parseRoseNonNegativeField(p.amount_usd ?? 0, "Amount paid in dollars");
@@ -6409,9 +6420,9 @@ app.post("/api/autogas", auth, allowRoles("owner", "employee"), async (req, res)
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO autogas_entries (date, description, amount_usd, amount_ksh, china_tracking_no, expected_cbm, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, amountUsd, amountKsh, chinaTracking, expectedCbm, req.user.username, nowIso, nowIso]
+    `INSERT INTO autogas_entries (date, description, amount_usd, amount_ksh, china_tracking_no, kit_tracking_no, cylinder_tracking_no, expected_cbm, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, amountUsd, amountKsh, kitTracking, kitTracking, cylinderTracking, expectedCbm, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -6426,7 +6437,8 @@ app.put("/api/autogas/:id", auth, allowRoles("owner", "employee"), async (req, r
   if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
   const description = String(p.description || "").trim();
   if (!description) return res.status(400).json({ error: "Description is required." });
-  const chinaTracking = String(p.china_tracking_no || "").trim();
+  const kitTracking = String(p.kit_tracking_no != null ? p.kit_tracking_no : p.china_tracking_no || "").trim();
+  const cylinderTracking = String(p.cylinder_tracking_no || "").trim();
   let amountUsd, amountKsh, expectedCbm;
   try {
     amountUsd = parseRoseNonNegativeField(p.amount_usd ?? 0, "Amount paid in dollars");
@@ -6436,8 +6448,8 @@ app.put("/api/autogas/:id", auth, allowRoles("owner", "employee"), async (req, r
     return res.status(400).json({ error: err.message });
   }
   await run(
-    `UPDATE autogas_entries SET date = ?, description = ?, amount_usd = ?, amount_ksh = ?, china_tracking_no = ?, expected_cbm = ?, updated_at = ? WHERE id = ?`,
-    [dateCanon, description, amountUsd, amountKsh, chinaTracking, expectedCbm, new Date().toISOString(), id]
+    `UPDATE autogas_entries SET date = ?, description = ?, amount_usd = ?, amount_ksh = ?, china_tracking_no = ?, kit_tracking_no = ?, cylinder_tracking_no = ?, expected_cbm = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, amountUsd, amountKsh, kitTracking, kitTracking, cylinderTracking, expectedCbm, new Date().toISOString(), id]
   );
   res.json({ ok: true });
 });

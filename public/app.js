@@ -9708,7 +9708,7 @@ function renderAutogasTable() {
   const totalKshEl = document.getElementById("agTotalKsh");
   const totalCbmEl = document.getElementById("agTotalCbm");
   if (!rows.length) {
-    autogasBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
+    autogasBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
     if (totalUsdEl) totalUsdEl.textContent = usdCurrency(0);
     if (totalKshEl) totalKshEl.textContent = currency(0);
     if (totalCbmEl) totalCbmEl.textContent = "0";
@@ -9732,7 +9732,8 @@ function renderAutogasTable() {
         <td>${escapeHtmlCell(row.description || "")}</td>
         <td>${usdCurrency(usd)}</td>
         <td>${currency(ksh)}</td>
-        <td>${escapeHtmlCell(row.china_tracking_no || "")}</td>
+        <td>${escapeHtmlCell(row.kit_tracking_no || row.china_tracking_no || "")}</td>
+        <td>${escapeHtmlCell(row.cylinder_tracking_no || "")}</td>
         <td>${Number.isFinite(cbm) ? cbm.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "0"}</td>
         <td>
           <div class="row-actions">
@@ -10744,7 +10745,8 @@ autogasForm?.addEventListener("submit", async (event) => {
     description,
     amount_usd: parseMoneyFromInput(document.getElementById("agAmountUsd")?.value) || 0,
     amount_ksh: parseMoneyFromInput(document.getElementById("agAmountKsh")?.value) || 0,
-    china_tracking_no: String(document.getElementById("agChinaTracking")?.value || "").trim(),
+    kit_tracking_no: String(document.getElementById("agKitTracking")?.value || "").trim(),
+    cylinder_tracking_no: String(document.getElementById("agCylinderTracking")?.value || "").trim(),
     expected_cbm: parseMoneyFromInput(document.getElementById("agExpectedCbm")?.value) || 0,
   };
   const saveBtn = document.getElementById("agSaveBtn");
@@ -10777,12 +10779,14 @@ autogasBody?.addEventListener("click", async (event) => {
     const descEl = document.getElementById("agDescription");
     const usdEl = document.getElementById("agAmountUsd");
     const kshEl = document.getElementById("agAmountKsh");
-    const trackEl = document.getElementById("agChinaTracking");
+    const kitTrackEl = document.getElementById("agKitTracking");
+    const cylinderTrackEl = document.getElementById("agCylinderTracking");
     const cbmEl = document.getElementById("agExpectedCbm");
     if (descEl) descEl.value = row.description || "";
     if (usdEl) usdEl.value = formatMoneyForInput(row.amount_usd);
     if (kshEl) kshEl.value = formatMoneyForInput(row.amount_ksh);
-    if (trackEl) trackEl.value = row.china_tracking_no || "";
+    if (kitTrackEl) kitTrackEl.value = row.kit_tracking_no || row.china_tracking_no || "";
+    if (cylinderTrackEl) cylinderTrackEl.value = row.cylinder_tracking_no || "";
     if (cbmEl) cbmEl.value = formatMoneyForInput(row.expected_cbm);
     const saveBtn = document.getElementById("agSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
