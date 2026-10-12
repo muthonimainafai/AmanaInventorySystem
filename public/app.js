@@ -7,6 +7,7 @@ const state = {
       "rose",
       "home-chickens",
       "car-imports",
+      "autogas",
       "nahah",
       "terry",
       "cess",
@@ -106,6 +107,8 @@ const state = {
   weighBridgeEntries: [],
   editWeighBridgeId: null,
   weighBridgeWithdrawals: [],
+  autogasEntries: [],
+  editAutogasId: null,
   carCustomerDeposits: [],
   editCarCustomerDepositId: null,
   carJapanDeposits: [],
@@ -143,6 +146,7 @@ const PAGE_HEADINGS = {
   "customer-deposits": "Customer Deposits",
   "japan-deposits": "Japan Deposits",
   "clearance-costs": "Clearance Costs",
+  autogas: "Autogas kits & Cylinders",
   credit: "Credit",
   calculator: "Calculator",
   receipt: "Receipt",
@@ -168,6 +172,10 @@ function isRecordsTenant() {
 
 function isCarImportsTenant() {
   return state.appInstance === "car-imports";
+}
+
+function isAutogasTenant() {
+  return state.appInstance === "autogas";
 }
 
 function carConsigneesTenantEnabled() {
@@ -364,6 +372,7 @@ function defaultPageForLoggedInUser() {
   if (isWaterBillsTenant()) return "water-bills";
   if (isElectricityBillsTenant()) return "electricity-bills";
   if (isCarImportsTenant()) return "customer-deposits";
+  if (isAutogasTenant()) return "autogas";
   if (state.appInstance === "terry") return "rose-inventory";
   if (
     state.appInstance === "cess" ||
@@ -780,6 +789,11 @@ const clearanceCostsBody = document.getElementById("clearance-costs-body");
 const ccDateDisplay = document.getElementById("ccDateDisplay");
 const ccDate = document.getElementById("ccDate");
 const ccOpenCalendarBtn = document.getElementById("ccOpenCalendarBtn");
+const autogasForm = document.getElementById("autogas-form");
+const autogasBody = document.getElementById("autogas-body");
+const agDateDisplay = document.getElementById("agDateDisplay");
+const agDate = document.getElementById("agDate");
+const agOpenCalendarBtn = document.getElementById("agOpenCalendarBtn");
 const calcBody = document.getElementById("calc-body");
 const receiptBody = document.getElementById("receipt-body");
 const calcDueDateDisplay = document.getElementById("calcDueDateDisplay");
@@ -805,6 +819,7 @@ function persistAppInstance() {
     "rose",
     "home-chickens",
     "car-imports",
+    "autogas",
     "nahah",
     "terry",
     "cess",
@@ -826,6 +841,7 @@ function applyAppTheme() {
     "rose",
     "home-chickens",
     "car-imports",
+    "autogas",
     "nahah",
     "terry",
     "cess",
@@ -840,6 +856,7 @@ function applyAppTheme() {
   const isUfaray = tenant === "ufaray";
   const isRose = tenant === "rose" || tenant === "home-chickens";
   const isCarImports = tenant === "car-imports";
+  const isAutogas = tenant === "autogas";
   const isWaterBills = tenant === "water-bills";
   const isElectricityBills = tenant === "electricity-bills";
   const isMainaFaithCess = tenant === "maina-faith-cess";
@@ -861,6 +878,8 @@ function applyAppTheme() {
     ? "Water Bills - Desktop Inventory"
     : isElectricityBills
       ? "Electricity Bills - Desktop Inventory"
+      : isAutogas
+        ? "Autogas kits & Cylinders - Desktop Inventory"
       : isCarImports
         ? "Car Imports Inventory - Desktop Inventory"
       : isMainaFaithCess
@@ -886,6 +905,8 @@ function applyAppTheme() {
           ? "WATER BILLS"
           : isElectricityBills
             ? "ELECTRICITY BILLS"
+        : isAutogas
+          ? "AUTOGAS KITS & CYLINDERS"
         : isCarImports
           ? "CAR IMPORTS INVENTORY"
         : isUfaray
@@ -904,6 +925,8 @@ function applyAppTheme() {
       ? "Water Bills Login"
       : isElectricityBills
         ? "Electricity Bills Login"
+        : isAutogas
+          ? "Autogas kits & Cylinders Login"
         : isCarImports
           ? "Car Imports Inventory Login"
         : tenant === "terry"
@@ -988,6 +1011,7 @@ async function api(path, options = {}) {
       "rose",
       "home-chickens",
       "car-imports",
+      "autogas",
       "nahah",
       "terry",
       "cess",
@@ -1078,6 +1102,13 @@ function currency(value) {
   return Number(value || 0).toLocaleString("en-KE", {
     style: "currency",
     currency: "KES",
+  });
+}
+
+function usdCurrency(value) {
+  return Number(value || 0).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
   });
 }
 
@@ -2838,6 +2869,7 @@ function pdfBusinessTitle() {
   if (state.appInstance === "water-bills") return "Water Bills";
   if (state.appInstance === "electricity-bills") return "Electricity Bills";
   if (state.appInstance === "car-imports") return "Car Imports Inventory";
+  if (state.appInstance === "autogas") return "Autogas kits & Cylinders";
   if (state.appInstance === "ufaray") return "Ufaray Feeds";
   if (state.appInstance === "home-chickens") return "Home Chickens";
   if (state.appInstance === "maina-faith-cess") return "Faith Inventory";
@@ -4894,6 +4926,8 @@ function showLoggedIn() {
       ? false
       : carImportsTenant
       ? page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs"
+      : isAutogasTenant()
+      ? page === "autogas"
       : state.appInstance === "terry"
       ? page === "rose-inventory" || page === "nahashon-records" || page === "calculator" || page === "receipt" || page === "faith-expenses" || page === "faith-sales" || page === "balance"
       : state.appInstance === "cess" ||
@@ -4967,6 +5001,12 @@ function showLoggedIn() {
     if (isCarImportsTenant()) {
       shouldShow =
         page === "customer-deposits" || page === "japan-deposits" || page === "clearance-costs";
+    }
+    if (page === "autogas") {
+      shouldShow = isAutogasTenant();
+    }
+    if (isAutogasTenant()) {
+      shouldShow = page === "autogas";
     }
     btn.classList.toggle("hidden", !shouldShow);
   });
@@ -9066,6 +9106,12 @@ function showPage(page) {
     const carImportsPages = new Set(["customer-deposits", "japan-deposits", "clearance-costs"]);
     if (!carImportsPages.has(page)) return showPage("customer-deposits");
   }
+  if (isAutogasTenant() && page !== "autogas") {
+    return showPage("autogas");
+  }
+  if (page === "autogas" && !isAutogasTenant()) {
+    return showPage(defaultPageForLoggedInUser());
+  }
   if ((page === "water-bills" || page === "electricity-bills") && state.user?.role !== "owner") {
     return showPage(defaultPageForLoggedInUser());
   }
@@ -9308,6 +9354,7 @@ function showPage(page) {
   if (page === "customer-deposits") renderCustomerDepositsTable();
   if (page === "japan-deposits") renderJapanDepositsTable();
   if (page === "clearance-costs") renderClearanceCostsTable();
+  if (page === "autogas") renderAutogasTable();
   if (page === "calculator") {
     populateCalcChickenBreedSelect();
     initCalcChickenFormDefaults();
@@ -9629,6 +9676,80 @@ async function onActiveCarConsigneeChange(consigneeId) {
   if (state.currentPage) showPage(state.currentPage);
 }
 
+async function loadAutogasTenantData() {
+  try {
+    const rows = await api("/api/autogas");
+    state.autogasEntries = Array.isArray(rows) ? rows : [];
+  } catch (_error) {
+    state.autogasEntries = [];
+  }
+  renderAutogasTable();
+}
+
+function resetAutogasForm() {
+  if (autogasForm) autogasForm.reset();
+  state.editAutogasId = null;
+  if (agDate) agDate.value = "";
+  if (agDateDisplay) agDateDisplay.value = "";
+  const usd = document.getElementById("agAmountUsd");
+  const ksh = document.getElementById("agAmountKsh");
+  const cbm = document.getElementById("agExpectedCbm");
+  if (usd instanceof HTMLInputElement) usd.value = "0";
+  if (ksh instanceof HTMLInputElement) ksh.value = "0";
+  if (cbm instanceof HTMLInputElement) cbm.value = "0";
+  const saveBtn = document.getElementById("agSaveBtn");
+  if (saveBtn) saveBtn.textContent = "Save entry";
+}
+
+function renderAutogasTable() {
+  if (!autogasBody) return;
+  const rows = sortRowsLatestFirst(state.autogasEntries || []);
+  const totalUsdEl = document.getElementById("agTotalUsd");
+  const totalKshEl = document.getElementById("agTotalKsh");
+  const totalCbmEl = document.getElementById("agTotalCbm");
+  if (!rows.length) {
+    autogasBody.innerHTML = '<tr><td colspan="8" class="empty">No records.</td></tr>';
+    if (totalUsdEl) totalUsdEl.textContent = usdCurrency(0);
+    if (totalKshEl) totalKshEl.textContent = currency(0);
+    if (totalCbmEl) totalCbmEl.textContent = "0";
+    return;
+  }
+  let sumUsd = 0;
+  let sumKsh = 0;
+  let sumCbm = 0;
+  autogasBody.innerHTML = rows
+    .map((row, idx) => {
+      const usd = Number(row.amount_usd || 0);
+      const ksh = Number(row.amount_ksh || 0);
+      const cbm = Number(row.expected_cbm || 0);
+      sumUsd += usd;
+      sumKsh += ksh;
+      sumCbm += cbm;
+      return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${formatDateDMY(row.date)}</td>
+        <td>${escapeHtmlCell(row.description || "")}</td>
+        <td>${usdCurrency(usd)}</td>
+        <td>${currency(ksh)}</td>
+        <td>${escapeHtmlCell(row.china_tracking_no || "")}</td>
+        <td>${Number.isFinite(cbm) ? cbm.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "0"}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" data-kind="autogas" data-action="edit" data-id="${row.id}">Edit</button>
+            <button type="button" class="danger" data-kind="autogas" data-action="delete" data-id="${row.id}">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  if (totalUsdEl) totalUsdEl.textContent = usdCurrency(sumUsd);
+  if (totalKshEl) totalKshEl.textContent = currency(sumKsh);
+  if (totalCbmEl) {
+    totalCbmEl.textContent = sumCbm.toLocaleString("en-KE", { maximumFractionDigits: 3 });
+  }
+}
+
 async function loadCarImportsTenantData() {
   await loadCarConsignees();
   if (!state.activeCarConsigneeId) {
@@ -9782,6 +9903,10 @@ async function loadAllData() {
   }
   if (isCarImportsTenant()) {
     await loadCarImportsTenantData();
+    return;
+  }
+  if (isAutogasTenant()) {
+    await loadAutogasTenantData();
     return;
   }
   await loadInventoryLots();
@@ -10061,6 +10186,12 @@ document.getElementById("openHomeChickensBtn")?.addEventListener("click", () => 
 
 document.getElementById("openCarImportsBtn")?.addEventListener("click", () => {
   state.appInstance = "car-imports";
+  persistAppInstance();
+  showLoginCard();
+});
+
+document.getElementById("openAutogasBtn")?.addEventListener("click", () => {
+  state.appInstance = "autogas";
   persistAppInstance();
   showLoginCard();
 });
@@ -10589,6 +10720,86 @@ if (weighBridgeDateDisplay && weighBridgeDate && weighBridgeOpenCalendarBtn) {
   wireDatePicker(weighBridgeDateDisplay, weighBridgeDate, weighBridgeOpenCalendarBtn);
 }
 document.getElementById("weighBridgeClearBtn")?.addEventListener("click", resetWeighBridgeForm);
+if (agDateDisplay && agDate && agOpenCalendarBtn) {
+  wireDatePicker(agDateDisplay, agDate, agOpenCalendarBtn);
+}
+document.getElementById("agClearBtn")?.addEventListener("click", resetAutogasForm);
+wireMoneyInputBlur(document.getElementById("agAmountUsd"));
+wireMoneyInputBlur(document.getElementById("agAmountKsh"));
+wireMoneyInputBlur(document.getElementById("agExpectedCbm"));
+autogasForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dateValue = agDateDisplay?.value?.trim() || "";
+  if (!isValidDMY(dateValue)) {
+    alert("Date must be in DD/MM/YYYY format.");
+    return;
+  }
+  const description = String(document.getElementById("agDescription")?.value || "").trim();
+  if (!description) {
+    alert("Description is required.");
+    return;
+  }
+  const payload = {
+    date: dateValue,
+    description,
+    amount_usd: parseMoneyFromInput(document.getElementById("agAmountUsd")?.value) || 0,
+    amount_ksh: parseMoneyFromInput(document.getElementById("agAmountKsh")?.value) || 0,
+    china_tracking_no: String(document.getElementById("agChinaTracking")?.value || "").trim(),
+    expected_cbm: parseMoneyFromInput(document.getElementById("agExpectedCbm")?.value) || 0,
+  };
+  const saveBtn = document.getElementById("agSaveBtn");
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    if (state.editAutogasId) {
+      await api(`/api/autogas/${state.editAutogasId}`, { method: "PUT", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/autogas", { method: "POST", body: JSON.stringify(payload) });
+    }
+    resetAutogasForm();
+    await loadAutogasTenantData();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+});
+autogasBody?.addEventListener("click", async (event) => {
+  const btn = event.target.closest("button[data-kind='autogas']");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const action = btn.dataset.action;
+  const row = (state.autogasEntries || []).find((r) => String(r.id) === String(id));
+  if (!row) return;
+  if (action === "edit") {
+    state.editAutogasId = row.id;
+    if (agDate) agDate.value = toIsoDate(row.date);
+    if (agDateDisplay) agDateDisplay.value = formatDateDMY(row.date);
+    const descEl = document.getElementById("agDescription");
+    const usdEl = document.getElementById("agAmountUsd");
+    const kshEl = document.getElementById("agAmountKsh");
+    const trackEl = document.getElementById("agChinaTracking");
+    const cbmEl = document.getElementById("agExpectedCbm");
+    if (descEl) descEl.value = row.description || "";
+    if (usdEl) usdEl.value = formatMoneyForInput(row.amount_usd);
+    if (kshEl) kshEl.value = formatMoneyForInput(row.amount_ksh);
+    if (trackEl) trackEl.value = row.china_tracking_no || "";
+    if (cbmEl) cbmEl.value = formatMoneyForInput(row.expected_cbm);
+    const saveBtn = document.getElementById("agSaveBtn");
+    if (saveBtn) saveBtn.textContent = "Update entry";
+    document.getElementById("page-autogas")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  if (action === "delete") {
+    if (!window.confirm("Delete this Autogas entry?")) return;
+    try {
+      await api(`/api/autogas/${id}`, { method: "DELETE" });
+      if (String(state.editAutogasId) === String(id)) resetAutogasForm();
+      await loadAutogasTenantData();
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+});
 wireMoneyInputBlur(document.getElementById("weighBridgeAmount"));
 wireMoneyInputBlur(document.getElementById("weighBridgeUfarayKsh"));
 wireMoneyInputBlur(document.getElementById("weighBridgeAmanaKsh"));

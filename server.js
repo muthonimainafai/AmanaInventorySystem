@@ -38,6 +38,7 @@ function loadEnvFile() {
       key.startsWith("ELECTRICITY_BILLS_") ||
       key.startsWith("HOME_CHICKENS_") ||
       key.startsWith("CAR_IMPORTS_") ||
+      key.startsWith("AUTOGAS_") ||
       key.startsWith("SHOP_") ||
       key.startsWith("VEHICLE_") ||
       key === "JWT_SECRET";
@@ -269,6 +270,31 @@ function tenantLoginEnv(tenant) {
           : "AMANA_* (fallback)",
     };
   }
+  if (t === "autogas") {
+    const ownerUsername = String(process.env.AUTOGAS_OWNER_USERNAME || "").trim();
+    const ownerPassword = String(process.env.AUTOGAS_OWNER_PASSWORD || "");
+    const ownerFullName = String(process.env.AUTOGAS_OWNER_FULL_NAME || "").trim();
+    const employeeUsername = String(process.env.AUTOGAS_EMPLOYEE_USERNAME || "").trim();
+    const employeePassword = String(process.env.AUTOGAS_EMPLOYEE_PASSWORD || "");
+    const employeeFullName = String(process.env.AUTOGAS_EMPLOYEE_FULL_NAME || "").trim();
+    return {
+      tenant: "autogas",
+      owner: {
+        username: ownerUsername || AMANA_OWNER_USERNAME,
+        password: ownerPassword || AMANA_OWNER_PASSWORD,
+        fullName: ownerFullName || "Autogas Owner",
+      },
+      employee: {
+        username: employeeUsername || AMANA_EMPLOYEE_USERNAME,
+        password: employeePassword || AMANA_EMPLOYEE_PASSWORD,
+        fullName: employeeFullName || "Autogas Employee",
+      },
+      sourceLabel:
+        ownerUsername || employeeUsername || ownerPassword || employeePassword
+          ? "AUTOGAS_*"
+          : "AMANA_* (fallback)",
+    };
+  }
   if (t === "car-imports") {
     const ownerUsername = String(process.env.CAR_IMPORTS_OWNER_USERNAME || "").trim();
     const ownerPassword = String(process.env.CAR_IMPORTS_OWNER_PASSWORD || "");
@@ -394,6 +420,7 @@ function normalizeAppTenant(value) {
   if (t === "rose") return "rose";
   if (t === "home-chickens") return "home-chickens";
   if (t === "car-imports") return "car-imports";
+  if (t === "autogas") return "autogas";
   if (t === "terry") return "terry";
   if (t === "cess") return "cess";
   if (t === "terry-and-cess") return "terry-and-cess";
@@ -420,6 +447,7 @@ function dbFileNameForTenant(tenant) {
   if (t === "rose") return "inventory-rose.db";
   if (t === "home-chickens") return "inventory-home-chickens.db";
   if (t === "car-imports") return "inventory-car-imports.db";
+  if (t === "autogas") return "inventory-autogas.db";
   if (t === "water-bills") return "inventory-water-bills.db";
   if (t === "electricity-bills") return "inventory-electricity-bills.db";
   return t === "ufaray" ? "inventory-ufaray.db" : "inventory.db";
@@ -1387,6 +1415,21 @@ async function initDb() {
       }
     }
   }
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS autogas_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      amount_usd REAL NOT NULL DEFAULT 0,
+      amount_ksh REAL NOT NULL DEFAULT 0,
+      china_tracking_no TEXT NOT NULL DEFAULT '',
+      expected_cbm REAL NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
 
   await run(`
     CREATE TABLE IF NOT EXISTS pigs_entries (
@@ -6334,6 +6377,78 @@ app.put("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, res)
   res.json({ ok: true });
 });
 
+function requireAutogasTenant(res) {
+  if (activeTenant() !== "autogas") {
+    res.status(403).json({ error: "This feature is only available in Autogas kits & Cylinders." });
+    return false;
+  }
+  return true;
+}
+
+app.get("/api/autogas", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireAutogasTenant(res)) return;
+  const rows = await all("SELECT * FROM autogas_entries ORDER BY id DESC");
+  res.json(rows);
+});
+
+app.post("/api/autogas", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireAutogasTenant(res)) return;
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  const chinaTracking = String(p.china_tracking_no || "").trim();
+  let amountUsd, amountKsh, expectedCbm;
+  try {
+    amountUsd = parseRoseNonNegativeField(p.amount_usd ?? 0, "Amount paid in dollars");
+    amountKsh = parseRoseNonNegativeField(p.amount_ksh ?? 0, "Amount in Ksh");
+    expectedCbm = parseRoseNonNegativeField(p.expected_cbm ?? 0, "Expected CBM");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO autogas_entries (date, description, amount_usd, amount_ksh, china_tracking_no, expected_cbm, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, amountUsd, amountKsh, chinaTracking, expectedCbm, req.user.username, nowIso, nowIso]
+  );
+  res.json({ ok: true });
+});
+
+app.put("/api/autogas/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireAutogasTenant(res)) return;
+  const id = Number(req.params.id);
+  const existing = await get("SELECT * FROM autogas_entries WHERE id = ?", [id]);
+  if (!existing) return res.status(404).json({ error: "Record not found." });
+  const p = req.body || {};
+  const dateCanon = normalizeInventoryDate(p.date);
+  if (!dateCanon) return res.status(400).json({ error: "Invalid date. Use DD/MM/YYYY." });
+  const description = String(p.description || "").trim();
+  if (!description) return res.status(400).json({ error: "Description is required." });
+  const chinaTracking = String(p.china_tracking_no || "").trim();
+  let amountUsd, amountKsh, expectedCbm;
+  try {
+    amountUsd = parseRoseNonNegativeField(p.amount_usd ?? 0, "Amount paid in dollars");
+    amountKsh = parseRoseNonNegativeField(p.amount_ksh ?? 0, "Amount in Ksh");
+    expectedCbm = parseRoseNonNegativeField(p.expected_cbm ?? 0, "Expected CBM");
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  await run(
+    `UPDATE autogas_entries SET date = ?, description = ?, amount_usd = ?, amount_ksh = ?, china_tracking_no = ?, expected_cbm = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, amountUsd, amountKsh, chinaTracking, expectedCbm, new Date().toISOString(), id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/autogas/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
+  if (!requireAutogasTenant(res)) return;
+  const result = await run("DELETE FROM autogas_entries WHERE id = ?", [Number(req.params.id)]);
+  if (result.changes === 0) return res.status(404).json({ error: "Record not found." });
+  res.json({ ok: true });
+});
+
 app.delete("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, res) => {
   const result =
     req.user.role === "owner"
@@ -8405,6 +8520,7 @@ async function startServer(port = PORT) {
   await ensureTenantInitialized("rose");
   await ensureTenantInitialized("home-chickens");
   await ensureTenantInitialized("car-imports");
+  await ensureTenantInitialized("autogas");
   await ensureTenantInitialized("ufaray");
   await ensureTenantInitialized("water-bills");
   await ensureTenantInitialized("electricity-bills");
