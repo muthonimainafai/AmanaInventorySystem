@@ -1427,6 +1427,7 @@ async function initDb() {
       kit_tracking_no TEXT NOT NULL DEFAULT '',
       cylinder_tracking_no TEXT NOT NULL DEFAULT '',
       expected_cbm REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -1434,6 +1435,7 @@ async function initDb() {
   `);
   await run("ALTER TABLE autogas_entries ADD COLUMN kit_tracking_no TEXT NOT NULL DEFAULT ''").catch(() => {});
   await run("ALTER TABLE autogas_entries ADD COLUMN cylinder_tracking_no TEXT NOT NULL DEFAULT ''").catch(() => {});
+  await run("ALTER TABLE autogas_entries ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'").catch(() => {});
   await run(
     `UPDATE autogas_entries
      SET kit_tracking_no = china_tracking_no
@@ -6387,6 +6389,13 @@ app.put("/api/pigs/:id", auth, allowRoles("owner", "employee"), async (req, res)
   res.json({ ok: true });
 });
 
+function normalizeAutogasStatus(value) {
+  const s = String(value ?? "").trim().toLowerCase();
+  if (!s) return "pending";
+  if (s === "pending" || s === "delivered" || s === "taken") return s;
+  return null;
+}
+
 function requireAutogasTenant(res) {
   if (activeTenant() !== "autogas") {
     res.status(403).json({ error: "This feature is only available in Autogas kits & Cylinders." });
@@ -6410,6 +6419,8 @@ app.post("/api/autogas", auth, allowRoles("owner", "employee"), async (req, res)
   if (!description) return res.status(400).json({ error: "Description is required." });
   const kitTracking = String(p.kit_tracking_no != null ? p.kit_tracking_no : p.china_tracking_no || "").trim();
   const cylinderTracking = String(p.cylinder_tracking_no || "").trim();
+  const status = normalizeAutogasStatus(p.status);
+  if (!status) return res.status(400).json({ error: "Status must be pending, delivered, or taken." });
   let amountUsd, amountKsh, expectedCbm;
   try {
     amountUsd = parseRoseNonNegativeField(p.amount_usd ?? 0, "Amount paid in dollars");
@@ -6420,9 +6431,9 @@ app.post("/api/autogas", auth, allowRoles("owner", "employee"), async (req, res)
   }
   const nowIso = new Date().toISOString();
   await run(
-    `INSERT INTO autogas_entries (date, description, amount_usd, amount_ksh, china_tracking_no, kit_tracking_no, cylinder_tracking_no, expected_cbm, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [dateCanon, description, amountUsd, amountKsh, kitTracking, kitTracking, cylinderTracking, expectedCbm, req.user.username, nowIso, nowIso]
+    `INSERT INTO autogas_entries (date, description, amount_usd, amount_ksh, china_tracking_no, kit_tracking_no, cylinder_tracking_no, expected_cbm, status, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [dateCanon, description, amountUsd, amountKsh, kitTracking, kitTracking, cylinderTracking, expectedCbm, status, req.user.username, nowIso, nowIso]
   );
   res.json({ ok: true });
 });
@@ -6439,6 +6450,8 @@ app.put("/api/autogas/:id", auth, allowRoles("owner", "employee"), async (req, r
   if (!description) return res.status(400).json({ error: "Description is required." });
   const kitTracking = String(p.kit_tracking_no != null ? p.kit_tracking_no : p.china_tracking_no || "").trim();
   const cylinderTracking = String(p.cylinder_tracking_no || "").trim();
+  const status = normalizeAutogasStatus(p.status);
+  if (!status) return res.status(400).json({ error: "Status must be pending, delivered, or taken." });
   let amountUsd, amountKsh, expectedCbm;
   try {
     amountUsd = parseRoseNonNegativeField(p.amount_usd ?? 0, "Amount paid in dollars");
@@ -6448,8 +6461,8 @@ app.put("/api/autogas/:id", auth, allowRoles("owner", "employee"), async (req, r
     return res.status(400).json({ error: err.message });
   }
   await run(
-    `UPDATE autogas_entries SET date = ?, description = ?, amount_usd = ?, amount_ksh = ?, china_tracking_no = ?, kit_tracking_no = ?, cylinder_tracking_no = ?, expected_cbm = ?, updated_at = ? WHERE id = ?`,
-    [dateCanon, description, amountUsd, amountKsh, kitTracking, kitTracking, cylinderTracking, expectedCbm, new Date().toISOString(), id]
+    `UPDATE autogas_entries SET date = ?, description = ?, amount_usd = ?, amount_ksh = ?, china_tracking_no = ?, kit_tracking_no = ?, cylinder_tracking_no = ?, expected_cbm = ?, status = ?, updated_at = ? WHERE id = ?`,
+    [dateCanon, description, amountUsd, amountKsh, kitTracking, kitTracking, cylinderTracking, expectedCbm, status, new Date().toISOString(), id]
   );
   res.json({ ok: true });
 });

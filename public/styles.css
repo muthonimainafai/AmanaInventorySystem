@@ -551,6 +551,12 @@ select {
   padding: 9px 10px;
 }
 
+.ag-status-select {
+  width: 100%;
+  min-width: 7.5rem;
+  padding: 6px 8px;
+}
+
 .date-field {
   gap: 6px;
 }

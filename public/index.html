@@ -2541,7 +2541,7 @@
         <div id="page-autogas" class="app-page hidden">
           <div class="card">
             <h3 class="card-title">Autogas kits &amp; Cylinders</h3>
-            <p class="field-hint">Record each shipment: date, description, amount paid in dollars, amount in Ksh, kit tracking number, cylinder tracking number, and expected CBM. Totals add up Amount (USD), Amount (Ksh), and Expected CBM.</p>
+            <p class="field-hint">Record each shipment: date, description, amount paid in dollars, amount in Ksh, kit tracking number, cylinder tracking number, expected CBM, and status. Totals add up Amount (USD), Amount (Ksh), and Expected CBM.</p>
             <form id="autogas-form">
               <div class="grid">
                 <label class="date-field">
@@ -2576,6 +2576,14 @@
                   Expected CBM
                   <input type="text" id="agExpectedCbm" inputmode="decimal" autocomplete="off" value="0" />
                 </label>
+                <label>
+                  Status
+                  <select id="agStatus">
+                    <option value="pending">Pending</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="taken">Taken</option>
+                  </select>
+                </label>
               </div>
               <div class="actions">
                 <button type="submit" id="agSaveBtn">Save entry</button>
@@ -2596,10 +2604,11 @@
                     <th>Kit tracking number</th>
                     <th>Cylinder tracking number</th>
                     <th>Expected CBM</th>
+                    <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
-                <tbody id="autogas-body"><tr><td colspan="9" class="empty">No records.</td></tr></tbody>
+                <tbody id="autogas-body"><tr><td colspan="10" class="empty">No records.</td></tr></tbody>
                 <tfoot>
                   <tr>
                     <th colspan="3">Total</th>
@@ -2608,6 +2617,7 @@
                     <th>—</th>
                     <th>—</th>
                     <th id="agTotalCbm">0</th>
+                    <th>—</th>
                     <th>—</th>
                   </tr>
                 </tfoot>
@@ -3440,6 +3450,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
-    <script src="app.js?v=2026-10-12-autogas-tracking-split"></script>
+    <script src="app.js?v=2026-10-13-autogas-status"></script>
   </body>
 </html>

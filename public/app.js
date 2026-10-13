@@ -2930,7 +2930,14 @@ function tableElementToPdfData(table) {
     if (tr.querySelector("td.empty")) continue;
     const cells = [...tr.querySelectorAll("td")].filter((td) => !td.querySelector(".row-actions"));
     if (!cells.length) continue;
-    let row = cells.map((td) => td.textContent.trim().replace(/\s+/g, " "));
+    let row = cells.map((td) => {
+      const select = td.querySelector("select");
+      if (select instanceof HTMLSelectElement) {
+        const chosen = select.selectedOptions?.[0];
+        return String(chosen?.textContent || select.value || "").trim().replace(/\s+/g, " ");
+      }
+      return td.textContent.trim().replace(/\s+/g, " ");
+    });
     while (row.length > headers.length) row.pop();
     while (row.length < headers.length) row.push("");
     body.push(row);
@@ -9686,6 +9693,25 @@ async function loadAutogasTenantData() {
   renderAutogasTable();
 }
 
+const AUTOGAS_STATUS_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "delivered", label: "Delivered" },
+  { value: "taken", label: "Taken" },
+];
+
+function normalizeAutogasStatus(value) {
+  const s = String(value || "").trim().toLowerCase();
+  return AUTOGAS_STATUS_OPTIONS.some((option) => option.value === s) ? s : "pending";
+}
+
+function autogasStatusSelectHtml(row) {
+  const current = normalizeAutogasStatus(row?.status);
+  const options = AUTOGAS_STATUS_OPTIONS.map(
+    (option) => `<option value="${option.value}"${option.value === current ? " selected" : ""}>${option.label}</option>`
+  ).join("");
+  return `<select class="ag-status-select" data-kind="autogas" data-action="status" data-id="${row.id}" aria-label="Status">${options}</select>`;
+}
+
 function resetAutogasForm() {
   if (autogasForm) autogasForm.reset();
   state.editAutogasId = null;
@@ -9697,6 +9723,8 @@ function resetAutogasForm() {
   if (usd instanceof HTMLInputElement) usd.value = "0";
   if (ksh instanceof HTMLInputElement) ksh.value = "0";
   if (cbm instanceof HTMLInputElement) cbm.value = "0";
+  const statusEl = document.getElementById("agStatus");
+  if (statusEl instanceof HTMLSelectElement) statusEl.value = "pending";
   const saveBtn = document.getElementById("agSaveBtn");
   if (saveBtn) saveBtn.textContent = "Save entry";
 }
@@ -9708,7 +9736,7 @@ function renderAutogasTable() {
   const totalKshEl = document.getElementById("agTotalKsh");
   const totalCbmEl = document.getElementById("agTotalCbm");
   if (!rows.length) {
-    autogasBody.innerHTML = '<tr><td colspan="9" class="empty">No records.</td></tr>';
+    autogasBody.innerHTML = '<tr><td colspan="10" class="empty">No records.</td></tr>';
     if (totalUsdEl) totalUsdEl.textContent = usdCurrency(0);
     if (totalKshEl) totalKshEl.textContent = currency(0);
     if (totalCbmEl) totalCbmEl.textContent = "0";
@@ -9735,6 +9763,7 @@ function renderAutogasTable() {
         <td>${escapeHtmlCell(row.kit_tracking_no || row.china_tracking_no || "")}</td>
         <td>${escapeHtmlCell(row.cylinder_tracking_no || "")}</td>
         <td>${Number.isFinite(cbm) ? cbm.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "0"}</td>
+        <td>${autogasStatusSelectHtml(row)}</td>
         <td>
           <div class="row-actions">
             <button type="button" data-kind="autogas" data-action="edit" data-id="${row.id}">Edit</button>
@@ -10748,6 +10777,7 @@ autogasForm?.addEventListener("submit", async (event) => {
     kit_tracking_no: String(document.getElementById("agKitTracking")?.value || "").trim(),
     cylinder_tracking_no: String(document.getElementById("agCylinderTracking")?.value || "").trim(),
     expected_cbm: parseMoneyFromInput(document.getElementById("agExpectedCbm")?.value) || 0,
+    status: normalizeAutogasStatus(document.getElementById("agStatus")?.value),
   };
   const saveBtn = document.getElementById("agSaveBtn");
   if (saveBtn) saveBtn.disabled = true;
@@ -10763,6 +10793,38 @@ autogasForm?.addEventListener("submit", async (event) => {
     alert(error.message);
   } finally {
     if (saveBtn) saveBtn.disabled = false;
+  }
+});
+autogasBody?.addEventListener("change", async (event) => {
+  const select = event.target instanceof HTMLSelectElement ? event.target : null;
+  if (!select || select.dataset.action !== "status" || select.dataset.kind !== "autogas") return;
+  const id = select.dataset.id;
+  const row = (state.autogasEntries || []).find((r) => String(r.id) === String(id));
+  if (!row) return;
+  const previous = normalizeAutogasStatus(row.status);
+  const next = normalizeAutogasStatus(select.value);
+  if (next === previous) return;
+  select.disabled = true;
+  try {
+    await api(`/api/autogas/${row.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        date: formatDateDMY(row.date),
+        description: row.description || "",
+        amount_usd: Number(row.amount_usd || 0),
+        amount_ksh: Number(row.amount_ksh || 0),
+        kit_tracking_no: row.kit_tracking_no || row.china_tracking_no || "",
+        cylinder_tracking_no: row.cylinder_tracking_no || "",
+        expected_cbm: Number(row.expected_cbm || 0),
+        status: next,
+      }),
+    });
+    row.status = next;
+  } catch (error) {
+    select.value = previous;
+    alert(error.message);
+  } finally {
+    select.disabled = false;
   }
 });
 autogasBody?.addEventListener("click", async (event) => {
@@ -10782,12 +10844,14 @@ autogasBody?.addEventListener("click", async (event) => {
     const kitTrackEl = document.getElementById("agKitTracking");
     const cylinderTrackEl = document.getElementById("agCylinderTracking");
     const cbmEl = document.getElementById("agExpectedCbm");
+    const statusEl = document.getElementById("agStatus");
     if (descEl) descEl.value = row.description || "";
     if (usdEl) usdEl.value = formatMoneyForInput(row.amount_usd);
     if (kshEl) kshEl.value = formatMoneyForInput(row.amount_ksh);
     if (kitTrackEl) kitTrackEl.value = row.kit_tracking_no || row.china_tracking_no || "";
     if (cylinderTrackEl) cylinderTrackEl.value = row.cylinder_tracking_no || "";
     if (cbmEl) cbmEl.value = formatMoneyForInput(row.expected_cbm);
+    if (statusEl instanceof HTMLSelectElement) statusEl.value = normalizeAutogasStatus(row.status);
     const saveBtn = document.getElementById("agSaveBtn");
     if (saveBtn) saveBtn.textContent = "Update entry";
     document.getElementById("page-autogas")?.scrollIntoView({ behavior: "smooth", block: "start" });
