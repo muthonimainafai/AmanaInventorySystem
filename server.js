@@ -582,10 +582,22 @@ function loadChickenBreedsList() {
   return defaultBreeds;
 }
 
-function normalizeChickenBreed(name) {
-  const s = String(name || "").trim();
+function sanitizeChickenBreedName(name) {
+  const s = String(name || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!s || s.length > 80) return null;
+  return s;
+}
+
+/** Breed must exist in `chicken_breeds` (includes owner-added breeds). */
+async function resolveChickenBreed(name) {
+  const s = sanitizeChickenBreedName(name);
   if (!s) return null;
-  return loadChickenBreedsList().includes(s) ? s : null;
+  const exact = await get("SELECT breed FROM chicken_breeds WHERE breed = ?", [s]);
+  if (exact) return exact.breed;
+  const ci = await get("SELECT breed FROM chicken_breeds WHERE LOWER(breed) = LOWER(?)", [s]);
+  return ci ? ci.breed : null;
 }
 
 /** Absolute paths for static + SPA (avoids sendFile NotFoundError on Windows / packaged apps). */
@@ -7781,8 +7793,41 @@ app.get("/api/chicken-breeds", auth, async (req, res) => {
   }
 });
 
+app.post("/api/chicken-breeds", auth, allowRoles("owner"), async (req, res) => {
+  try {
+    await ensureChickenBreedsSeeded();
+    const breed = sanitizeChickenBreedName(req.body.breed);
+    if (!breed) return res.status(400).json({ error: "Enter a valid breed name (1–80 characters)." });
+    const dup = await get("SELECT breed FROM chicken_breeds WHERE LOWER(breed) = LOWER(?)", [breed]);
+    if (dup) return res.status(400).json({ error: "That breed already exists." });
+    const buyingRaw = req.body.buying_price;
+    const sellingRaw = req.body.selling_price;
+    const buying = buyingRaw == null || buyingRaw === "" ? 0 : Number(buyingRaw);
+    const selling = sellingRaw == null || sellingRaw === "" ? 0 : Number(sellingRaw);
+    if (!Number.isFinite(buying) || buying < 0) {
+      return res.status(400).json({ error: "Buying price must be zero or greater." });
+    }
+    if (!Number.isFinite(selling) || selling < 0) {
+      return res.status(400).json({ error: "Selling price must be zero or greater." });
+    }
+    const margin = selling - buying;
+    const now = new Date().toISOString();
+    await run(
+      `INSERT INTO chicken_breeds (breed, buying_price, selling_price, profit_margin_per_chick, accumulated_profit, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?)`,
+      [breed, buying, selling, margin, now]
+    );
+    const row = await get("SELECT * FROM chicken_breeds WHERE breed = ?", [breed]);
+    res.json(row);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err);
+    res.status(500).json({ error: err.message || "Could not add breed." });
+  }
+});
+
 app.put("/api/chicken-breeds", auth, allowRoles("owner"), async (req, res) => {
-  const breed = normalizeChickenBreed(req.body.breed);
+  const breed = await resolveChickenBreed(req.body.breed);
   if (!breed) return res.status(400).json({ error: "Invalid breed." });
   const buying = Number(req.body.buying_price);
   const selling = Number(req.body.selling_price);
@@ -7866,7 +7911,7 @@ app.post("/api/chicken-sales", auth, allowRoles("owner", "employee"), async (req
   const throughParty = normalizeThroughParty(p.through_party);
   const isThrough = throughParty != null;
   const passThroughStatus = isThrough ? normalizePassThroughStatus(p.pass_through_status) : null;
-  const breed = normalizeChickenBreed(p.breed);
+  const breed = await resolveChickenBreed(p.breed);
   if (!breed) return res.status(400).json({ error: "Select a valid breed." });
   const qty = Number(p.quantity_birds);
   const unitPrice = Number(p.unit_price);
@@ -7960,7 +8005,7 @@ app.put("/api/chicken-sales/:id", auth, allowRoles("owner", "employee"), async (
   const p = req.body;
   const throughParty = normalizeThroughParty(p.through_party);
   const isThrough = throughParty != null;
-  const breed = normalizeChickenBreed(p.breed);
+  const breed = await resolveChickenBreed(p.breed);
   if (!breed) return res.status(400).json({ error: "Select a valid breed." });
   const qty = Number(p.quantity_birds);
   const unitPrice = Number(p.unit_price);

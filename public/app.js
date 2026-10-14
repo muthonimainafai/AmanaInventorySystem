@@ -9022,7 +9022,51 @@ function populateChickenBreedSelect() {
     opt.textContent = r.breed;
     sel.appendChild(opt);
   }
+  if (state.user?.role === "owner") {
+    const addOpt = document.createElement("option");
+    addOpt.value = "__add_breed__";
+    addOpt.textContent = "＋ Add new breed…";
+    sel.appendChild(addOpt);
+  }
   if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+function hideChickenAddBreedUi() {
+  document.getElementById("chAddBreedWrap")?.classList.add("hidden");
+  const nameInput = document.getElementById("chAddBreedName");
+  if (nameInput) nameInput.value = "";
+}
+
+async function reloadChickenBreedsFromApi() {
+  state.chickenBreeds = await api("/api/chicken-breeds");
+}
+
+async function saveNewChickenBreed() {
+  if (state.user?.role !== "owner") return;
+  const name = String(document.getElementById("chAddBreedName")?.value || "").trim();
+  if (!name) {
+    alert("Enter a breed name.");
+    return;
+  }
+  const saveBtn = document.getElementById("chAddBreedSaveBtn");
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const row = await api("/api/chicken-breeds", { method: "POST", body: JSON.stringify({ breed: name }) });
+    hideChickenAddBreedUi();
+    await reloadChickenBreedsFromApi();
+    populateChickenBreedSelect();
+    populateCalcChickenBreedSelect();
+    populateReceiptChickenBreedSelect();
+    const sel = document.getElementById("chBreed");
+    const breedName = row?.breed || name;
+    if (sel) sel.value = breedName;
+    applyOwnerChickenPricesFromBreed();
+    syncOwnerChickenMarginFromBuySell();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 function resetSalesBagForm() {
@@ -9077,6 +9121,7 @@ function resetChickenForm() {
   const chSave = document.getElementById("chSaveBtn");
   if (chSave) chSave.textContent = state.user?.role === "owner" ? "Save inventory" : "Save sale";
   populateChickenBreedSelect();
+  hideChickenAddBreedUi();
   applyEmployeeSalesDateRules();
   applyEmployeeFeedSalePricingUi();
   if (state.user?.role === "owner") {
@@ -12022,7 +12067,15 @@ document.getElementById("receiptChClearBtn")?.addEventListener("click", () => re
   }
 }
 
-document.getElementById("chBreed")?.addEventListener("change", () => {
+document.getElementById("chBreed")?.addEventListener("change", (event) => {
+  const sel = event.target instanceof HTMLSelectElement ? event.target : document.getElementById("chBreed");
+  if (sel?.value === "__add_breed__") {
+    sel.value = "";
+    document.getElementById("chAddBreedWrap")?.classList.remove("hidden");
+    document.getElementById("chAddBreedName")?.focus();
+    return;
+  }
+  hideChickenAddBreedUi();
   if (state.user?.role === "employee") {
     applyEmployeeChickenPriceFromBreeds();
     updateChickenCustomerAmounts();
@@ -12030,6 +12083,13 @@ document.getElementById("chBreed")?.addEventListener("change", () => {
     applyOwnerChickenPricesFromBreed();
     syncOwnerChickenMarginFromBuySell();
   }
+});
+
+document.getElementById("chAddBreedSaveBtn")?.addEventListener("click", () => {
+  saveNewChickenBreed();
+});
+document.getElementById("chAddBreedCancelBtn")?.addEventListener("click", () => {
+  hideChickenAddBreedUi();
 });
 
 document.getElementById("chQuantity")?.addEventListener("input", updateChickenCustomerAmounts);

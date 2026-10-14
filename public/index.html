@@ -621,7 +621,7 @@
             <h3 class="card-title">Chicken Sales Inventory</h3>
             <p class="field-hint">
               Record chick sales by breed. <strong>Minimum order:</strong> 50 chicks. <span class="owner-only-highlight hidden"
-                ><strong>Owner:</strong> set buying and selling per chick; profit margin is calculated automatically (selling − buying). </span
+                ><strong>Owner:</strong> choose a breed or use <strong>＋ Add new breed…</strong> in the list; set buying and selling per chick (margin is selling − buying). </span
               ><span class="employee-only-action hidden"
                 ><strong>Staff:</strong> <strong>Price per chick</strong> follows the selling price last saved by the owner for that breed (from their sales). Choose <strong>Feed brand</strong> and <strong>Feed type</strong> from Feed Inventory; <strong>Feed amount</strong> is bags × that line’s selling price per bag. </span
               >
@@ -648,6 +648,15 @@
                     <option value="">Select breed</option>
                   </select>
                 </label>
+                <div id="chAddBreedWrap" class="owner-only-highlight hidden add-catalog-item-wrap" style="grid-column: 1 / -1">
+                  <label class="add-catalog-item-label">New breed name</label>
+                  <div class="add-catalog-item-row">
+                    <input type="text" id="chAddBreedName" placeholder="e.g. Kuroiler" maxlength="80" />
+                    <button type="button" class="secondary" id="chAddBreedSaveBtn">Add breed</button>
+                    <button type="button" class="secondary" id="chAddBreedCancelBtn">Cancel</button>
+                  </div>
+                  <p class="field-hint">Adds the breed for you and staff. Set default buying and selling prices when you save your first inventory line for that breed.</p>
+                </div>
                 <label class="owner-only-highlight hidden">
                   Buying price (per chick)
                   <input type="number" id="chBuyingPrice" min="0" step="0.01" />
