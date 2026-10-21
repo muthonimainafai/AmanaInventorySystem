@@ -6495,17 +6495,41 @@ function renderRetailInventoryTable() {
   });
 }
 
+function feedersDrinkersOptionName(item) {
+  return String(typeof item === "string" ? item : item?.name || item?.item_name || "").trim();
+}
+
+function mergeFeedersDrinkersDropdownItems(...lists) {
+  const merged = [];
+  const seen = new Set();
+  for (const list of lists) {
+    for (const item of list || []) {
+      const name = feedersDrinkersOptionName(item);
+      const key = name.toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(name);
+    }
+  }
+  return merged;
+}
+
+function selectFeedersDrinkersItem(name) {
+  if (!fdItem) return;
+  const wanted = String(name || "").trim().toLowerCase();
+  const match = [...fdItem.options].find((option) => String(option.value || "").trim().toLowerCase() === wanted);
+  if (match) fdItem.value = match.value;
+}
+
 function populateFeedersDrinkersItems() {
   if (!fdItem) return;
   const current = fdItem.value;
   fdItem.innerHTML = '<option value="">Select item</option>';
   const items =
     state.user?.role === "employee"
-      ? state.feedersDrinkersEmployeeItems || []
-      : state.feedersDrinkersCatalog || [];
-  for (const item of items) {
-    const name = typeof item === "string" ? item : item.name || item.item_name;
-    if (!name) continue;
+      ? mergeFeedersDrinkersDropdownItems(state.feedersDrinkersInventory, state.feedersDrinkersEmployeeItems)
+      : mergeFeedersDrinkersDropdownItems(state.feedersDrinkersCatalog, state.feedersDrinkersInventory);
+  for (const name of items) {
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
@@ -6517,7 +6541,7 @@ function populateFeedersDrinkersItems() {
     addOpt.textContent = "＋ Add new item…";
     fdItem.appendChild(addOpt);
   }
-  if (current && [...fdItem.options].some((o) => o.value === current)) fdItem.value = current;
+  selectFeedersDrinkersItem(current);
 }
 
 function populateMedicamentsItems() {
@@ -13648,7 +13672,7 @@ fdBody?.addEventListener("click", async (event) => {
       state.editFeedersDrinkersId = row.id;
       fdDate.value = toIsoDate(row.date);
       fdDateDisplay.value = formatDateDMY(row.date);
-      fdItem.value = row.item_name;
+      selectFeedersDrinkersItem(row.item_name);
       document.getElementById("fdQuantity").value = row.quantity_sold;
       if (fdSaleType) fdSaleType.value = String(row.through_party || "").trim();
       refreshEmployeeNewPageSellingPrices();
@@ -13670,7 +13694,7 @@ fdBody?.addEventListener("click", async (event) => {
     state.editFeedersDrinkersId = row.id;
     fdDate.value = toIsoDate(row.date);
     fdDateDisplay.value = formatDateDMY(row.date);
-    fdItem.value = row.item_name;
+    selectFeedersDrinkersItem(row.item_name);
     document.getElementById("fdQuantity").value = row.quantity_in_stock;
     document.getElementById("fdBuyingPrice").value = row.buying_price;
     document.getElementById("fdSellingPrice").value = row.selling_price;

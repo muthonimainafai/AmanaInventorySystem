@@ -538,10 +538,29 @@ async function getEffectiveFeedersDrinkersCatalog() {
   const custom = await all(
     "SELECT name, item_type FROM custom_catalog_items WHERE category = 'feeders-drinkers' ORDER BY id ASC"
   );
-  return [
+  const inventory = await all(
+    `SELECT item_name AS name, item_type, capacity_liters
+     FROM feeders_drinkers_inventory
+     WHERE TRIM(COALESCE(item_name, '')) <> ''
+     ORDER BY id ASC`
+  );
+  const merged = [
     ...FEEDERS_DRINKERS_CATALOG,
     ...custom.map((r) => ({ name: r.name, item_type: r.item_type || "feeder", capacity_liters: null })),
   ];
+  const seen = new Set(merged.map((item) => normalizeInventoryItemName(item.name)));
+  for (const row of inventory) {
+    const name = String(row.name || "").trim();
+    const key = normalizeInventoryItemName(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push({
+      name,
+      item_type: row.item_type === "drinker" ? "drinker" : "feeder",
+      capacity_liters: row.capacity_liters == null ? null : Number(row.capacity_liters),
+    });
+  }
+  return merged;
 }
 
 async function getEffectiveMedicamentsCatalog() {
@@ -3976,10 +3995,13 @@ async function adjustFeedersDrinkersStock(itemName, deltaQty, recordProfit = tru
 
 app.get("/api/feeders-drinkers/employee-items", auth, allowRoles("employee"), async (_req, res) => {
   const rows = await all(
-    `SELECT item_name, item_type, capacity_liters, COALESCE(SUM(quantity_in_stock), 0) AS quantity_in_stock
+    `SELECT item_name,
+            MAX(item_type) AS item_type,
+            MAX(capacity_liters) AS capacity_liters,
+            COALESCE(SUM(quantity_in_stock), 0) AS quantity_in_stock
      FROM feeders_drinkers_inventory
-     GROUP BY item_name, item_type, capacity_liters
-     HAVING COALESCE(SUM(quantity_in_stock), 0) > 0
+     WHERE TRIM(COALESCE(item_name, '')) <> ''
+     GROUP BY item_name
      ORDER BY item_name ASC`
   );
   res.json(rows);
