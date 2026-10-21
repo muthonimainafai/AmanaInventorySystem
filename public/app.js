@@ -9805,7 +9805,7 @@ function renderAutogasTable() {
   const totalKshEl = document.getElementById("agTotalKsh");
   const totalCbmEl = document.getElementById("agTotalCbm");
   if (!rows.length) {
-    autogasBody.innerHTML = '<tr><td colspan="11" class="empty">No records.</td></tr>';
+    autogasBody.innerHTML = '<tr><td colspan="13" class="empty">No records.</td></tr>';
     if (totalUsdEl) totalUsdEl.textContent = usdCurrency(0);
     if (totalKshEl) totalKshEl.textContent = currency(0);
     if (totalCbmEl) totalCbmEl.textContent = "0";
@@ -9832,6 +9832,8 @@ function renderAutogasTable() {
         <td>${escapeHtmlCell(row.kit_tracking_no || row.china_tracking_no || "")}</td>
         <td>${escapeHtmlCell(row.cylinder_tracking_no || "")}</td>
         <td>${escapeHtmlCell(row.lpg_diagnosis_cable_tracking_no || "")}</td>
+        <td>${escapeHtmlCell(row.kenya_waybill || "")}</td>
+        <td>${escapeHtmlCell(row.container_details || "")}</td>
         <td>${Number.isFinite(cbm) ? cbm.toLocaleString("en-KE", { maximumFractionDigits: 3 }) : "0"}</td>
         <td>${autogasStatusSelectHtml(row)}</td>
         <td>
@@ -10847,6 +10849,8 @@ autogasForm?.addEventListener("submit", async (event) => {
     kit_tracking_no: String(document.getElementById("agKitTracking")?.value || "").trim(),
     cylinder_tracking_no: String(document.getElementById("agCylinderTracking")?.value || "").trim(),
     lpg_diagnosis_cable_tracking_no: String(document.getElementById("agLpgCableTracking")?.value || "").trim(),
+    kenya_waybill: String(document.getElementById("agKenyaWaybill")?.value || "").trim(),
+    container_details: String(document.getElementById("agContainerDetails")?.value || "").trim(),
     expected_cbm: parseMoneyFromInput(document.getElementById("agExpectedCbm")?.value) || 0,
     status: normalizeAutogasStatus(document.getElementById("agStatus")?.value),
   };
@@ -10887,6 +10891,8 @@ autogasBody?.addEventListener("change", async (event) => {
         kit_tracking_no: row.kit_tracking_no || row.china_tracking_no || "",
         cylinder_tracking_no: row.cylinder_tracking_no || "",
         lpg_diagnosis_cable_tracking_no: row.lpg_diagnosis_cable_tracking_no || "",
+        kenya_waybill: row.kenya_waybill || "",
+        container_details: row.container_details || "",
         expected_cbm: Number(row.expected_cbm || 0),
         status: next,
       }),
@@ -10916,6 +10922,8 @@ autogasBody?.addEventListener("click", async (event) => {
     const kitTrackEl = document.getElementById("agKitTracking");
     const cylinderTrackEl = document.getElementById("agCylinderTracking");
     const lpgCableTrackEl = document.getElementById("agLpgCableTracking");
+    const kenyaWaybillEl = document.getElementById("agKenyaWaybill");
+    const containerDetailsEl = document.getElementById("agContainerDetails");
     const cbmEl = document.getElementById("agExpectedCbm");
     const statusEl = document.getElementById("agStatus");
     if (descEl) descEl.value = row.description || "";
@@ -10924,6 +10932,8 @@ autogasBody?.addEventListener("click", async (event) => {
     if (kitTrackEl) kitTrackEl.value = row.kit_tracking_no || row.china_tracking_no || "";
     if (cylinderTrackEl) cylinderTrackEl.value = row.cylinder_tracking_no || "";
     if (lpgCableTrackEl) lpgCableTrackEl.value = row.lpg_diagnosis_cable_tracking_no || "";
+    if (kenyaWaybillEl) kenyaWaybillEl.value = row.kenya_waybill || "";
+    if (containerDetailsEl) containerDetailsEl.value = row.container_details || "";
     if (cbmEl) cbmEl.value = formatMoneyForInput(row.expected_cbm);
     if (statusEl instanceof HTMLSelectElement) statusEl.value = normalizeAutogasStatus(row.status);
     const saveBtn = document.getElementById("agSaveBtn");
